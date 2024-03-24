@@ -128,9 +128,9 @@ Commitizen can then be used to perform commits and version bumps following speci
 .. code:: bash
 
   cz init
-  # use pyproject.toml with conventional commits.
+  # use pyproject.toml with conventional commits
   # store pep440 versions in the .toml
-  # create changelog automatically.
+  # create changelog automatically
   # Keep major version zero
   # do not install pre-commit hook via cz init
 
