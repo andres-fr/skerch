@@ -56,9 +56,13 @@ q, u, s, vt, pt = ssvd(
 )
 ```
 
-Where `q @ u @ diag(s) @ vt @ pt` approximates `op` and the number of outer and inner measurements for the sketch is specified.
+Where `q @ u @ diag(s) @ vt @ pt` approximates `op` and the number of outer and inner measurements for the sketch is specified. The `op` object must simply satify the following criteria:
 
-See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
+* It must have a `op.shape = (height, width)` attribute
+* It must implement the `w = op @ v` right-matmul operator, receiving and returning PyTorch vectors/matrices
+* It must implement the `w = v @ op` left-matmul operator, receiving and returning PyTorch vectors/matrices
+
+`skerch` provides a convenience PyTorch wrapper for the cases where `op` interacts with NumPy arrays instead (e.g. [SciPy linear operators](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html) like the ones used in [CurvLinOps](https://github.com/f-dangel/curvlinops)). See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
 
 # Developers
 
