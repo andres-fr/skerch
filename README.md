@@ -63,7 +63,21 @@ The `op` object must simply satify the following criteria:
 * It must implement the `w = op @ v` right-matmul operator, receiving and returning PyTorch vectors/matrices
 * It must implement the `w = v @ op` left-matmul operator, receiving and returning PyTorch vectors/matrices
 
-`skerch` provides a convenience PyTorch wrapper for the cases where `op` interacts with NumPy arrays instead (e.g. [SciPy linear operators](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html) like the ones used in [CurvLinOps](https://github.com/f-dangel/curvlinops)). See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
+`skerch` provides a convenience PyTorch wrapper for the cases where `op` interacts with NumPy arrays instead (e.g. [SciPy linear operators](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html) like the ones used in [CurvLinOps](https://github.com/f-dangel/curvlinops)).
+
+To get a good suggestion of the number of measurements required for a given shape and budget, simply run:
+
+```bash
+python -m skerch prio_hpars --shape=100,200 --budget=12345
+```
+
+The library also implements cheap *a-posteriori* methods to estimate the error of the obtained sketched approximation. For a given number of *a-posteriori* measurements, the probability of such estimation being wrong by a certain margin can be queried as follows:
+
+```bash
+python -m skerch post_bounds --apost_n=30 --apost_err=0.5
+```
+
+See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
 
 # Developers
 
