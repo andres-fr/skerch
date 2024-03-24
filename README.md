@@ -1,6 +1,6 @@
 <p align="center">
-    <img src="docs/materials/assets/skerch_horizontal.svg#gh-light-mode-only" width="50%"/>
-    <img src="docs/materials/assets/skerch_horizontal_inv.svg#gh-dark-mode-only" width="50%"/>
+    <img alt="Skerch logo, light mode" src="docs/materials/assets/skerch_horizontal.svg#gh-light-mode-only" width="50%"/>
+    <img alt="Skerch logo, dark mode" src="docs/materials/assets/skerch_horizontal_inv.svg#gh-dark-mode-only" width="50%"/>
 </p>
 
 
