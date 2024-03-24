@@ -22,7 +22,12 @@
 
 * Built on top of PyTorch, with natural support for CPU and CUDA interoperability, and very few dependencies otherwise
 * Works on matrices and matrix-free operators of potentially very large dimensionality
-* Support for sketched measurements in a fully distributed fashion via HDF5 databases
+* Support for sketched measurements in a fully distributed fashion via [HDF5 databases](https://www.h5py.org/)
+
+
+References:
+
+* [Streaming Low-Rank Matrix Approximation with an Application to Scientific Simulation](https://arxiv.org/abs/1902.08651) Joel A. Tropp, Alp Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. SIAM Journal on Scientific Computing 41 (4): A2430–63.
 
 
 See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details.
@@ -40,6 +45,8 @@ The sketched SVD of a linear operator `op` can be then computed simply via:
 
 
 ```python
+from skerch.decompositions import ssvd
+
 q, u, s, vt, pt = ssvd(
     op,
     op_device=DEVICE,
@@ -49,7 +56,7 @@ q, u, s, vt, pt = ssvd(
 )
 ```
 
-Where `q @ u @ diag(s) @ vt @ pt` approximates `linop` and the number of outer and inner measurements for the sketch is specified.
+Where `q @ u @ diag(s) @ vt @ pt` approximates `op` and the number of outer and inner measurements for the sketch is specified.
 
 See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
 
