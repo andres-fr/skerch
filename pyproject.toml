@@ -1,0 +1,32 @@
+[tool.black]
+line-length = 80
+target-version = ['py39', 'py310', 'py311']
+include = '\.pyi?$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.pytest_cache
+    | assets
+  )/
+)
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 80
+
+# https://github.com/PyCQA/pydocstyle/issues/363#issuecomment-625563088
+[tool.pydocstyle]
+convention = "google"
+match_dir = '^(?!(docs|.eggs)).*'
+match = '(?!example_).*\.py'
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "$version"
+version_scheme = "pep440"
+version = "0.4.0"
+update_changelog_on_bump = true
+major_version_zero = true
