@@ -179,7 +179,7 @@ Tests pipeline and Coveralls
 
 The CI pipeline that performs the tests and reports to Coveralls is defined in the first job of the ``.github/workflows/ci.yaml`` YAML file. The existence of this file is all GitHub needs to run the pipeline.
 
-The `Coveralls service <https://coveralls.io/>`_ reports on code coverage based on the results of running ``pytest``. This was configured by signing in to Coveralls via the GitHub account and "activating" the desired repository. No need to set any Actions evironment variables. Then, the Github Action will take care of the rest:
+The `Coveralls service <https://coveralls.io/>`_ reports on code coverage based on the results of running ``pytest``. This was configured by signing in to Coveralls via the GitHub account and "activating" the desired repository. No need to set any Actions evironment variables. Then, the GitHub Action will take care of the rest:
 
 1. Running `pytest` with the ``--cov`` plugin will generate a ``.coverage`` report in the runner's repo root
 2. Running ``coveralls`` will then access the service and provide the report
@@ -194,7 +194,7 @@ To render and deploy the documentation online, we add a ``.readthedocs.yaml`` YA
 
 In our case, this is a customized build, requiring extra dependencies and commands to correctly build the documentation). Also, if you want the doc build to be conditioned on some previous command, the current way of doing it is to add said command before ``make docs`` in the ``.readthedocs.yaml`` file.
 
-The `ReadTheDocs <https://readthedocs.org>`_ needs to be now configured to actually look at this file, build and deploy the docs. Log in e.g. using the GitHub option (if you are doing this for the first time, you may also need to `connect <https://docs.readthedocs.io/en/stable/reference/git-integration.html>`_ both platforms). Then, under "Import a repository", find and add the desired repository.
+The `ReadTheDocs <https://readthedocs.org>`_ service needs to be now configured to actually look at this file, build and deploy the docs. Log in e.g. using the GitHub option (if you are doing this for the first time, you may also need to `connect <https://docs.readthedocs.io/en/stable/reference/git-integration.html>`_ both platforms). Then, under "Import a repository", find and add the desired repository.
 
 Optionally, grab the Markdown badge from the ReadTheDocs website and add it to your repo ``README``.
 
