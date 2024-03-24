@@ -76,6 +76,18 @@ The library also implements cheap *a-posteriori* methods to estimate the error o
 
 ```python
 from skerch.a_posteriori import a_posteriori_error
+from skerch.linops import CompositeLinOp, DiagonalLinOp
+
+# (q, u, s, vt, pt) previously computed via ssvd
+sketched_op = CompositeLinOp(
+    (
+        ("Q", q),
+        ("U", u),
+        ("S", DiagonalLinOp(s)),
+        ("Vt", vt),
+        ("Pt", pt),
+    )
+)
 
 (f1, f2, frob_err) = a_posteriori_error(
     op, sketched_op, NUM_A_POSTERIORI, dtype=DTYPE, device=DEVICE
@@ -85,7 +97,7 @@ print("Estimated Frob(sketched_op):", f2**0.5)
 print("Estimated Frobenius Error:", frob_err**0.5)
 ```
 
-For a given `NUM_A_POSTERIORI`, the probability of `frob_err**0.5` being wrong by a certain amount can be queried as follows:
+For a given `NUM_A_POSTERIORI` measurements (30 is generally OK), the probability of `frob_err**0.5` being wrong by a certain amount can be queried as follows:
 
 ```bash
 python -m skerch post_bounds --apost_n=30 --apost_err=0.5
@@ -96,6 +108,6 @@ See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.ht
 # Developers
 
 Contributions are most welcome under this repo's [LICENSE](LICENSE).
-Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, features requests, etc.
+Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, feature requests, etc.
 
 The documentation contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo.
