@@ -71,7 +71,21 @@ To get a good suggestion of the number of measurements required for a given shap
 python -m skerch prio_hpars --shape=100,200 --budget=12345
 ```
 
-The library also implements cheap *a-posteriori* methods to estimate the error of the obtained sketched approximation. For a given number of *a-posteriori* measurements, the probability of such estimation being wrong by a certain margin can be queried as follows:
+The library also implements cheap *a-posteriori* methods to estimate the error of the obtained sketched approximation:
+
+
+```python
+from skerch.a_posteriori import a_posteriori_error
+
+(f1, f2, frob_err) = a_posteriori_error(
+    op, sketched_op, NUM_A_POSTERIORI, dtype=DTYPE, device=DEVICE
+)[0]
+print("Estimated Frob(op):", f1**0.5)
+print("Estimated Frob(sketched_op):", f2**0.5)
+print("Estimated Frobenius Error:", frob_err**0.5)
+```
+
+For a given `NUM_A_POSTERIORI`, the probability of `frob_err**0.5` being wrong by a certain amount can be queried as follows:
 
 ```bash
 python -m skerch post_bounds --apost_n=30 --apost_err=0.5
