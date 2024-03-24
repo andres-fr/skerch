@@ -56,7 +56,8 @@ q, u, s, vt, pt = ssvd(
 )
 ```
 
-Where `q @ u @ diag(s) @ vt @ pt` approximates `op` and the number of outer and inner measurements for the sketch is specified. The `op` object must simply satify the following criteria:
+Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`.
+The `op` object must simply satify the following criteria:
 
 * It must have a `op.shape = (height, width)` attribute
 * It must implement the `w = op @ v` right-matmul operator, receiving and returning PyTorch vectors/matrices
