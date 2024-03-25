@@ -1,6 +1,6 @@
 name: CI tests and releases
 
-# activate for all relevant branches and tags
+# activate for all relevant branches, tags and PRs
 on:
   push:
     branches:
