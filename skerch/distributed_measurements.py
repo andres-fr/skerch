@@ -446,8 +446,9 @@ def ssrft_idx_torch(
       setting it to the ``processing_flag, success_flag`` values via
       the ``flag[0] = "..."`` assignment.
     :param bool adjoint: See above.
-    :returns: Nothing, result is written to ``out_vals``, and optionally
-      ``flag`` is also written.
+    :returns: the SSRFT matrix-free linear operator used for the measurement.
+      Note that the measurement is not returned, but written to ``out_vals``,
+      and optionally ``flag`` is also written.
     """
     assert (
         0 <= idx <= total_measurements
@@ -473,6 +474,7 @@ def ssrft_idx_torch(
         out_vals[:] = result.cpu()
     if flag is not None:
         flag[0] = success_flag
+    return ssrft
 
 
 # ##############################################################################

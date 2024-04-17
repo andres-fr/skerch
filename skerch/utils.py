@@ -71,6 +71,32 @@ def gaussian_noise(
     return noise
 
 
+def rademacher_noise(shape, seed=None, device="cpu"):
+    """Reproducible Rademacher noise.
+
+    .. note::
+      This function makes use of :func:`uniform_noise` to sample the Rademacher
+      noise. If ``x`` itself has been generated using ``uniform_noise``, make
+      sure to use a different seed to mitigate correlations.
+
+    .. warning::
+      PyTorch does not ensure RNG reproducibility across
+      devices. This parameter determines the device to generate the noise from.
+      If you want cross-device reproducibility, make sure that the noise is
+      always generated from the same device.
+
+    :param shape: Shape of the output tensor with Rademacher noise.
+    :param seed: Seed for the randomness.
+    :param device: Device of the output tensor and also source for the noise.
+      See warning.
+    """
+    noise = (
+        uniform_noise(shape, seed=seed, dtype=torch.float32, device=device)
+        > 0.5
+    ) * 2 - 1
+    return noise
+
+
 def randperm(n, seed=None, device="cpu", inverse=False):
     """Reproducible randperm of ``n`` integers from  0 to (n-1) (both included).
 
@@ -90,8 +116,8 @@ def randperm(n, seed=None, device="cpu", inverse=False):
     return perm
 
 
-def rademacher(x, seed=None, inplace=True, rng_device="cpu"):
-    """Reproducible sign-flipping via Rademacher noise.
+def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
+    """Reproducible random sign flip using Rademacher noise.
 
     .. note::
       This function makes use of :func:`uniform_noise` to sample the Rademacher
@@ -99,21 +125,9 @@ def rademacher(x, seed=None, inplace=True, rng_device="cpu"):
       sure to use a different seed to mitigate correlations.
 
     .. warning::
-      PyTorch does not ensure RNG reproducibility across
-      devices. This parameter determines the device to generate the noise from.
-      If you want cross-device reproducibility, make sure that the noise is
-      always generated from the same device.
-
-    :param rng_device: While result will be returned on the same device as
-      ``x``, the Rademacher noise used to flip entries will be sampled on
-      this device (see reproducibility note).
+      See :fun:`rademacher_noise` for notes on reproducibility and more info.
     """
-    mask = (
-        uniform_noise(
-            x.shape, seed=seed, dtype=torch.float32, device=rng_device
-        )
-        > 0.5
-    ).to(x.device) * 2 - 1
+    mask = rademacher_noise(x.shape, seed, device=rng_device).to(x.device)
     if inplace:
         x *= mask
         return x, mask

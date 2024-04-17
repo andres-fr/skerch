@@ -27,7 +27,7 @@ polynomial matrices are diagonal. here, we extend them as follows:
 
 import torch
 
-from .utils import gaussian_noise, rademacher
+from .utils import gaussian_noise, rademacher_flip
 
 
 # ##############################################################################
@@ -160,7 +160,7 @@ class SynthMat:
         svals[:rank] = 1
         svals[rank:] = torch.arange(2, min_shape - rank + 2) ** (-float(decay))
         if not psd:
-            rademacher(svals[rank:], seed=seed + 1, inplace=True)
+            rademacher_flip(svals[rank:], seed=seed + 1, inplace=True)
         #
         result = cls._decay_helper(
             svals, shape, rank, decay, symmetric, seed, dtype, device
@@ -202,7 +202,7 @@ class SynthMat:
         svals[:rank] = 1
         svals[rank:] = 10 ** -(decay * torch.arange(1, min_shape - rank + 1))
         if not psd:
-            rademacher(svals[rank:], seed=seed + 1, inplace=True)
+            rademacher_flip(svals[rank:], seed=seed + 1, inplace=True)
         #
         result = cls._decay_helper(
             svals, shape, rank, decay, symmetric, seed, dtype, device
