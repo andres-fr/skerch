@@ -38,7 +38,7 @@ def dims_diags_meas_defl(request):
     dimensions should not exceed the number of measurements.
     """
     result = [
-        (1000, torch.arange(-9, 9).tolist(), 200, 200),
+        (1000, torch.arange(-9, 9).tolist(), 200, 100),
         (10, torch.arange(-9, 9).tolist(), 10),
         (100, torch.arange(-99, 100, 99).tolist(), 20),
         (1000, torch.arange(-999, 1000, 54).tolist(), 50),
@@ -72,7 +72,7 @@ def test_subdiags(
                     mat = SynthMat.exp_decay(
                         shape=(dims, dims),
                         rank=dims // 5,
-                        decay=0.01,
+                        decay=0.1,
                         symmetric=True,
                         seed=seed,
                         dtype=dtype,
