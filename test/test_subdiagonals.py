@@ -9,6 +9,7 @@ import pytest
 import torch
 
 from skerch.utils import gaussian_noise
+from skerch.synthmat import SynthMat
 from skerch.subdiagonals import do_stuff
 
 from . import rng_seeds, torch_devices  # noqa: F401
@@ -37,7 +38,7 @@ def dims_diags_meas_defl(request):
     dimensions should not exceed the number of measurements.
     """
     result = [
-        (1000, torch.arange(-9, 9).tolist(), 500, 100),
+        (1000, torch.arange(-9, 9).tolist(), 200, 200),
         (10, torch.arange(-9, 9).tolist(), 10),
         (100, torch.arange(-99, 100, 99).tolist(), 20),
         (1000, torch.arange(-999, 1000, 54).tolist(), 50),
@@ -68,16 +69,17 @@ def test_subdiags(
         for dims, diags, meas, defl in dims_diags_meas_defl:
             for dtype in (torch.float64, torch.float32):
                 for device in torch_devices:
-                    # Just sample a random gaussian matrix
-                    mat = gaussian_noise(
-                        (dims, dims),
-                        mean=0,
-                        std=1.0,
+                    mat = SynthMat.exp_decay(
+                        shape=(dims, dims),
+                        rank=dims // 5,
+                        decay=0.01,
+                        symmetric=True,
                         seed=seed,
                         dtype=dtype,
                         device=device,
+                        psd=False,
                     )
-                    mat = 0.5 * (mat + mat.T)
+
                     for diag_idx in diags:
                         # retrieve the true diag
                         diag = torch.diag(mat, diagonal=diag_idx)
@@ -92,7 +94,6 @@ def test_subdiags(
                         )
                         # here estimate things
                         # then assert
-                        breakpoint()
 
                     # assert torch.allclose(
                     #     S[: 2 * r], core_S[: 2 * r], atol=atol

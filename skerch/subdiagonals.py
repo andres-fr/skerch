@@ -73,11 +73,11 @@ def subroutine(
     Given a PyTorch datatype object, like ``torch.float32``, returns the
     corresponding string, in this case 'float32'.
     """
-    deflation_rank = 100
     h, w = lop.shape
     assert h == w, "Only square linear operators supported!"
     dims = h
     result_buff = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    # squares_buff = torch.ones_like(result_buff)
     squares_buff = torch.zeros_like(result_buff)
     ssrft = SSRFT((num_meas, dims), seed=seed)
     #
@@ -93,12 +93,11 @@ def subroutine(
             )
         # orthogonalize measurements to get deflated lop
         orthogonalize(deflation_matrix, overwrite=True)
+        proj = OrthProjLinOp(deflation_matrix)
         negproj = NegOrthProjLinOp(deflation_matrix)
         deflated_lop = CompositeLinOp(
             (("negproj", negproj), ("lop", lop), ("negproj", negproj))
         )
-
-        proj = OrthProjLinOp(deflation_matrix)
     else:
         # no deflation
         deflated_lop = lop
@@ -120,48 +119,59 @@ def subroutine(
     """
 
     for i in range(num_meas):
-        # v = (
-        #     rademacher_noise(in_dim, seed=seed + i, device="cpu")
-        #     .to(lop_dtype)
-        #     .to(lop_device)
-        # )
-        v = ssrft.get_row(i, lop_dtype, lop_device)
-        result_buff += v * (deflated_lop @ v)
+        v = (
+            rademacher_noise(dims, seed=seed + i, device="cpu")
+            .to(lop_dtype)
+            .to(lop_device)
+        )
+        # v = ssrft.get_row(i, lop_dtype, lop_device)
+        result_buff += v * (deflated_lop @ v)  # / (v * v)
         squares_buff += v * v
-    # # finally add projected diagonal
-    # if deflation_rank > 0:
-    #     for i in range(dims):
-    #         result_buff[i] += projected_ij(i, i, lop, deflation_matrix)
 
     true_diag = torch.diag(lop)
+    result_buff /= squares_buff
+
     top_diag = torch.zeros_like(result_buff)
     if deflation_rank > 0:
         for i in range(dims):
             top_diag[i] = projected_ij(i, i, lop, deflation_matrix)
 
-    cooked = top_diag + result_buff / squares_buff**0.5
     # print("<<<<>>>>", torch.dist(result_buff, torch.diag(lop)))
     print(
-        "<<<<>>>>",
-        torch.dist(cooked, torch.diag(lop)),
+        "\n<<<< JUST TOP >>>>",
+        torch.dist(top_diag, true_diag),
     )
     print(
-        "<<<<>>>>",
-        torch.dist((top_diag + result_buff), torch.diag(lop)),
+        "<<<< JUST BOTTOM >>>>",
+        torch.dist((result_buff), true_diag),
+    )
+    print(
+        "<<<< TOP AND BOTTOM >>>>",
+        torch.dist((top_diag + result_buff), true_diag),
     )
 
-    plt.clf()
-    plt.plot(cooked - torch.diag(lop))
+    # plt.clf()
+    # plt.plot(cooked - torch.diag(lop))
+    # plt.show()
+
+    plt.plot(true_diag, color="grey")
+    plt.plot(top_diag + result_buff)
     plt.show()
     breakpoint()
 
     # torch.diag(lop)
     # out_buff
-    # plt.plot(result_buff); plt.plot(torch.diag(lop)); plt.show()
-    # plt.plot(top_diag); plt.plot(torch.diag(lop)); plt.show()
+    # plt.plot(result_buff); plt.plot(true_diag); plt.show()
+    # plt.plot(top_diag); plt.plot(true_diag); plt.show()
+    # plt.plot(cooked); plt.plot(true_diag); plt.show()
     # torch.dist(torch.diag(lop), result_buff)
     # torch.dist(torch.diag(lop), top_diag)
 
-    ssrft = SSRFT((in_dim, num_meas))
-    # linmeas_idx_torch(idx, lop, meas_lop, lop_device, lop_dtype, adjoint=False)
-    # rademacher(x, seed=None, inplace=True, rng_device="cpu")
+    """
+    SANDBOX
+    """
+    true_top_diag = torch.diag(
+        deflation_matrix
+        @ (deflation_matrix.T @ lop @ deflation_matrix)
+        @ deflation_matrix.T
+    )
