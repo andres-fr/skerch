@@ -25,22 +25,22 @@ def entry_atol():
 
 
 @pytest.fixture
-def heights_widths_diags_meas_defl(request):
-    """Test cases for different matrix shapes and (sub-)diagonal measurements
+def dims_diags_meas_defl(request):
+    """Test cases for different matrix sizes and (sub-)diagonal measurements
 
     Entries are in the form
-    ``((h, w), (diag_idxs), num_measurements, deflation_dimensions)``. Note
+    ``(dims, (diag_idxs), num_measurements, deflation_dimensions)``, where dims
+    is the number of dimensions of a square (nonsymmetric) test matrix. Note
     that given diagonal indices should not exceed the furthest away diagonal,
     which depends on the shape. Also, the number of measurements should not
     exceed the length of the main diagonal, and the number of deflation
     dimensions should not exceed the number of measurements.
     """
     result = [
-        ((1000, 1000), torch.arange(-9, 9).tolist(), 100, 10),
-        ((10, 100), torch.arange(-9, 9).tolist(), 10),
-        ((100, 10), torch.arange(-9, 9).tolist(), 10),
-        ((100, 100), torch.arange(-99, 100, 99).tolist(), 20),
-        ((1000, 1000), torch.arange(-999, 1000, 54).tolist(), 50),
+        (1000, torch.arange(-9, 9).tolist(), 500, 100),
+        (10, torch.arange(-9, 9).tolist(), 10),
+        (100, torch.arange(-99, 100, 99).tolist(), 20),
+        (1000, torch.arange(-999, 1000, 54).tolist(), 50),
     ]
     if request.config.getoption("--quick"):
         result = result[:4]
@@ -54,7 +54,7 @@ def test_subdiags(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
     entry_atol,
-    heights_widths_diags_meas_defl,
+    dims_diags_meas_defl,
 ):
     """Test SSVD on asymmetric exponential matrices.
 
@@ -65,18 +65,19 @@ def test_subdiags(
     * Lowtri evaluations?
     """
     for seed in rng_seeds:
-        for (h, w), diags, meas, defl in heights_widths_diags_meas_defl:
+        for dims, diags, meas, defl in dims_diags_meas_defl:
             for dtype in (torch.float64, torch.float32):
                 for device in torch_devices:
                     # Just sample a random gaussian matrix
                     mat = gaussian_noise(
-                        (h, w),
+                        (dims, dims),
                         mean=0,
                         std=1.0,
                         seed=seed,
                         dtype=dtype,
                         device=device,
                     )
+                    mat = 0.5 * (mat + mat.T)
                     for diag_idx in diags:
                         # retrieve the true diag
                         diag = torch.diag(mat, diagonal=diag_idx)

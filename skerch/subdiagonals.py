@@ -21,6 +21,7 @@ from .utils import rademacher_noise
 from .distributed_measurements import ssrft_idx_torch
 from .ssrft import SSRFT
 from .distributed_decompositions import orthogonalize
+from .linops import CompositeLinOp, OrthProjLinOp, NegOrthProjLinOp
 
 
 import matplotlib.pyplot as plt
@@ -43,6 +44,22 @@ def do_stuff(
     subroutine(num_meas, lop, lop_dtype, lop_device, seed, deflation_rank)
 
 
+def projected_ij(i, j, lop, Q):
+    """Retrieves ``(i, j)`` entry from ``(QQ.t) @ lop @ (QQ.t)``.
+
+    :param i: Index between 0 and ``height(proj)``
+    :param j: Index between 0 and ``width(proj)``
+    :param lop: linear operator
+    :param proj: Thin orthonormal matrix
+    """
+    h, w = lop.shape
+    assert h == w, "Only square linear operators supported!"
+    vj = Q @ Q[j, :]
+    vi = vj if (i == j) else (Q @ Q[i, :])
+    result = vi @ (lop @ vj)
+    return result
+
+
 def subroutine(
     num_meas,
     lop,
@@ -56,60 +73,94 @@ def subroutine(
     Given a PyTorch datatype object, like ``torch.float32``, returns the
     corresponding string, in this case 'float32'.
     """
+    deflation_rank = 100
     h, w = lop.shape
-    diag_len = min(h, w)
-    result_buff = torch.empty(diag_len, dtype=lop_dtype, device=lop_device)
-    ssrft = SSRFT((num_meas, w), seed=seed)
+    assert h == w, "Only square linear operators supported!"
+    dims = h
+    result_buff = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    squares_buff = torch.zeros_like(result_buff)
+    ssrft = SSRFT((num_meas, dims), seed=seed)
     #
     if deflation_rank > 0:
-        ssrft_defl = SSRFT((num_meas, w), seed=seed + 1)
+        # deflate lop: first compute a few random measurements
+        ssrft_defl = SSRFT((num_meas, dims), seed=seed + 12345)
         deflation_matrix = torch.empty(
-            (h, deflation_rank), dtype=lop_dtype, device=lop_device
+            (dims, deflation_rank), dtype=lop_dtype, device=lop_device
         )
         for i in range(deflation_rank):
             deflation_matrix[:, i] = lop @ ssrft_defl.get_row(
                 i, lop_dtype, lop_device
             )
+        # orthogonalize measurements to get deflated lop
         orthogonalize(deflation_matrix, overwrite=True)
-        breakpoint()
-        """
-        HERE DO THE TOP MEASUREMENTS, QR DECOMP, AND STORE INITIAL
-        DIAG GUESS
-        """
-        breakpoint()
+        negproj = NegOrthProjLinOp(deflation_matrix)
+        deflated_lop = CompositeLinOp(
+            (("negproj", negproj), ("lop", lop), ("negproj", negproj))
+        )
 
-    # in_buff = torch.zeros(
-    #     h if adjoint else w, dtype=lop_dtype, device=lop_device
-    # )
-    # out_buff = torch.empty(
-    #     w if adjoint else h, dtype=lop_dtype, device=lop_device
-    # )
+        proj = OrthProjLinOp(deflation_matrix)
+    else:
+        # no deflation
+        deflated_lop = lop
+
+    """
+    OK NOW COMPUTE DIAG ON DEFLATED
+
+
+    TODO:
+
+    DEFLATION FOR NONSYMMETRIC MUST USE DIFFERENT ORTH FRAMES!!
+
+    CAN WE RECYCLE MEASUREMENTS BETWEEN DEFLATION AND ESTIMATION??
+
+    SCALE NORMALIZATION: HOW? IS SQUARES_BUFF ENOUGH?
+
+    DIAGPP IMPLEMENTATION IN JULIA: SOME
+    https://github.com/niclaspopp/RandomizedDiagonalEstimation.jl/blob/master/src/PureDiagonalEstimation.jl
+    """
 
     for i in range(num_meas):
-        v = ssrft.get_row(i, lop_dtype, lop_device)
-        v[:]
         # v = (
         #     rademacher_noise(in_dim, seed=seed + i, device="cpu")
         #     .to(lop_dtype)
         #     .to(lop_device)
         # )
-        meas = (v @ lop) if adjoint else (lop @ v)
-        result_buff[:] += v[:diag_len] * meas
-        # in_buff[:] = ssrft.get_row(i, lop_dtype, lop_device)
-        # breakpoint()
-        # in_buff[:] = (
-        #     rademacher_noise(in_dim, seed=seed + i, device="cpu")
-        #     .to(lop_dtype)
-        #     .to(lop_device)
-        # )
-        # out_buff += in_buff * ((in_buff @ lop) if adjoint else (lop @ in_buff))
+        v = ssrft.get_row(i, lop_dtype, lop_device)
+        result_buff += v * (deflated_lop @ v)
+        squares_buff += v * v
+    # # finally add projected diagonal
+    # if deflation_rank > 0:
+    #     for i in range(dims):
+    #         result_buff[i] += projected_ij(i, i, lop, deflation_matrix)
 
-    # result_buff /= num_meas
+    true_diag = torch.diag(lop)
+    top_diag = torch.zeros_like(result_buff)
+    if deflation_rank > 0:
+        for i in range(dims):
+            top_diag[i] = projected_ij(i, i, lop, deflation_matrix)
+
+    cooked = top_diag + result_buff / squares_buff**0.5
+    # print("<<<<>>>>", torch.dist(result_buff, torch.diag(lop)))
+    print(
+        "<<<<>>>>",
+        torch.dist(cooked, torch.diag(lop)),
+    )
+    print(
+        "<<<<>>>>",
+        torch.dist((top_diag + result_buff), torch.diag(lop)),
+    )
+
+    plt.clf()
+    plt.plot(cooked - torch.diag(lop))
+    plt.show()
     breakpoint()
 
     # torch.diag(lop)
     # out_buff
     # plt.plot(result_buff); plt.plot(torch.diag(lop)); plt.show()
+    # plt.plot(top_diag); plt.plot(torch.diag(lop)); plt.show()
+    # torch.dist(torch.diag(lop), result_buff)
+    # torch.dist(torch.diag(lop), top_diag)
 
     ssrft = SSRFT((in_dim, num_meas))
     # linmeas_idx_torch(idx, lop, meas_lop, lop_device, lop_dtype, adjoint=False)
