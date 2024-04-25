@@ -8,9 +8,9 @@
 import pytest
 import torch
 
-from skerch.utils import BadShapeError, gaussian_noise
-from skerch.linops import OrthProjLinOp, NegOrthProjLinOp
 from skerch.a_posteriori import a_posteriori_error
+from skerch.linops import NegOrthProjLinOp, OrthProjLinOp
+from skerch.utils import BadShapeError, gaussian_noise
 
 from . import rng_seeds, torch_devices
 

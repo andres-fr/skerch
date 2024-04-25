@@ -8,44 +8,57 @@
 import pytest
 import torch
 
-from skerch.utils import gaussian_noise
+from skerch.subdiagonals import subdiagpp
 from skerch.synthmat import SynthMat
-from skerch.subdiagonals import do_stuff
+from skerch.utils import gaussian_noise
 
 from . import rng_seeds, torch_devices  # noqa: F401
+
+
+import matplotlib.pyplot as plt
 
 
 # ##############################################################################
 # # FIXTURES
 # ##############################################################################
 @pytest.fixture
-def entry_atol():
-    """Absolute, entry-wise error tolerance for ``diff(Q.T @ Q, I)``."""
-    result = 1e-5
+def diag_dist_rtol():
+    """Relative Frobenius error tolerance for the diagonal estimates."""
+    result = 0.05
     return result
 
 
 @pytest.fixture
-def dims_diags_meas_defl(request):
-    """Test cases for different matrix sizes and (sub-)diagonal measurements
+def dim_rank_diags_meas_defl(request):
+    """Test cases for matrix sizes, ranks and subdiagpp measurements
 
     Entries are in the form
-    ``(dims, (diag_idxs), num_measurements, deflation_dimensions)``, where dims
-    is the number of dimensions of a square (nonsymmetric) test matrix. Note
-    that given diagonal indices should not exceed the furthest away diagonal,
-    which depends on the shape. Also, the number of measurements should not
-    exceed the length of the main diagonal, and the number of deflation
-    dimensions should not exceed the number of measurements.
+    ``(dims, rank, (diag_idxs), num_meas, defl)``, where dims is the number of
+    dimensions of a square test matrix of exp-decaying singular values with
+    given minimum ``rank``. The ``num_meas`` parameter specifies the number of
+    measurements for the hutchinson diagonal estimator, and ``defl`` the rank
+    of the deflation orthogonal projector.
+
+    .. note::
+
+      The given diagonal indices should not exceed the furthest away
+      diagonal, which depends on the shape.
     """
     result = [
-        (1000, torch.arange(-9, 9).tolist(), 200, 100),
-        (10, torch.arange(-9, 9).tolist(), 10),
-        (100, torch.arange(-99, 100, 99).tolist(), 20),
-        (1000, torch.arange(-999, 1000, 54).tolist(), 50),
+        (1000, 0, [0], 750, 250),
+        # (1000, 200, torch.arange(-9, 9).tolist(), 0, 200),
+        # (10, 5, torch.arange(-9, 9).tolist(), 10),
+        # (100, 20, torch.arange(-99, 100, 99).tolist(), 20),
     ]
-    if request.config.getoption("--quick"):
-        result = result[:4]
+    # if request.config.getoption("--quick"):
+    #     result = result[:4]
     return result
+
+
+@pytest.fixture
+def exp_decays():
+    """Decay values for the synthetic matrix. The larger, the faster decay."""
+    return [0.01]
 
 
 # ##############################################################################
@@ -54,8 +67,9 @@ def dims_diags_meas_defl(request):
 def test_subdiags(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
-    entry_atol,
-    dims_diags_meas_defl,
+    diag_dist_rtol,
+    dim_rank_diags_meas_defl,
+    exp_decays,
 ):
     """Test SSVD on asymmetric exponential matrices.
 
@@ -66,35 +80,59 @@ def test_subdiags(
     * Lowtri evaluations?
     """
     for seed in rng_seeds:
-        for dims, diags, meas, defl in dims_diags_meas_defl:
+        for dim, rank, diags, meas, defl in dim_rank_diags_meas_defl:
             for dtype in (torch.float64, torch.float32):
                 for device in torch_devices:
-                    mat = SynthMat.exp_decay(
-                        shape=(dims, dims),
-                        rank=dims // 5,
-                        decay=0.1,
-                        symmetric=True,
-                        seed=seed,
-                        dtype=dtype,
-                        device=device,
-                        psd=False,
-                    )
+                    for decay in exp_decays:
+                        for sym in (True, False):
+                            print(
+                                "\n\n\n\n>>>>",
+                                dim,
+                                rank,
+                                diags,
+                                dtype,
+                                device,
+                                decay,
+                                "SYM" if sym else "ASYM",
+                            )
+                            mat = SynthMat.exp_decay(
+                                shape=(dim, dim),
+                                rank=rank,
+                                decay=decay,
+                                symmetric=False,
+                                seed=seed,
+                                dtype=dtype,
+                                device=device,
+                                psd=False,
+                            )
 
-                    for diag_idx in diags:
-                        # retrieve the true diag
-                        diag = torch.diag(mat, diagonal=diag_idx)
-                        # matrix-free estimation of the diag
-                        do_stuff(
-                            meas,
-                            mat,
-                            dtype,
-                            device,
-                            seed + 1,
-                            defl,
-                        )
-                        # here estimate things
-                        # then assert
+                            for diag_idx in diags:
+                                diag_idx = 0
+                                # retrieve the true diag
+                                diag = torch.diag(mat, diagonal=diag_idx)
+                                # matrix-free estimation of the diag
+                                diag_est, _, norms = subdiagpp(
+                                    meas,
+                                    mat,
+                                    dtype,
+                                    device,
+                                    seed + 1,
+                                    defl,
+                                    diag_idx,
+                                )
+                                # then assert
+                                dist = torch.dist(diag, diag_est)
+                                rel_err = (dist / torch.norm(diag)).item()
+                                print("\n", rel_err)
+                                breakpoint()
+                                try:
+                                    assert (
+                                        rel_err <= diag_dist_rtol
+                                    ), "Incorrect diagonal recovery!"
+                                except:
+                                    # plt.plot(diag, color="grey"); plt.plot(diag_est); plt.show()
+                                    # plt.plot(diag, color="grey"); plt.plot(diag - diag_est); plt.show()
 
-                    # assert torch.allclose(
-                    #     S[: 2 * r], core_S[: 2 * r], atol=atol
-                    # ), "Bad recovery of singular values!"
+                                    # plt.hist(diag, bins=100, color="grey"); plt.hist(diag - diag_est, alpha=0.5, bins=100); plt.show()
+
+                                    breakpoint()

@@ -151,15 +151,16 @@ class SynthMat:
           `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
           values are used: 0.5 for slow decay, 1 for medium, 2 for fast.
         :param bool symmetric: If true, ``V == U``.
-        :param psd: If true, ``S`` will be multiplied with Rademacher noise
-          to create a non-PSD matrix (assuming symmetric).
+        :param psd: If false, and matrix is symmetric, the "tail" singular values
+          values will be multiplied with Rademacher noise to create a non-PSD
+          matrix.
         """
         min_shape = min(shape)
         # a few ones, followed by a poly decay
         svals = torch.zeros(min_shape, dtype=dtype).to(device)
         svals[:rank] = 1
         svals[rank:] = torch.arange(2, min_shape - rank + 2) ** (-float(decay))
-        if not psd:
+        if (not psd) and symmetric:
             rademacher_flip(svals[rank:], seed=seed + 1, inplace=True)
         #
         result = cls._decay_helper(
@@ -193,15 +194,16 @@ class SynthMat:
           `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
           values are used: 0.01 for slow decay, 0.1 for medium, 0.5 for fast.
         :param bool symmetric: If true, ``V == U``.
-        :param psd: If true, ``S`` will be multiplied with Rademacher noise
-          to create a non-PSD matrix (assuming symmetric).
+        :param psd: If false, and matrix is symmetric, the "tail" singular
+          values will be multiplied with Rademacher noise to create a non-PSD
+          matrix.
         """
         min_shape = min(shape)
         # a few ones, followed by exp decay
         svals = torch.zeros(min_shape, dtype=dtype).to(device)
         svals[:rank] = 1
         svals[rank:] = 10 ** -(decay * torch.arange(1, min_shape - rank + 1))
-        if not psd:
+        if (not psd) and symmetric:
             rademacher_flip(svals[rank:], seed=seed + 1, inplace=True)
         #
         result = cls._decay_helper(
