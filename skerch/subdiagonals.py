@@ -23,6 +23,26 @@ from .utils import rademacher_noise
 # ##############################################################################
 # #
 # ##############################################################################
+def subdiag_hadamard_pattern(v, subdiag_idxs):
+    """Map random vector into a pattern for subdiagonal estimation.
+
+    :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
+    :param subdiag_idxs: Collection of integers corresponding to the
+      subdiag indices to include.
+    """
+    # note: subdiag_idxs could be optimized to be an iterator and save memory
+    breakpoint()
+
+    v1 = torch.range(1, 20).to(torch.float32)
+    v2 = torch.zeros_like(v1)
+    for idx in diag_idxs:
+        v2[idx] = 1
+    # circular convolution
+    V = torch.fft.rfft(v1)
+    V *= torch.fft.rfft(v2)
+    V = torch.fft.irfft(V)
+
+
 def subdiagpp(
     num_meas,
     lop,
@@ -36,7 +56,10 @@ def subdiagpp(
     h, w = lop.shape
     assert h == w, "Only square linear operators supported!"
     dims = h
-    result_buff = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    abs_diag_idx = abs(diag_idx)
+    result_buff = torch.zeros(
+        dims - abs_diag_idx, dtype=lop_dtype, device=lop_device
+    )
     deflation_matrix = None
     if num_meas > 0:
         squares_buff = torch.zeros_like(result_buff)
@@ -63,15 +86,28 @@ def subdiagpp(
         ssrft = SSRFT((num_meas, dims), seed=seed)
         for i in range(num_meas):
             v = ssrft.get_row(i, lop_dtype, lop_device)
-            squares_buff += v * v
-            result_buff += v * (v @ deflated_lop)
+            if diag_idx == 0:
+                result_buff += v * (v @ deflated_lop)
+                squares_buff += v * v
+            elif diag_idx > 0:
+                result_buff += (
+                    v[:-abs_diag_idx] * (v @ deflated_lop)[abs_diag_idx:]
+                )
+                squares_buff += v[:-abs_diag_idx] * v[:-abs_diag_idx]
+            elif diag_idx < 0:
+                result_buff += (
+                    v[abs_diag_idx:] * (v @ deflated_lop)[:-abs_diag_idx]
+                )
+                squares_buff += v[abs_diag_idx:] * v[abs_diag_idx:]
         result_buff /= squares_buff
     bottom_norm = result_buff.norm().item()
     # add estimated deflated diagonal to exact top-rank diagonal
     top_norm = 0
     if deflation_rank > 0:
-        for i in range(dims):
-            entry = ((deflation_matrix @ deflation_matrix[i]) @ lop)[i]
+        for i in range(len(result_buff)):
+            row = i if (diag_idx > 0) else i + abs_diag_idx
+            col = i if (diag_idx <= 0) else i + abs_diag_idx
+            entry = ((deflation_matrix @ deflation_matrix[row]) @ lop)[col]
             result_buff[i] += entry
             top_norm += entry**2
         top_norm = top_norm**0.5
