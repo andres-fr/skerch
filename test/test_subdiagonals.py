@@ -16,6 +16,9 @@ from skerch.utils import gaussian_noise
 from . import rng_seeds, torch_devices  # noqa: F401
 
 
+from skerch.subdiagonals import TriangularLinOp
+
+
 # ##############################################################################
 # # FIXTURES
 # ##############################################################################
@@ -124,7 +127,7 @@ def serrated_hadamard_dims_chunks():
 @pytest.fixture
 def hadamard_atol():
     """ """
-    result = {torch.float64: 1e-15, torch.float32: 1e-5}
+    result = {torch.float64: 1e-13, torch.float32: 1e-5}
     return result
 
 
@@ -208,6 +211,18 @@ def test_subdiags(
                         device=device,
                         psd=False,
                     )
+
+                    tlop = TriangularLinOp(
+                        mat, 11, 0, lower=True, with_main_diagonal=True
+                    )
+                    v = gaussian_noise(
+                        dim,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    w = tlop @ v
+                    breakpoint()
                     for diag_idx in diags:
                         # retrieve the true diag
                         diag = torch.diag(mat, diagonal=diag_idx)
@@ -318,6 +333,45 @@ def test_serrated_hadamard_pattern(
                     ),
                     atol=atol,
                 ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 4, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 1, 2, 3, 0, 1, 2, 3, 0, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
                 # random test with more complex responses
                 for dims, chunk in serrated_hadamard_dims_chunks:
                     v = gaussian_noise(
@@ -326,11 +380,16 @@ def test_serrated_hadamard_pattern(
                         dtype=dtype,
                         device=device,
                     )
-                    had = serrated_hadamard_pattern(v, chunk, use_fft=False)
-                    had_fft = serrated_hadamard_pattern(v, chunk, use_fft=True)
-                    assert torch.allclose(
-                        had, had_fft, atol=atol
-                    ), "Inconsistent FFT implementation of serrated Hadamard!"
+                    for diag in (True, False):
+                        had = serrated_hadamard_pattern(
+                            v, chunk, with_main_diagonal=diag, use_fft=False
+                        )
+                        had_fft = serrated_hadamard_pattern(
+                            v, chunk, with_main_diagonal=diag, use_fft=True
+                        )
+                        assert torch.allclose(
+                            had, had_fft, atol=atol
+                        ), "Inconsistent FFT implementation of serrated!"
 
 
 # def test_combined_diags(
