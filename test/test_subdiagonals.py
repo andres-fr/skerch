@@ -9,8 +9,10 @@ import pytest
 import torch
 
 from skerch.subdiagonals import subdiagpp
+from skerch.subdiagonals import subdiag_hadamard_pattern
+from skerch.subdiagonals import serrated_hadamard_pattern
 from skerch.synthmat import SynthMat
-
+from skerch.utils import gaussian_noise
 from . import rng_seeds, torch_devices  # noqa: F401
 
 
@@ -77,19 +79,52 @@ def dim_rank_decay_sym_diags_meas_defl_rtol(request):
 def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
     """Test cases for subdiagonal estimation on different matrices.
 
-    Like the main diagonal test, but all matrices are smaller and asymmetric,
-    since subdiag recovery behaves here similarly to asymmetric main diagonals,
-    and we care more about discarding off-by-one errors and such things.
+    Note that very extremal subdiagonals have few entries, and we are better
+    off just directly measuring them. For this reason, this test focuses on
+    subdiagonals in the mid-section. It also focuses on asymmetric matrices
+    only, since symmetry mostly impacts the diagonal.
     """
     dims, rank = 100, 10
     if request.config.getoption("--quick"):
-        subdiag_idxs = torch.arange(-99, 100, 22).tolist()
+        subdiag_idxs = [-50, -40, -30, -20, -10, 10, 20, 30, 40, 50]
     else:
-        subdiag_idxs = torch.arange(-99, 100).tolist()
+        subdiag_idxs = [-50, -30, -10, 10, 30, 50]
+    #
     result = [
         # fast-decay: low-rank recovery works nicely
-        (dims, rank, 0.5, False, subdiag_idxs, 0, 20, 1e-4),
+        (dims, rank, 0.5, False, subdiag_idxs, 0, rank * 2, 0.001),
+        # mid-decay: low-rank recovery works less nicely for subdiags
+        (dims, rank, 0.1, False, subdiag_idxs, 0, rank * 3, 0.03),
+        # fast-decay: Hutch is bad for central subdiags (worse than direct)...
+        (dims, rank, 0.5, False, subdiag_idxs, 99, 0, 0.2),
+        # but as with main diag, Hutch doesn't depend much on the decay
+        (dims, rank, 0.1, False, subdiag_idxs, 99, 0, 0.2),
     ]
+    return result
+
+
+@pytest.fixture
+def subdiag_hadamard_idxs():
+    """ """
+    result = [
+        [0, 1, 2, 3, 4, 5],
+        [0, -1, -2, -3, -4, -5],
+        [-1, 5, -9, 9],
+    ]
+    return result
+
+
+@pytest.fixture
+def serrated_hadamard_dims_chunks():
+    """ """
+    result = [(100, 2), (100, 3), (100, 10), (100, 100)]
+    return result
+
+
+@pytest.fixture
+def hadamard_atol():
+    """ """
+    result = {torch.float64: 1e-15, torch.float32: 1e-5}
     return result
 
 
@@ -189,14 +224,113 @@ def test_subdiags(
                         # then assert
                         dist = torch.dist(diag, diag_est)
                         rel_err = (dist / torch.norm(diag)).item()
+                        assert rel_err <= rtol, "Incorrect subdiag recovery!"
 
-                        try:
-                            assert (
-                                rel_err <= rtol
-                            ), "Incorrect subdiagonal recovery!"
-                        except Exception as e:
-                            print("!!!", e)
-                            breakpoint()
+
+def test_subdiag_hadamard_pattern(
+    rng_seeds,  # noqa: F811
+    hadamard_atol,
+    torch_devices,  # noqa: F811
+    subdiag_hadamard_idxs,
+):
+    """ """
+    for seed in rng_seeds:
+        for dtype, atol in hadamard_atol.items():
+            for device in torch_devices:
+                # Simple tests with delta responses:
+                v = gaussian_noise(100, seed=seed, dtype=dtype, device=device)
+                had = subdiag_hadamard_pattern(v, [], use_fft=False)
+                assert had.norm() == 0, "Empty idxs should yield zeros!"
+                had = subdiag_hadamard_pattern(v, [0], use_fft=False)
+                assert torch.allclose(
+                    v, had, atol=atol
+                ), "Delta(0) should yield same result!"
+                had = subdiag_hadamard_pattern(v, [1], use_fft=False)
+                assert (had[0] == 0) and (
+                    torch.allclose(had[1:], v[:-1], atol=atol)
+                ), "Delta(1) should shift vector one position to the right!"
+                had = subdiag_hadamard_pattern(v, [-1], use_fft=False)
+                assert (had[-1] == 0) and (
+                    torch.allclose(had[:-1], v[1:], atol=atol)
+                ), "Delta(-1) should shift vector one position to the left!"
+                # random test with more complex responses
+                for idxs in subdiag_hadamard_idxs:
+                    v = gaussian_noise(
+                        100,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    had = subdiag_hadamard_pattern(v, idxs, use_fft=False)
+                    had_fft = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+                    assert torch.allclose(
+                        had, had_fft, atol=atol
+                    ), "Inconsistent FFT implementation of Hadamard pattern!"
+                    if not idxs:
+                        assert had.norm() == 0, "Hadamard should be empty!"
+
+
+def test_serrated_hadamard_pattern(
+    rng_seeds,  # noqa: F811
+    hadamard_atol,
+    torch_devices,  # noqa: F811
+    serrated_hadamard_dims_chunks,
+):
+    """ """
+    for seed in rng_seeds:
+        for dtype, atol in hadamard_atol.items():
+            for device in torch_devices:
+                # Simple tests with unit vector:
+                v = torch.ones(10, dtype=dtype, device=device)
+                # chunk size must be 1 or greater
+                with pytest.raises(ValueError):
+                    serrated_hadamard_pattern(v, 0)
+                #
+                had = serrated_hadamard_pattern(v, 1, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(v, 2, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(v, 4, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 2, 3, 4, 1, 2, 3, 4, 1, 2],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                # random test with more complex responses
+                for dims, chunk in serrated_hadamard_dims_chunks:
+                    v = gaussian_noise(
+                        dims,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    had = serrated_hadamard_pattern(v, chunk, use_fft=False)
+                    had_fft = serrated_hadamard_pattern(v, chunk, use_fft=True)
+                    assert torch.allclose(
+                        had, had_fft, atol=atol
+                    ), "Inconsistent FFT implementation of serrated Hadamard!"
 
 
 # def test_combined_diags(

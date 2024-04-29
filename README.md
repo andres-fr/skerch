@@ -41,7 +41,7 @@ Install via:
 pip install skerch
 ```
 
-The sketched SVD of a linear operator `op` can be then computed simply via:
+The sketched SVD of a linear operator `op` of shape `(h, w)` can be then computed simply via:
 
 
 ```python
@@ -56,7 +56,8 @@ q, u, s, vt, pt = ssvd(
 )
 ```
 
-Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`.
+Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`, where `q, p` are *thin* orthonormal matrices of shape `(h, NUM_OUTER)` and `(NUM_OUTER, w)` respectively, and `u, vt` are *small* orthogonal matrices of shape `(NUM_OUTER, NUM_OUTER)`.
+
 The `op` object must simply satify the following criteria:
 
 * It must have a `op.shape = (height, width)` attribute
