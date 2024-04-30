@@ -59,21 +59,21 @@ def dim_rank_decay_sym_diags_meas_defl_rtol(request):
         dims, rank = 500, 50
     result = [
         # fast-decay: just Hutch does poorly, but better if symmetric
-        (dims, rank, 0.5, True, [0], round(dims * 0.995), 0, 0.02),
-        (dims, rank, 0.5, False, [0], round(dims * 0.995), 0, 0.2),
-        # slow-decay: just Hutch behaves the same as with fast decay
+        (dims, rank, 0.5, True, [0], round(dims * 0.995), 0, 0.01),
+        (dims, rank, 0.5, False, [0], round(dims * 0.995), 0, 0.1),
+        # slow-decay: just Hutch behaves a bit worse as with fast decay
         (dims, rank, 0.01, True, [0], round(dims * 0.995), 0, 0.02),
-        (dims, rank, 0.01, False, [0], round(dims * 0.995), 0, 0.2),
+        (dims, rank, 0.01, False, [0], round(dims * 0.995), 0, 0.1),
         # fast-decay: just deflating is great (also for asymmetric)
-        (dims, rank, 0.5, True, [0], 0, rank + 10, 1e-4),
+        (dims, rank, 0.5, True, [0], 0, rank + 10, 1e-5),
         (dims, rank, 0.5, False, [0], 0, rank + 10, 1e-4),
         # slow-decay: deflating is less good and affected by asym
-        (dims, rank, 0.01, True, [0], 0, rank * 3, 0.05),
-        (dims, rank, 0.01, False, [0], 0, rank * 4, 0.1),
+        (dims, rank, 0.01, True, [0], 0, rank * 3, 0.01),
+        (dims, rank, 0.01, False, [0], 0, rank * 4, 0.01),
         # slow-decay: A lot of Hutch are needed, but deflation tends to help
-        # fo asym
-        (dims, rank, 0.01, True, [0], round(dims * 0.7), rank * 3, 0.02),
-        (dims, rank, 0.01, False, [0], round(dims * 0.7), rank * 4, 0.1),
+        # for asym
+        (dims, rank, 0.01, True, [0], round(dims * 0.7), rank * 3, 0.002),
+        (dims, rank, 0.01, False, [0], round(dims * 0.7), rank * 4, 0.002),
     ]
     return result
 
@@ -85,7 +85,7 @@ def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
     Note that very extremal subdiagonals have few entries, and we are better
     off just directly measuring them. For this reason, this test focuses on
     subdiagonals in the mid-section. It also focuses on asymmetric matrices
-    only, since symmetry mostly impacts the diagonal.
+    only, since symmetry mostly impacts the main diagonal.
     """
     dims, rank = 100, 10
     if request.config.getoption("--quick"):
@@ -95,7 +95,7 @@ def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
     #
     result = [
         # fast-decay: low-rank recovery works nicely
-        (dims, rank, 0.5, False, subdiag_idxs, 0, rank * 2, 0.001),
+        (dims, rank, 0.5, False, subdiag_idxs, 0, rank * 2, 5e-5),
         # mid-decay: low-rank recovery works less nicely for subdiags
         (dims, rank, 0.1, False, subdiag_idxs, 0, rank * 3, 0.03),
         # fast-decay: Hutch is bad for central subdiags (worse than direct)...
@@ -212,8 +212,14 @@ def test_subdiags(
                         psd=False,
                     )
 
+                    #
+                    #
+                    #
+                    import matplotlib.pyplot as plt
+
+                    tril = torch.tril(mat, diagonal=0)
                     tlop = TriangularLinOp(
-                        mat, 11, 0, lower=True, with_main_diagonal=True
+                        mat, 20, 50, lower=True, with_main_diagonal=True
                     )
                     v = gaussian_noise(
                         dim,
@@ -221,8 +227,15 @@ def test_subdiags(
                         dtype=dtype,
                         device=device,
                     )
-                    w = tlop @ v
+                    ww = tril @ v
+                    www = tlop @ v
                     breakpoint()
+                    #
+                    # plt.clf(); plt.plot(ww, color="black"); plt.plot(www); plt.show()
+                    #
+                    #
+                    #
+
                     for diag_idx in diags:
                         # retrieve the true diag
                         diag = torch.diag(mat, diagonal=diag_idx)

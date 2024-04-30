@@ -37,8 +37,6 @@ def subdiagpp(
         dims - abs_diag_idx, dtype=lop_dtype, device=lop_device
     )
     deflation_matrix = None
-    if num_meas > 0:
-        squares_buff = torch.zeros_like(result_buff)
     # first compute top-rank orth proj to deflate lop
     if deflation_rank > 0:
         # deflate lop: first compute a few random measurements
@@ -64,18 +62,17 @@ def subdiagpp(
             v = ssrft.get_row(i, lop_dtype, lop_device)
             if diag_idx == 0:
                 result_buff += v * (v @ deflated_lop)
-                squares_buff += v * v
+                # squares_buff += v * v
             elif diag_idx > 0:
                 result_buff += (
                     v[:-abs_diag_idx] * (v @ deflated_lop)[abs_diag_idx:]
                 )
-                squares_buff += v[:-abs_diag_idx] * v[:-abs_diag_idx]
             elif diag_idx < 0:
                 result_buff += (
                     v[abs_diag_idx:] * (v @ deflated_lop)[:-abs_diag_idx]
                 )
-                squares_buff += v[abs_diag_idx:] * v[abs_diag_idx:]
-        result_buff /= squares_buff
+        # note that here we would typically apply result_buff /= squares_buff
+        # but l2 norm of SSRFT rows is always 1, so no need.
     bottom_norm = result_buff.norm().item()
     # add estimated deflated diagonal to exact top-rank diagonal
     top_norm = 0
@@ -219,6 +216,7 @@ class TriangularLinOp(BaseLinOp):
         num_serrated_measurements=0,
         lower=True,
         with_main_diagonal=True,
+        seed=0b1110101001010101011,
     ):
         """
         :param lop: A square linear operator of order ``dims``, such that
@@ -241,18 +239,30 @@ class TriangularLinOp(BaseLinOp):
           in the operator, otherwise excluded. If you already have precomuted
           the diagonal elsewhere, consider excluding it from this approximation,
           and adding it separately.
+        :param seed: Seed for the random SSRFT measurements used in the
+          serrated estimator.
         """
         h, w = lop.shape
         assert h == w, "Only square linear operators supported!"
         self.dims = h
         self.lop = lop
-        self.n_stair = num_staircase_measurements
         self.n_serrat = num_serrated_measurements
+        assert (
+            num_staircase_measurements <= self.dims
+        ), "More staircase measurements than dimensions??"
+        assert (
+            self.n_serrat <= self.dims
+        ), "More serrated measurements than dimensions??"
+        assert (
+            num_staircase_measurements + self.n_serrat
+        ) <= self.dims, "More total measurements than dimensions??"
+
         self.lower = lower
         self.with_main = with_main_diagonal
         self.stair_steps, self.dims_serrat = self._get_chunk_dims(
-            self.dims, self.n_stair
+            self.dims, num_staircase_measurements
         )
+        self.ssrft = SSRFT((self.n_serrat, self.dims), seed=seed)
         super().__init__(lop.shape)  # this sets self.shape also
 
     @staticmethod
@@ -282,8 +292,16 @@ class TriangularLinOp(BaseLinOp):
             # reset buffer and prepare next measurement
             buff[beg:end] = 0
             beg = end
-
-        breakpoint()
+        #
+        if self.n_serrat > 0:
+            buff_v = torch.empty_like(buff)
+            buff *= 0
+        for i in range(self.n_serrat):
+            buff_v[:] = self.ssrft.get_row(i, x.dtype, x.device)
+            buff[:] += serrated_hadamard_pattern(buff_v, self.dims_serrat) * (
+                self.lop @ (buff_v * x)
+            )
+        return result + buff
 
     def __rmatmul__(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
@@ -309,27 +327,16 @@ class TriangularLinOp(BaseLinOp):
 """
 TODO:
 
-* Implement a sub-linop that uses hadamard:
-  * given lop and a hadamard lambda for right and left matmul
-  * also num of measurements or sth like that
-  * when computing self @ x, computes mean(had(v) * lop @ (v * x))
-    for multiple, random v.
+* Refactor diag estimator to work with general Hadamards and SSRFT.
+* Finish tri linop, accept also upper and left-matmul. utest
+  * factor out staircase and serrated into their submethods
+* Add submatrix linop, and utest
 
-* If the above works, implement triangular matrix
-  * logarithmic amount of chunks to be specified
-  * left- and right-serrated patterns can be derived from chunks
-  * When A@x, just run the log-chunks and add them. then, run the
-    serrated estimator for num_measurements.
+Check that we are indeed ready to do our experiments, or do we need more?
+What about LR or diagonal deflations? we would need a "subtraction" linop?
+
 
 * we may want to implement a submatrix operator
 * deflation is a thing! is there a way to translate arbitrary Hadamard
   patterns into the deflated projector?
-
-
-Note:
-* If we wanna deflate, we rather do this before and pass the deflated linop
-* If we wanna pick up the corners separately:
-  * Apply a few extremal axis-aligned measurements,
-
-we want a linop
 """
