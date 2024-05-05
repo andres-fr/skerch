@@ -201,38 +201,50 @@ def test_subdiags(
                     defl,
                     rtol,
                 ) in dim_rank_decay_sym_subdiags_meas_defl_rtol:
-                    mat = SynthMat.exp_decay(
-                        shape=(dim, dim),
-                        rank=rank,
-                        decay=decay,
-                        symmetric=sym,
-                        seed=seed,
-                        dtype=dtype,
-                        device=device,
-                        psd=False,
-                    )
+                    # mat = SynthMat.exp_decay(
+                    #     shape=(dim, dim),
+                    #     rank=rank,
+                    #     decay=decay,
+                    #     symmetric=sym,
+                    #     seed=seed,
+                    #     dtype=dtype,
+                    #     device=device,
+                    #     psd=False,
+                    # )
 
                     #
                     #
                     #
                     import matplotlib.pyplot as plt
 
-                    tril = torch.tril(mat, diagonal=0)
+                    mat = SynthMat.exp_decay(
+                        shape=(1000, 1000),
+                        rank=500,
+                        decay=decay,
+                        symmetric=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                        psd=False,
+                    )
+
+                    tril = torch.triu(mat, diagonal=0)
                     tlop = TriangularLinOp(
-                        mat, 20, 50, lower=True, with_main_diagonal=True
+                        mat, 0, 100, lower=False, with_main_diagonal=True
                     )
                     v = gaussian_noise(
-                        dim,
+                        1000,
                         seed=seed,
                         dtype=dtype,
                         device=device,
                     )
                     ww = tril @ v
                     www = tlop @ v
+                    print("\n\n!!!!", torch.dist(ww, www))
                     breakpoint()
                     #
                     # plt.clf(); plt.plot(ww, color="black"); plt.plot(www); plt.show()
-                    #
+                    # plt.clf(); plt.imshow(tril); plt.show()
                     #
                     #
 
@@ -308,7 +320,7 @@ def test_serrated_hadamard_pattern(
     for seed in rng_seeds:
         for dtype, atol in hadamard_atol.items():
             for device in torch_devices:
-                # Simple tests with unit vector:
+                # Simple tests with vector of ones:
                 v = torch.ones(10, dtype=dtype, device=device)
                 # chunk size must be 1 or greater
                 with pytest.raises(ValueError):
@@ -385,6 +397,84 @@ def test_serrated_hadamard_pattern(
                     ),
                     atol=atol,
                 ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+
+                had = serrated_hadamard_pattern(
+                    v, 4, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [2, 1, 4, 3, 2, 1, 4, 3, 2, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 4, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 0, 3, 2, 1, 0, 3, 2, 1, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
                 # random test with more complex responses
                 for dims, chunk in serrated_hadamard_dims_chunks:
                     v = gaussian_noise(
@@ -394,15 +484,24 @@ def test_serrated_hadamard_pattern(
                         device=device,
                     )
                     for diag in (True, False):
-                        had = serrated_hadamard_pattern(
-                            v, chunk, with_main_diagonal=diag, use_fft=False
-                        )
-                        had_fft = serrated_hadamard_pattern(
-                            v, chunk, with_main_diagonal=diag, use_fft=True
-                        )
-                        assert torch.allclose(
-                            had, had_fft, atol=atol
-                        ), "Inconsistent FFT implementation of serrated!"
+                        for lower in (True, False):
+                            had = serrated_hadamard_pattern(
+                                v,
+                                chunk,
+                                with_main_diagonal=diag,
+                                use_fft=False,
+                                lower=lower,
+                            )
+                            had_fft = serrated_hadamard_pattern(
+                                v,
+                                chunk,
+                                with_main_diagonal=diag,
+                                use_fft=True,
+                                lower=lower,
+                            )
+                            assert torch.allclose(
+                                had, had_fft, atol=atol
+                            ), "Inconsistent FFT implementation of serrated!"
 
 
 # def test_combined_diags(

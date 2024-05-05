@@ -134,7 +134,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 
 
 def serrated_hadamard_pattern(
-    v, chunksize, with_main_diagonal=True, use_fft=False
+    v, chunksize, with_main_diagonal=True, lower=True, use_fft=False
 ):
     """Auxiliary pattern for block-triangular estimation.
 
@@ -143,8 +143,8 @@ def serrated_hadamard_pattern(
           in the patterns, otherwise excluded.
 
     For example, given a 10-dimensional vector, the corresponding serrated
-    pattern with ``chunksize=3`` and with main diagonal will yield the
-    following entries:
+    pattern with ``chunksize=3, with_main_diagonal=True, lower=True`` yields
+    the following entries:
 
     * ``v1``
     * ``v1 + v2``
@@ -169,25 +169,66 @@ def serrated_hadamard_pattern(
     * ``v7``
     * ``v7 + v8``
     * ``0``
+
+    And if ``lower=False``, it will look like this instead:
+
+    * ``v1``
+    * ``v4 + v3 + v2``
+    * ``v4 + v3``
+    * ``v4``
+    * ``v7 + v6 + v5``
+    * ``v7 + v6``
+    * ``v7``
+    * ``v10 + v9 + v8``
+    * ``v10 + v9``
+    * ``v10``
     """
     if chunksize < 1:
         raise ValueError("Chunksize must be a positive scalar!")
     #
+    len_v = len(v)
     if use_fft:
-        idxs = range(len(v)) if with_main_diagonal else range(1, len(v))
-        result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
-        for i in range(0, len(v), chunksize):
-            offset = sum(v[i : (i + chunksize)])
-            result[(i + chunksize) :] -= offset
+        if lower:
+            idxs = range(len_v) if with_main_diagonal else range(1, len_v)
+            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+            for i in range(0, len_v, chunksize):
+                mark = i + chunksize
+                offset = sum(v[i:mark])
+                result[mark:] -= offset
+        else:
+            idxs = (
+                range(0, -len_v, -1)
+                if with_main_diagonal
+                else range(-1, -len_v, -1)
+            )
+            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+            for i in range(0, len_v, chunksize):
+                mark = len_v - (i + chunksize)
+                offset = sum(v[mark : (mark + chunksize)])
+                result[:mark] -= offset
     else:
         if with_main_diagonal:
             result = v.clone()
         else:
             result = torch.zeros_like(v)
-        for i in range(1, chunksize):
-            for j in range(0, i):
-                target_len = len(result[i::chunksize])
-                result[i::chunksize] += v[j::chunksize][:target_len]
+        #
+        for i in range(len_v - 1):
+            block_n, block_i = divmod(i + 1, chunksize)
+            if block_i == 0:
+                continue
+            # get indices for result[out_beg:out_end] = v[beg:end]
+            if lower:
+                beg = block_n * chunksize
+                end = beg + block_i
+                out_end = min(beg + chunksize, len_v)
+                out_beg = out_end - block_i
+            else:
+                end = len_v - (block_n * chunksize)
+                beg = end - block_i
+                out_beg = max(0, end - chunksize)
+                out_end = out_beg + block_i
+            # add to serrated pattern
+            result[out_beg:out_end] += v[beg:end]
     #
     return result
 
@@ -217,6 +258,7 @@ class TriangularLinOp(BaseLinOp):
         lower=True,
         with_main_diagonal=True,
         seed=0b1110101001010101011,
+        use_fft=True,
     ):
         """
         :param lop: A square linear operator of order ``dims``, such that
@@ -241,12 +283,17 @@ class TriangularLinOp(BaseLinOp):
           and adding it separately.
         :param seed: Seed for the random SSRFT measurements used in the
           serrated estimator.
+        :param use_fft: Whether to use FFT when calling
+        :fun:`serrated_hadamard_pattern`, used for the serrated measurements.
+          FFT slightly decreases precision and needs a few buffer vectors of
+          ``dims`` size, but greatly improves runtime for larger ``dims``.
         """
         h, w = lop.shape
         assert h == w, "Only square linear operators supported!"
         self.dims = h
         self.lop = lop
         self.n_serrat = num_serrated_measurements
+        self.use_fft = use_fft
         assert (
             num_staircase_measurements <= self.dims
         ), "More staircase measurements than dimensions??"
@@ -259,7 +306,7 @@ class TriangularLinOp(BaseLinOp):
 
         self.lower = lower
         self.with_main = with_main_diagonal
-        self.stair_steps, self.dims_serrat = self._get_chunk_dims(
+        self.stair_steps, self.stair_width = self._get_chunk_dims(
             self.dims, num_staircase_measurements
         )
         self.ssrft = SSRFT((self.n_serrat, self.dims), seed=seed)
@@ -268,40 +315,45 @@ class TriangularLinOp(BaseLinOp):
     @staticmethod
     def _get_chunk_dims(dims, num_stair_meas):
         """ """
-        div, _ = divmod(dims, num_stair_meas)
-        stair_steps = torch.tensor([div] * num_stair_meas).cumsum(0)
-        serrated_dims = div
-        return stair_steps, serrated_dims
+        stair_width = dims // (num_stair_meas + 1)
+        stair_steps = torch.arange(0, dims, stair_width)
+        return stair_steps, stair_width
 
     def __matmul__(self, x):
         """Forward (right) matrix-vector multiplication ``self @ x``.
 
         See parent class for more details.
         """
+
+        serrated_hadamard_pattern(
+            torch.ones(10),
+            3,
+            with_main_diagonal=True,
+            lower=False,
+            use_fft=False,
+        )
+
         self.check_input(x, adjoint=False)
         #
         buff = torch.zeros_like(x)
         result = torch.zeros_like(x)
-        #
-        beg = 0
-        for step in self.stair_steps:
-            # prepare entry buffer and apply to linop
-            end = step
-            buff[beg:end] = x[beg:end]
-            result[step:] += (self.lop @ buff)[step:]
-            # reset buffer and prepare next measurement
-            buff[beg:end] = 0
-            beg = end
-        #
-        if self.n_serrat > 0:
-            buff_v = torch.empty_like(buff)
-            buff *= 0
+        # add step computations to result
+        for beg, end in zip(self.stair_steps[:-1], self.stair_steps[1:]):
+            if self.lower:
+                buff[beg:end] = x[beg:end]
+                result[end:] += (self.lop @ buff)[end:]
+                buff[beg:end] = 0
+            else:
+                buff[end:] = x[end:]
+                result[beg:end] += (self.lop @ buff)[beg:end]
+                buff[end:] = 0
+        # add serrated Hutchinson estimator to result
         for i in range(self.n_serrat):
-            buff_v[:] = self.ssrft.get_row(i, x.dtype, x.device)
-            buff[:] += serrated_hadamard_pattern(buff_v, self.dims_serrat) * (
-                self.lop @ (buff_v * x)
-            )
-        return result + buff
+            buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
+            result[:] += serrated_hadamard_pattern(
+                buff, self.stair_width, lower=self.lower, use_fft=self.use_fft
+            ) * (self.lop @ (buff * x))
+        return result
 
     def __rmatmul__(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
