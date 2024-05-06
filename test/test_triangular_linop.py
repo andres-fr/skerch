@@ -10,6 +10,7 @@ import torch
 
 from skerch.triangles import serrated_hadamard_pattern, TriangularLinOp
 from skerch.utils import gaussian_noise
+from skerch.synthmat import SynthMat
 from . import rng_seeds, torch_devices  # noqa: F401
 
 
@@ -36,27 +37,25 @@ def hadamard_atol():
 @pytest.fixture
 def num_tri_tests(request):
     """ """
-    result = 10
+    result = 3
     if request.config.getoption("--quick"):
-        result = 3
+        result = 1
     return result
 
 
 @pytest.fixture
-def dim_rank_decay_sym_step_serr_rtol(request):
-    """
-
-
-    WITH MAIN DIAG BELONGS WITH TOLERANCE AND NUM MEAS HERE
-    """
+def dim_rank_decay_sym_step_serr_maindiag_rtol(request):
+    """ """
     dims, rank = 1000, 100
     if request.config.getoption("--quick"):
         dims, rank = 500, 50
     result = [
-        # fast-decay: just Hutch does poorly, but better if symmetric
-        (dims, rank, 0.5, True, [0], round(dims * 0.995), 0, 0.01),
-        # (dims, rank, 0.5, False, [0], round(dims * 0.995), 0, 0.1),
+        # COMMENT CASE
+        # (dims, rank, 0.5, True, 20, 0, True, 0.01),
+        (dims, rank, 0.5, True, 100, 400, True, 0.01),
+    ]
     return result
+
 
 # ##############################################################################
 # # HADAMARD
@@ -275,7 +274,7 @@ def test_serrated_hadamard_pattern(
 def test_triangular_linop(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
-    dim_rank_decay_sym_step_serr_rtol,
+    dim_rank_decay_sym_step_serr_maindiag_rtol,
     num_tri_tests,
 ):
     """ """
@@ -289,8 +288,9 @@ def test_triangular_linop(
                     sym,
                     step_meas,
                     serrat_meas,
+                    maindiag,
                     rtol,
-                ) in dim_rank_decay_sym_step_serr_rtol:
+                ) in dim_rank_decay_sym_step_serr_maindiag_rtol:
                     mat = SynthMat.exp_decay(
                         shape=(dim, dim),
                         rank=rank,
@@ -302,17 +302,18 @@ def test_triangular_linop(
                         psd=False,
                     )
                     for lower in (True, False):
+                        diag_idx = int(not maindiag)  # if with main, idx=0
                         if lower:
-                            tri = torch.tril(mat, diagonal=-int(with_main_diag))
+                            tri = torch.tril(mat, diagonal=-diag_idx)
                         else:
-                            tri = torch.triu(mat, diagonal=int(with_main_diag))
+                            tri = torch.triu(mat, diagonal=diag_idx)
                         #
                         tri_approx = TriangularLinOp(
                             mat,
                             step_meas,
                             serrat_meas,
                             lower=lower,
-                            with_main_diagonal=with_main_diag,
+                            with_main_diagonal=maindiag,
                         )
                         for i in range(num_tri_tests):
                             v = gaussian_noise(
@@ -321,8 +322,8 @@ def test_triangular_linop(
                                 dtype=dtype,
                                 device=device,
                             )
-                            for adjoint in (False, True):
-                                if not adjoint:
+                            for adjoint in (True, False):
+                                if adjoint:
                                     tri_v = v @ tri
                                     tri_approx_v = v @ tri_approx
                                 else:
@@ -330,12 +331,36 @@ def test_triangular_linop(
                                     tri_approx_v = tri_approx @ v
                                 dist = torch.dist(tri_v, tri_approx_v)
 
-                                print("\n\n!!!!", dist)
-                                breakpoint()
-                                #
-                                # plt.clf(); plt.plot(ww, color="black"); plt.plot(www); plt.show()
-                                # plt.clf(); plt.imshow(tril); plt.show()
-                                #
-                                #
-                                # rel_err = (dist / torch.norm(diag)).item()
-                                # assert rel_err <= rtol, "Incorrect subdiag recovery!"
+                            print(
+                                "\n\n!!!!",
+                                dim,
+                                rank,
+                                decay,
+                                sym,
+                                step_meas,
+                                serrat_meas,
+                                maindiag,
+                                rtol,
+                            )
+                        print(f"lower={lower}")
+                        print(f"adjoint={adjoint}")
+
+                        print("dist:", dist)
+
+                        print("\n\n\n", tri_approx._get_chunk_dims(10, 3))
+                        breakpoint()
+                        """
+                        TODO:
+
+                        CHECK THAT NONSQUARE THROWS BADSHAPEERROR
+
+                        ALSO: WE ARE DOING ONE MEASUREMENT TOO MANY IN STAIR!!!
+                        """
+                        # breakpoint()
+                        #
+                        # plt.clf(); plt.plot(tri_v, color="black"); plt.plot(tri_approx_v); plt.show()
+                        # plt.clf(); plt.imshow(tri); plt.show()
+                        #
+                        #
+                        # rel_err = (dist / torch.norm(diag)).item()
+                        # assert rel_err <= rtol, "Incorrect subdiag recovery!"

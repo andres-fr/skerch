@@ -226,45 +226,82 @@ class TriangularLinOp(BaseLinOp):
 
     @staticmethod
     def _get_chunk_dims(dims, num_stair_meas):
-        """ """
+        """Helper method to partition triangular matrix-free computations.
+
+        :param dims: Height (or width) of the (square) linear operator.
+        :param num_stair_meas: Number of exact stair-wise measurements to be
+          done.
+        :returns: The pair ``(stair_steps, stair_width)``. The former is a
+          list of indices in ascending order signaling the beginning of each
+          stair-wise step. The latter is the width of each stair.
+
+
+        For example, a matrix with ``dims=10`` and 3 stair measurements, will
+        yield 3 measurements of width 3, plus one measurement of width 1.
+        Hence the returned value is::
+
+          ([0, 3, 6, 9], 3)
+        """
+
+        TODO:
+
+        CHECK THAT NONSQUARE THROWS BADSHAPEERROR
+
+        ALSO: WE ARE DOING ONE MEASUREMENT TOO MANY IN STAIR!!!
+
+        # div, mod = divmod(dims, num_stair_meas + 1)
         stair_width = dims // (num_stair_meas + 1)
         stair_steps = torch.arange(0, dims, stair_width)
         return stair_steps, stair_width
+
+    def _matmul_helper(self, x, adjoint=False):
+        """ """
+        self.check_input(x, adjoint=adjoint)
+        # we don't factorize this method because we want to share buff
+        # across both loops to hopefully save memory
+        buff = torch.zeros_like(x)
+        result = torch.zeros_like(x)
+        # add step computations to result
+        for beg, end in zip(self.stair_steps[:-1], self.stair_steps[1:]):
+            if (not adjoint) and self.lower:
+                buff[beg:end] = x[beg:end]
+                result[end:] += (self.lop @ buff)[end:]
+                buff[beg:end] = 0
+            elif (not adjoint) and (not self.lower):
+                buff[end:] = x[end:]
+                result[beg:end] += (self.lop @ buff)[beg:end]
+                buff[end:] = 0
+            elif adjoint and self.lower:
+                buff[end:] = x[end:]
+                result[beg:end] += (buff @ self.lop)[beg:end]
+                buff[end:] = 0
+            elif adjoint and (not self.lower):
+                buff[beg:end] = x[beg:end]
+                result[end:] += (buff @ self.lop)[end:]
+                buff[beg:end] = 0
+        # add serrated Hutchinson estimator to result
+        for i in range(self.n_serrat):
+            buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
+            result[:] += serrated_hadamard_pattern(
+                buff, self.stair_width, lower=self.lower, use_fft=self.use_fft
+            ) * (
+                ((buff * x) @ self.lop) if adjoint else (self.lop @ (buff * x))
+            )
+        return result
 
     def __matmul__(self, x):
         """Forward (right) matrix-vector multiplication ``self @ x``.
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=False)
-        #
-        buff = torch.zeros_like(x)
-        result = torch.zeros_like(x)
-        # add step computations to result
-        for beg, end in zip(self.stair_steps[:-1], self.stair_steps[1:]):
-            if self.lower:
-                buff[beg:end] = x[beg:end]
-                result[end:] += (self.lop @ buff)[end:]
-                buff[beg:end] = 0
-            else:
-                buff[end:] = x[end:]
-                result[beg:end] += (self.lop @ buff)[beg:end]
-                buff[end:] = 0
-        # add serrated Hutchinson estimator to result
-        for i in range(self.n_serrat):
-            buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
-            result[:] += serrated_hadamard_pattern(
-                buff, self.stair_width, lower=self.lower, use_fft=self.use_fft
-            ) * (self.lop @ (buff * x))
-        return result
+        return self._matmul_helper(x, adjoint=False)
 
     def __rmatmul__(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=True)
-        breakpoint()
+        return self._matmul_helper(x, adjoint=True)
 
     def __repr__(self):
         """Readable string version of this object.
