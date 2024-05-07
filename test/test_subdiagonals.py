@@ -219,8 +219,8 @@ def test_main_diags(
                         diag = torch.diag(mat, diagonal=diag_idx)
                         # matrix-free estimation of the diag
                         diag_est, _, norms = subdiagpp(
-                            meas,
                             mat,
+                            meas,
                             dtype,
                             device,
                             seed + 1,
@@ -272,8 +272,8 @@ def test_subdiags(
                         diag = torch.diag(mat, diagonal=diag_idx)
                         # matrix-free estimation of the diag
                         diag_est, _, norms = subdiagpp(
-                            meas,
                             mat,
+                            meas,
                             dtype,
                             device,
                             seed + 1,

@@ -72,8 +72,8 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 # # SKETCHED (SUB)-DIAGONAL ESTIMATOR
 # ##############################################################################
 def subdiagpp(
-    num_meas,
     lop,
+    num_meas,
     lop_dtype,
     lop_device,
     seed=0b1110101001010101011,
@@ -103,10 +103,10 @@ def subdiagpp(
     The final estimation is then the sum of the exact first component plus the
     estimated, deflated component.
 
-    :param num_meas: Number of samples ``v`` used to compute the expectation.
     :param lop: The linear operator to extract (sub-) diagonals from. It must
       implement a ``lop.shape = (h, w)`` attribute as well as the left- and
       right- matmul operator ``@``, interacting with torch tensors.
+    :param num_meas: Number of samples ``v`` used to compute the expectation.
     :param lop_dtype: Datatype of ``lop``.
     :param lop_device: Device of ``lop``.
     :param seed: Random seed for the ``v`` random SSRFT vectors.
@@ -116,7 +116,12 @@ def subdiagpp(
       and so on. Note that if diagonals are too far away from the main diagonal
       (or if ``lop`` is small enough), it may be worth it to directly perform
       one exact measurement per diagonal entry and not use ``Diag++`` at all.
-    :returns: An estimation of the requested (sub-) diagonal from ``lop``.
+    :returns: The tuple ``(result, defl, (top_norm, bottom_norm))``. The first
+      element is the estimated diagonal. The second is the computed deflation
+      matrix, or ``None`` if ``deflation_rank=0``. The last element is the
+      Euclidean norm of the deflation and the deflated parts of the diagonal,
+      respectively, which can be used to roughly diagnose the contribution of
+      each part of the algorithm.
     """
     h, w = lop.shape
     assert h == w, "Only square linear operators supported!"
