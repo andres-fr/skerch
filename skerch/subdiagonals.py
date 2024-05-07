@@ -18,8 +18,6 @@ from .distributed_decompositions import orthogonalize
 from .linops import CompositeLinOp, NegOrthProjLinOp
 from .ssrft import SSRFT
 
-from .utils import rademacher_noise
-
 
 # ##############################################################################
 # # HADAMARD

@@ -10,9 +10,9 @@ import torch
 
 from skerch.subdiagonals import subdiag_hadamard_pattern, subdiagpp
 from skerch.synthmat import SynthMat
-from . import rng_seeds, torch_devices  # noqa: F401
-
 from skerch.utils import gaussian_noise
+
+from . import rng_seeds, torch_devices  # noqa: F401
 
 
 # ##############################################################################
@@ -104,7 +104,7 @@ def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
 
 @pytest.fixture
 def subdiag_hadamard_idxs():
-    """ """
+    """Subdiagonal indices to test with the Hadamard pattern."""
     result = [
         [0, 1, 2, 3, 4, 5],
         [0, -1, -2, -3, -4, -5],
@@ -115,7 +115,7 @@ def subdiag_hadamard_idxs():
 
 @pytest.fixture
 def hadamard_atol():
-    """ """
+    """Absolute tolerances to test Hadamard pattern."""
     result = {torch.float64: 1e-13, torch.float32: 1e-5}
     return result
 

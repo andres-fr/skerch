@@ -125,7 +125,7 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
       sure to use a different seed to mitigate correlations.
 
     .. warning::
-      See :fun:`rademacher_noise` for notes on reproducibility and more info.
+      See :func:`rademacher_noise` for notes on reproducibility and more info.
     """
     mask = rademacher_noise(x.shape, seed, device=rng_device).to(x.device)
     if inplace:

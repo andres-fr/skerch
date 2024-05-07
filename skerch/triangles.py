@@ -10,9 +10,9 @@ functionality to compute left- and right matrix-multiplications of both
 
 This is done by first exactly computing a limited number of "main rectangles",
 a.k.a. "steps", that fully belong to the triangular submatrix, and then
-estimating the "serrated pattern" that they leave as residual.
-The addition of the steps plus the serrated pattern forms the full triangle.
-See :class:`TriangularLinOp` for more details.
+estimating the "serrated pattern" that they leave as residual via modified
+Hutchinson. The addition of the steps plus the serrated pattern forms the full
+triangle. See :class:`TriangularLinOp` for more details.
 
 Contents:
 
@@ -25,14 +25,10 @@ Contents:
 
 import torch
 
-from .distributed_decompositions import orthogonalize
-from .linops import CompositeLinOp, NegOrthProjLinOp
-from .ssrft import SSRFT
-
-from .utils import rademacher_noise, BadShapeError
 from .linops import BaseLinOp
-
+from .ssrft import SSRFT
 from .subdiagonals import subdiag_hadamard_pattern
+from .utils import BadShapeError
 
 
 # ##############################################################################
@@ -48,7 +44,7 @@ def serrated_hadamard_pattern(
           in the patterns, otherwise excluded.
     :param lower: If true, the block-triangles will be below the diagonal,
       otherwise above.
-    :param use_fft: See :fun:`subdiag_hadamard_pattern`.
+    :param use_fft: See :func:`subdiag_hadamard_pattern`.
     :returns: A vector of same shape, type and device as ``v``, composed of
       shifted copies of ``v`` following a block-triangular pattern.
 
@@ -157,7 +153,7 @@ class TriangularLinOp(BaseLinOp):
     ``lop[200, 100:200]``, and so on. The more measurements, the more closely
     the full triangle is approximated. Then, the linear operation including
     the remaining steps (leftovers from the staircase pattern) is then
-    estimated with the help of  :fun:`serrated_hadamard_pattern`, completing
+    estimated with the help of  :func:`serrated_hadamard_pattern`, completing
     the triangular approximation.
     """
 
@@ -165,7 +161,7 @@ class TriangularLinOp(BaseLinOp):
         self,
         lop,
         stair_width=None,
-        num_serrated_measurements=0,
+        num_hutch_measurements=0,
         lower=True,
         with_main_diagonal=True,
         seed=0b1110101001010101011,
@@ -184,7 +180,7 @@ class TriangularLinOp(BaseLinOp):
           regulates this trade-off: Ideally, we want as many exact measurements
           as possible, but not too many. If no value is provided, ``dims // 2``
           is chosen by default, such that only 1 exact measurement is performed.
-        :param num_serrated_measurements: The leftover entries from the
+        :param num_hutch_measurements: The leftover entries from the
           staircase measurements are approximated here using an extension of
           the Hutchinson diagonal estimator. This estimator generally requires
           many measurements to be informative, and it can even be counter-
@@ -199,9 +195,9 @@ class TriangularLinOp(BaseLinOp):
           the diagonal elsewhere, consider excluding it from this approximation,
           and adding it separately.
         :param seed: Seed for the random SSRFT measurements used in the
-          serrated estimator.
-        :param use_fft: Whether to use FFT for the serrated estimation. See
-          :fun:`subdiag_hadamard_pattern` for more details.
+          Hutchinson estimator.
+        :param use_fft: Whether to use FFT for the Hutchinson estimation. See
+          :func:`subdiag_hadamard_pattern` for more details.
         """
         h, w = lop.shape
         if h != w:
@@ -211,8 +207,8 @@ class TriangularLinOp(BaseLinOp):
         self.use_fft = use_fft
         self.lower = lower
         self.with_main = with_main_diagonal
-        self.n_serrat = num_serrated_measurements
-        self.ssrft = SSRFT((self.n_serrat, self.dims), seed=seed)
+        self.n_hutch = num_hutch_measurements
+        self.ssrft = SSRFT((self.n_hutch, self.dims), seed=seed)
         #
         self.stair_width = stair_width
         num_stair_meas = sum(
@@ -222,10 +218,10 @@ class TriangularLinOp(BaseLinOp):
             num_stair_meas <= self.dims
         ), "More staircase measurements than dimensions??"
         assert (
-            self.n_serrat <= self.dims
-        ), "More serrated measurements than dimensions??"
+            self.n_hutch <= self.dims
+        ), "More Hutchinson measurements than dimensions??"
         assert (
-            num_stair_meas + self.n_serrat
+            num_stair_meas + self.n_hutch
         ) <= self.dims, "More total measurements than dimensions??"
         #
         super().__init__(lop.shape)  # this sets self.shape also
@@ -246,7 +242,12 @@ class TriangularLinOp(BaseLinOp):
             end = beg + stair_width
 
     def _matmul_helper(self, x, adjoint=False):
-        """ """
+        """Forward and adjoint triangular matrix multiplications.
+
+        Since forward and adjoint matmul share many common computations, this
+        method implements both at the same time. The specific mode can be
+        dispatched using the ``adjoint`` parameter.
+        """
         self.check_input(x, adjoint=adjoint)
         # we don't factorize this method because we want to share buff
         # across both loops to hopefully save memory
@@ -270,8 +271,8 @@ class TriangularLinOp(BaseLinOp):
                 buff[beg:end] = x[beg:end]
                 result[end:] += (buff @ self.lop)[end:]
                 buff[beg:end] = 0
-        # add serrated Hutchinson estimator to result
-        for i in range(self.n_serrat):
+        # add Hutchinson estimator to result
+        for i in range(self.n_hutch):
             buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
             result[:] += serrated_hadamard_pattern(
                 buff, self.stair_width, lower=self.lower, use_fft=self.use_fft

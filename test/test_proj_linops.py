@@ -145,7 +145,7 @@ def test_proj_shapes(torch_devices, dtypes_atols, tall_heights_widths):
 
                 then actually create, and feed a vec and a mat. should work.
                 """
-                # create matrix. It doesn't need to be orthogonalized for this test
+                # create mat. It doesn't need to be orthogonalized for this test
                 mat = gaussian_noise(
                     (h, w),
                     mean=0.0,

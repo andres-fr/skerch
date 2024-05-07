@@ -5,16 +5,15 @@
 """Pytest for in-core sketched triangular estimation."""
 
 
+import matplotlib.pyplot as plt
 import pytest
 import torch
 
-from skerch.triangles import serrated_hadamard_pattern, TriangularLinOp
-from skerch.utils import gaussian_noise, BadShapeError
 from skerch.synthmat import SynthMat
+from skerch.triangles import TriangularLinOp, serrated_hadamard_pattern
+from skerch.utils import BadShapeError, gaussian_noise
+
 from . import rng_seeds, torch_devices  # noqa: F401
-
-
-import matplotlib.pyplot as plt
 
 
 # ##############################################################################
@@ -22,21 +21,21 @@ import matplotlib.pyplot as plt
 # ##############################################################################
 @pytest.fixture
 def serrated_hadamard_dims_chunks():
-    """ """
+    """Pairs of ``(matrix_order, step_size)`` to test serrated Hadamard."""
     result = [(100, 2), (100, 3), (100, 10), (100, 100)]
     return result
 
 
 @pytest.fixture
 def hadamard_atol():
-    """ """
+    """Absolute tolerances to test serrated Hadamard."""
     result = {torch.float64: 1e-13, torch.float32: 1e-5}
     return result
 
 
 @pytest.fixture
 def num_tri_tests(request):
-    """ """
+    """Number of random vectors to test for each triangular linop case."""
     result = 3
     if request.config.getoption("--quick"):
         result = 1
@@ -291,10 +290,7 @@ def test_triangular_linop_corner_cases(
     dim_rank_decay_sym_width_hutch_maindiag_rtol,
     num_tri_tests,
 ):
-    """Test case for corner cases with triangular linop.
-
-    * Empty and scalar matrices
-    """
+    """ """
     for seed in rng_seeds:
         for dtype in (torch.float64, torch.float32):
             for device in torch_devices:
@@ -303,7 +299,7 @@ def test_triangular_linop_corner_cases(
                     rank,
                     decay,
                     sym,
-                    step_width,
+                    stair_width,
                     hutch_meas,
                     maindiag,
                     rtol,
@@ -335,7 +331,7 @@ def test_triangular_linop_correctness(
                     rank,
                     decay,
                     sym,
-                    step_width,
+                    stair_width,
                     hutch_meas,
                     maindiag,
                     rtol,
@@ -359,7 +355,7 @@ def test_triangular_linop_correctness(
                         #
                         tri_approx = TriangularLinOp(
                             mat,
-                            step_width,
+                            stair_width,
                             hutch_meas,
                             lower=lower,
                             with_main_diagonal=maindiag,
@@ -394,7 +390,7 @@ def test_triangular_linop_correctness(
                                         rank,
                                         decay,
                                         sym,
-                                        step_width,
+                                        stair_width,
                                         hutch_meas,
                                         maindiag,
                                         rtol,

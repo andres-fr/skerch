@@ -151,7 +151,7 @@ class SynthMat:
           `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
           values are used: 0.5 for slow decay, 1 for medium, 2 for fast.
         :param bool symmetric: If true, ``V == U``.
-        :param psd: If false, and matrix is symmetric, the "tail" singular values
+        :param psd: If false, and matrix is symmetric, the "tail" singular
           values will be multiplied with Rademacher noise to create a non-PSD
           matrix.
         """
