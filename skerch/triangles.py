@@ -228,12 +228,12 @@ class TriangularLinOp(BaseLinOp):
         self.lower = lower
         self.with_main = with_main_diagonal
         self.n_hutch = num_hutch_measurements
-        self.ssrft = SSRFT((self.n_hutch, self.dims), seed=seed)
         #
         self.stair_width = stair_width
         num_stair_meas = sum(
             1 for _ in self._iter_stairs(self.dims, stair_width)
         )
+        self.quack = num_stair_meas
         assert (
             num_stair_meas <= self.dims
         ), "More staircase measurements than dimensions??"
@@ -244,6 +244,7 @@ class TriangularLinOp(BaseLinOp):
             num_stair_meas + self.n_hutch
         ) <= self.dims, "More total measurements than dimensions??"
         #
+        self.ssrft = SSRFT((self.n_hutch, self.dims), seed=seed)
         super().__init__(lop.shape)  # this sets self.shape also
 
     @staticmethod
