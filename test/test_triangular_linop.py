@@ -44,7 +44,25 @@ def num_tri_tests(request):
 
 @pytest.fixture
 def dim_rank_decay_sym_width_hutch_maindiag_rtol(request):
-    """ """
+    """Test cases for triangular estimation.
+
+    Entries are in the form
+    ``(dim, rank, decay, sym, width, hutch, maindiag, rtol)``, where:
+
+    * ``dim`` is the number of dimensions of a square test matrix of
+      exp-decaying singular values
+    * ``rank`` is the number of unit singular values in the test matrix
+    * ``decay`` is the speed of the exp-decay of singular values after ``rank``.
+      The larger, the faster decay.
+    * ``sym`` is a boolean specifying whether the matrix is symmetric
+    * ``width`` is the step width for the staircase exact measurements in the
+      triangular linop.
+    * ``hutch`` is the number of Hutchinson measurements for the "serrated"
+      (block-diagonal) estimator in the triangular linop.
+    * ``maindiag`` is a boolean specifying whether to include the main diagonal
+      in the triangle or not.
+    * ``rtol`` is the relative error tolerance for each given case.
+    """
     dims, rank = 1000, 100
     if request.config.getoption("--quick"):
         dims, rank = 500, 50
@@ -272,16 +290,136 @@ def test_serrated_hadamard_pattern(
 # # TRIANGULAR LINOP
 # ##############################################################################
 def test_triangular_linop_badshape():
-    """Test case for non-square inputs to triangular linop."""
+    """Test case for non-square or empty inputs to triangular linop."""
+    # non-square case
     mat = torch.ones(2, 3)
     with pytest.raises(BadShapeError):
         TriangularLinOp(
             mat,
             1,
-            10,
+            0,
             lower=True,
             with_main_diagonal=True,
         )
+    # empty case
+    mat = torch.ones(0, 0)
+    with pytest.raises(BadShapeError):
+        TriangularLinOp(
+            mat,
+            0,
+            0,
+            lower=True,
+            with_main_diagonal=True,
+        )
+
+
+def test_triangular_linop_small_shapes():
+    """Exact test cases for 2x2 and 3x3 matrices (both step and Hutch)."""
+    # create test linops and vectors
+    mat2 = torch.tensor([[1, 2], [3, 4]], dtype=torch.float64)
+    mat3 = torch.tensor([[1, 2, 3], [4, 5, 6], [7, 8, 9]], dtype=torch.float64)
+    v2 = torch.ones_like(mat2[0])
+    v3 = torch.ones_like(mat3[0])
+
+    # 2x2 lower with diagonal
+    tri = TriangularLinOp(mat2, 2, 2, lower=True, with_main_diagonal=True)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((1.0, 7))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((4.0, 4))
+    ), "Incorrect result!"
+    # 2x2 lower without diagonal (Hutch)
+    tri = TriangularLinOp(mat2, 2, 2, lower=True, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((0.0, 3))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((3.0, 0))
+    ), "Incorrect result!"
+    # 2x2 lower without diagonal (Step)
+    tri = TriangularLinOp(mat2, 1, 0, lower=True, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((0.0, 3))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((3.0, 0))
+    ), "Incorrect result!"
+
+    # 2x2 upper with diagonal
+    tri = TriangularLinOp(mat2, 2, 2, lower=False, with_main_diagonal=True)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((3.0, 4))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((1.0, 6))
+    ), "Incorrect result!"
+    # 2x2 upper without diagonal (Hutch)
+    tri = TriangularLinOp(mat2, 2, 2, lower=False, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((2.0, 0))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((0.0, 2))
+    ), "Incorrect result!"
+    # 2x2 upper without diagonal (Step)
+    tri = TriangularLinOp(mat2, 1, 0, lower=False, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v2, torch.DoubleTensor((2.0, 0))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v2 @ tri, torch.DoubleTensor((0.0, 2))
+    ), "Incorrect result!"
+
+    # 3x3 lower with diagonal
+    tri = TriangularLinOp(mat3, 3, 3, lower=True, with_main_diagonal=True)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((1.0, 9, 24))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((12.0, 13, 9))
+    ), "Incorrect result!"
+    # 3x3 lower without diagonal (Hutch)
+    tri = TriangularLinOp(mat3, 3, 3, lower=True, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((0.0, 4, 15))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((11.0, 8, 0))
+    ), "Incorrect result!"
+    # 3x3 lower without diagonal (Step)
+    tri = TriangularLinOp(mat3, 1, 0, lower=True, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((0.0, 4, 15))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((11.0, 8, 0))
+    ), "Incorrect result!"
+
+    # 3x3 upper with diagonal
+    tri = TriangularLinOp(mat3, 3, 3, lower=False, with_main_diagonal=True)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((6.0, 11, 9))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((1.0, 7, 18))
+    ), "Incorrect result!"
+    # 3x3 upper without diagonal (Hutch)
+    tri = TriangularLinOp(mat3, 3, 3, lower=False, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((5.0, 6, 0))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((0.0, 2, 9))
+    ), "Incorrect result!"
+    # 3x3 upper without diagonal (Step)
+    tri = TriangularLinOp(mat3, 1, 0, lower=False, with_main_diagonal=False)
+    assert torch.allclose(
+        tri @ v3, torch.DoubleTensor((5.0, 6, 0))
+    ), "Incorrect result!"
+    assert torch.allclose(
+        v3 @ tri, torch.DoubleTensor((0.0, 2, 9))
+    ), "Incorrect result!"
 
 
 def test_triangular_linop_corner_cases(
@@ -290,7 +428,22 @@ def test_triangular_linop_corner_cases(
     dim_rank_decay_sym_width_hutch_maindiag_rtol,
     num_tri_tests,
 ):
-    """ """
+    """Testing corner cases for triangular linop.
+
+    Cases:
+
+    * linop is scalar: both triangles with diagonal are the scalar, and zero
+      without.
+    * cases for 2x2 and 3x3 with fixed values
+
+    * Giving 0 measurements everywhere is OK, but yields 0
+      * 0 stair width raises assertion error
+    * Requesting too many measurements raises error
+
+    * Having D exact measurements yields exact
+    * But also having D hutch yields exact
+    * Requesting too many measurements throws error
+    """
     for seed in rng_seeds:
         for dtype in (torch.float64, torch.float32):
             for device in torch_devices:

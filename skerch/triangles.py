@@ -12,7 +12,8 @@ This is done by first exactly computing a limited number of "main rectangles",
 a.k.a. "steps", that fully belong to the triangular submatrix, and then
 estimating the "serrated pattern" that they leave as residual via modified
 Hutchinson. The addition of the steps plus the serrated pattern forms the full
-triangle. See :class:`TriangularLinOp` for more details.
+triangle. See :class:`TriangularLinOp` and the
+:ref:`Examples section<Examples>` for more details.
 
 Contents:
 
@@ -143,7 +144,7 @@ def serrated_hadamard_pattern(
 # # TRIANGULAR LINOP
 # ##############################################################################
 class TriangularLinOp(BaseLinOp):
-    """Given a full linear operator, compute products with one of its triangles.
+    """Given a square linop, compute products with one of its triangles.
 
     The triangle of a linear operator can be approximated from the full operator
     via a "staircase pattern" of exact measurements, whose computation is exact
@@ -151,10 +152,26 @@ class TriangularLinOp(BaseLinOp):
     stairs of size 100, yields 9 exact measurements strictly under the diagonal,
     the first one covering ``lop[100:, :100]``, the next one
     ``lop[200, 100:200]``, and so on. The more measurements, the more closely
-    the full triangle is approximated. Then, the linear operation including
-    the remaining steps (leftovers from the staircase pattern) is then
-    estimated with the help of  :func:`serrated_hadamard_pattern`, completing
-    the triangular approximation.
+    the full triangle is approximated.
+
+    Note that this staircase pattern leaves a block-triangular section of the
+    linop untouched (near the main diagonal). This part can be then estimated
+    with the help of  :func:`serrated_hadamard_pattern`, completing the
+    triangular approximation, as follows:
+
+
+    Given a square linear operator :math:`A`, and random vectors
+    :math:`v \\sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider the
+    generalized Hutchinson diagonal estimator:
+
+    .. math::
+
+      f(A) =
+      \mathbb{E}_{v \\sim \mathcal{R}} \\big[ \\varphi(v) \\odot Av \\big]
+
+    In this case, if the :math:`\\varphi` function follows a "serrated
+    Hadamard pattern", :math:`f(A)` will equal a block-triangular subset of
+    :math:`A`.
     """
 
     def __init__(
@@ -203,6 +220,9 @@ class TriangularLinOp(BaseLinOp):
         if h != w:
             raise BadShapeError("Only square linear operators supported!")
         self.dims = h
+        if self.dims < 1:
+            raise BadShapeError("Empty linear operators not supported!")
+        assert stair_width > 0, "Stair width must be a positive int!"
         self.lop = lop
         self.use_fft = use_fft
         self.lower = lower
@@ -271,11 +291,17 @@ class TriangularLinOp(BaseLinOp):
                 buff[beg:end] = x[beg:end]
                 result[end:] += (buff @ self.lop)[end:]
                 buff[beg:end] = 0
+            else:
+                raise RuntimeError("This should never happen")
         # add Hutchinson estimator to result
         for i in range(self.n_hutch):
             buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
             result[:] += serrated_hadamard_pattern(
-                buff, self.stair_width, lower=self.lower, use_fft=self.use_fft
+                buff,
+                self.stair_width,
+                self.with_main,
+                lower=(self.lower ^ adjoint),  # pattern also depends on adj
+                use_fft=self.use_fft,
             ) * (
                 ((buff * x) @ self.lop) if adjoint else (self.lop @ (buff * x))
             )
@@ -303,6 +329,7 @@ class TriangularLinOp(BaseLinOp):
         """
         clsname = self.__class__.__name__
         lopstr = self.lop.__repr__()
-        typestr = "lower" if self.lower else "upper"
-        result = f"<{clsname}[{lopstr}]({typestr})>"
+        lower_str = "lower" if self.lower else "upper"
+        diag_str = "with" if self.with_main else "no"
+        result = f"<{clsname}[{lopstr}]({lower_str}, {diag_str} main diag)>"
         return result

@@ -3,12 +3,11 @@
 r"""Sketched Triangular Operators
 =================================
 
-In this tutorial we create a noisy, numerically low-rank matrix, and perform
-sketched estimations of matrix-vector multiplications with its triangles.
-Specifically, we test both its upper and lower triangles, as well as right-
-and left-matrix multiplications.
+In this tutorial we create a noisy matrix and perform sketched estimations of
+matrix-vector multiplications with its lower and upper triangles.
 """
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
 
@@ -23,9 +22,8 @@ from skerch.utils import gaussian_noise
 # Globals and creation of test matrix
 # -----------------------------------
 #
-# We will create a random matrix of shape ``(ORDER, ORDER)``, with an effective
-# ``RANK`` of unit singular values followed by exponential decay with rate
-# ``EXP_DECAY``. Also a test vector with Gaussian i.i.d. noise.
+# We will create a random matrix of shape ``(ORDER, ORDER)``, and a test vector
+# with Gaussian i.i.d. noise (the other global parameters can be ignored).
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float64
@@ -101,42 +99,55 @@ v_up_est = v @ triu_est
 
 
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.imshow(triu.cpu()[:50, :50], cmap="bwr", aspect="auto")
+ax1.imshow(
+    triu.cpu()[:50, :50],
+    cmap="bwr",
+    aspect="auto",
+    norm=mpl.colors.CenteredNorm(),
+)
 ax2.plot(up_v.cpu()[:50], color="black", label="original")
 ax2.plot(up_v_est.cpu()[:50], color="pink", label="approximation")
 ax2.legend()
-fig.suptitle("Upper Triangular ($triu(A)~v$), Detail")
+fig.suptitle("Upper Triangular and $triu(A)~v$ (detail)")
 fig.tight_layout()
 #
 
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.imshow(tril.cpu()[:, :], cmap="bwr", aspect="auto")
+ax1.imshow(
+    tril.cpu()[:, :], cmap="bwr", aspect="auto", norm=mpl.colors.CenteredNorm()
+)
 ax2.plot(lo_v.cpu()[:], color="black", label="original")
 ax2.plot(lo_v_est.cpu()[:], color="pink", label="approximation")
 ax2.legend()
-fig.suptitle("Lower Triangular ($tril(A)~v$)")
+fig.suptitle("Lower Triangular and $tril(A)~v$")
 fig.tight_layout()
 #
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.imshow(tril.cpu()[:, :], cmap="bwr", aspect="auto")
+ax1.imshow(
+    tril.cpu()[:, :], cmap="bwr", aspect="auto", norm=mpl.colors.CenteredNorm()
+)
 ax2.plot(v_lo.cpu()[:], color="black", label="original")
 ax2.plot(v_lo_est.cpu()[:], color="pink", label="approximation")
 ax2.legend()
-fig.suptitle("Lower Triangular Adjoint ($v~tril(A)$)")
+fig.suptitle("Lower Triangular and $v~tril(A)$")
 fig.tight_layout()
 #
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.imshow(triu.cpu()[:, :], cmap="bwr", aspect="auto")
+ax1.imshow(
+    triu.cpu()[:, :], cmap="bwr", aspect="auto", norm=mpl.colors.CenteredNorm()
+)
 ax2.plot(up_v.cpu()[:], color="black", label="original")
 ax2.plot(up_v_est.cpu()[:], color="pink", label="approximation")
 ax2.legend()
-fig.suptitle("Upper Triangular ($triu(A)~v$)")
+fig.suptitle("Upper Triangular and $triu(A)~v$")
 fig.tight_layout()
 #
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.imshow(triu.cpu()[:, :], cmap="bwr", aspect="auto")
+ax1.imshow(
+    triu.cpu()[:, :], cmap="bwr", aspect="auto", norm=mpl.colors.CenteredNorm()
+)
 ax2.plot(v_up.cpu()[:], color="black", label="original")
 ax2.plot(v_up_est.cpu()[:], color="pink", label="approximation")
 ax2.legend()
-fig.suptitle("Upper Triangular Adjoint ($v~triu(A)$)")
+fig.suptitle("Upper Triangular and $v~triu(A)$")
 fig.tight_layout()

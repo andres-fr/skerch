@@ -6,7 +6,7 @@
 
 Including:
 
-* Hadamard pattern to compute subdiagonals as``mean(hadamard(v) * lop @ v)``,
+* Hadamard pattern to compute subdiagonals as ``mean(hadamard(v) * lop @ v)``,
   for ``v_i = SSRFT[i, :]``.
 * In-core routine to compute arbitrary subdiagonals of linops.
 """
@@ -24,6 +24,25 @@ from .ssrft import SSRFT
 # ##############################################################################
 def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
     """Shifted copies of vectors for subdiagonal Hutchinson estimation.
+
+    Given a square linear operator :math:`A`, and random vectors
+    :math:`v \\sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
+    this generalized formulation of the Hutchinson diagonal estimator:
+
+    .. math::
+
+      f(A) =
+      \mathbb{E}_{v \\sim \mathcal{R}} \\big[ \\varphi(v) \\odot Av \\big]
+
+    If the :math:`\\varphi` function is the identity, then :math:`f(A)` equals
+    the main diagonal of :math:`A`. If e.g. :math:`\\varphi` shifts the entries
+    in :math:`v` downwards by ``k`` positions, we get the ``k``-th subdiagonal.
+
+    .. seealso::
+
+      `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+      Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds
+      and an improved algorithm”*.  CoRR abs/2201.10684.
 
     :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
     :param diag_idxs: Iterator with integers corresponding to the subdiagonal
@@ -79,6 +98,14 @@ def subdiagpp(
     diag_idx=0,
 ):
     """Matrix-free (sub-) diagonal sketched estimator via Diag++.
+
+    .. seealso::
+
+      Reference for this algorithm:
+
+      `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+      Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds
+      and an improved algorithm”*.  CoRR abs/2201.10684.
 
     Given a linear operator ``lop``, implements an unbiased diagonal estimator,
     composed of orthogonal deflation followed by Hutchinson estimation.

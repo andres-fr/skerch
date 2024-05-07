@@ -11,6 +11,9 @@ throughout the documentation:
   Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. *“Streaming Low-rank
   Matrix Approximation with an Application to Scientific Simulation”*. SIAM
   Journal on Scientific Computing 41 (4): A2430–63.
+* `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+  Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds and
+  an improved algorithm”*.  CoRR abs/2201.10684.
 """
 
 
