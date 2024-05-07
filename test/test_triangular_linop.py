@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from skerch.triangles import serrated_hadamard_pattern, TriangularLinOp
-from skerch.utils import gaussian_noise
+from skerch.utils import gaussian_noise, BadShapeError
 from skerch.synthmat import SynthMat
 from . import rng_seeds, torch_devices  # noqa: F401
 
@@ -44,15 +44,16 @@ def num_tri_tests(request):
 
 
 @pytest.fixture
-def dim_rank_decay_sym_step_serr_maindiag_rtol(request):
+def dim_rank_decay_sym_width_hutch_maindiag_rtol(request):
     """ """
     dims, rank = 1000, 100
     if request.config.getoption("--quick"):
         dims, rank = 500, 50
     result = [
         # COMMENT CASE
-        # (dims, rank, 0.5, True, 20, 0, True, 0.01),
-        (dims, rank, 0.5, True, 100, 400, True, 0.01),
+        # fast-decay:(dims, rank, 0.5, True, 20, 0, True, 0.01),
+        (dims, rank, 0.5, False, 5, 400, True, 0.1),
+        # (dims, rank, 0.5, False, 5, 400, True, 0.1),
     ]
     return result
 
@@ -271,10 +272,58 @@ def test_serrated_hadamard_pattern(
 # ##############################################################################
 # # TRIANGULAR LINOP
 # ##############################################################################
-def test_triangular_linop(
+def test_triangular_linop_badshape():
+    """Test case for non-square inputs to triangular linop."""
+    mat = torch.ones(2, 3)
+    with pytest.raises(BadShapeError):
+        TriangularLinOp(
+            mat,
+            1,
+            10,
+            lower=True,
+            with_main_diagonal=True,
+        )
+
+
+def test_triangular_linop_corner_cases(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
-    dim_rank_decay_sym_step_serr_maindiag_rtol,
+    dim_rank_decay_sym_width_hutch_maindiag_rtol,
+    num_tri_tests,
+):
+    """Test case for corner cases with triangular linop.
+
+    * Empty and scalar matrices
+    """
+    for seed in rng_seeds:
+        for dtype in (torch.float64, torch.float32):
+            for device in torch_devices:
+                for (
+                    dim,
+                    rank,
+                    decay,
+                    sym,
+                    step_width,
+                    hutch_meas,
+                    maindiag,
+                    rtol,
+                ) in dim_rank_decay_sym_width_hutch_maindiag_rtol:
+                    mat = SynthMat.exp_decay(
+                        shape=(dim, dim),
+                        rank=rank,
+                        decay=decay,
+                        symmetric=sym,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                        psd=False,
+                    )
+
+
+def test_triangular_linop_correctness(
+    rng_seeds,  # noqa: F811
+    torch_devices,  # noqa: F811
+    dim_rank_decay_sym_width_hutch_maindiag_rtol,
     num_tri_tests,
 ):
     """ """
@@ -286,11 +335,11 @@ def test_triangular_linop(
                     rank,
                     decay,
                     sym,
-                    step_meas,
-                    serrat_meas,
+                    step_width,
+                    hutch_meas,
                     maindiag,
                     rtol,
-                ) in dim_rank_decay_sym_step_serr_maindiag_rtol:
+                ) in dim_rank_decay_sym_width_hutch_maindiag_rtol:
                     mat = SynthMat.exp_decay(
                         shape=(dim, dim),
                         rank=rank,
@@ -310,8 +359,8 @@ def test_triangular_linop(
                         #
                         tri_approx = TriangularLinOp(
                             mat,
-                            step_meas,
-                            serrat_meas,
+                            step_width,
+                            hutch_meas,
                             lower=lower,
                             with_main_diagonal=maindiag,
                         )
@@ -329,36 +378,42 @@ def test_triangular_linop(
                                 else:
                                     tri_v = tri @ v
                                     tri_approx_v = tri_approx @ v
+                                #
                                 dist = torch.dist(tri_v, tri_approx_v)
+                                rel_err = (dist / torch.norm(tri_v)).item()
+                                #
+                                try:
+                                    assert (
+                                        rel_err <= rtol
+                                    ), "Incorrect triangular recovery!"
+                                except Exception as e:
+                                    print(e)
+                                    print(
+                                        "\n\n!!!!",
+                                        dim,
+                                        rank,
+                                        decay,
+                                        sym,
+                                        step_width,
+                                        hutch_meas,
+                                        maindiag,
+                                        rtol,
+                                    )
+                                    print(f"lower={lower}")
+                                    print(f"adjoint={adjoint}")
+                                    print("relerr:", rel_err, "tol:", rtol)
+                                    breakpoint()
+                                    # plt.clf(); plt.plot(tri_v, color="black"); plt.plot(tri_approx_v); plt.show()
+                                    # plt.clf(); plt.plot(tri_approx_v - tri_v); plt.show()
 
-                            print(
-                                "\n\n!!!!",
-                                dim,
-                                rank,
-                                decay,
-                                sym,
-                                step_meas,
-                                serrat_meas,
-                                maindiag,
-                                rtol,
-                            )
-                        print(f"lower={lower}")
-                        print(f"adjoint={adjoint}")
+                        # print("\n\n\n", tri_approx._get_chunk_dims(10, 3))
+                        # breakpoint()
 
-                        print("dist:", dist)
-
-                        print("\n\n\n", tri_approx._get_chunk_dims(10, 3))
-                        breakpoint()
-                        """
-                        TODO:
-
-                        CHECK THAT NONSQUARE THROWS BADSHAPEERROR
-
-                        ALSO: WE ARE DOING ONE MEASUREMENT TOO MANY IN STAIR!!!
-                        """
+                        # tri_approx._get_stair_width(10, 3)
+                        # p list(tri_approx._iter_stairs(7, 3))
                         # breakpoint()
                         #
-                        # plt.clf(); plt.plot(tri_v, color="black"); plt.plot(tri_approx_v); plt.show()
+
                         # plt.clf(); plt.imshow(tri); plt.show()
                         #
                         #

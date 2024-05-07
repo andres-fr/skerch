@@ -29,7 +29,7 @@ from .distributed_decompositions import orthogonalize
 from .linops import CompositeLinOp, NegOrthProjLinOp
 from .ssrft import SSRFT
 
-from .utils import rademacher_noise
+from .utils import rademacher_noise, BadShapeError
 from .linops import BaseLinOp
 
 from .subdiagonals import subdiag_hadamard_pattern
@@ -151,11 +151,12 @@ class TriangularLinOp(BaseLinOp):
 
     The triangle of a linear operator can be approximated from the full operator
     via a "staircase pattern" of exact measurements, whose computation is exact
-    and fast. For example, 10 measurements in a ``(1000, 1000)`` operators
-    yields one step covering ``lop[100:, :100]``, the next step covering
+    and fast. For example, given an operator of shape ``(1000, 1000)``, and
+    stairs of size 100, yields 9 exact measurements strictly under the diagonal,
+    the first one covering ``lop[100:, :100]``, the next one
     ``lop[200, 100:200]``, and so on. The more measurements, the more closely
     the full triangle is approximated. Then, the linear operation including
-    the remaining steps (leftovers from the staircase pattern) are then
+    the remaining steps (leftovers from the staircase pattern) is then
     estimated with the help of  :fun:`serrated_hadamard_pattern`, completing
     the triangular approximation.
     """
@@ -163,24 +164,26 @@ class TriangularLinOp(BaseLinOp):
     def __init__(
         self,
         lop,
-        num_staircase_measurements=10,
+        stair_width=None,
         num_serrated_measurements=0,
         lower=True,
         with_main_diagonal=True,
         seed=0b1110101001010101011,
         use_fft=True,
     ):
-        """
+        """Init method.
+
         :param lop: A square linear operator of order ``dims``, such that
           ``self @ v`` will equal ``triangle(lop) @ v``. It must implement a
-          ``lop.shape = (h, w)`` attribute as well as the left- and right-
+          ``lop.shape = (dims, dims)`` attribute as well as the left- and right-
           matmul operator ``@``, interacting with torch tensors.
-        :param num_staircase_measurements: The exact part of the triangular
-          approximation, comprising measurements following a "staircase"
-          pattern. Runtime grows linearly with this parameter. Memory is
-          unaffected. Approximation error shrinks with ``1 / measurements``.
-          It can be 0, but since this part is exact and efficient, it probably
-          should be a substantial part of the total measurements.
+        :param stair_width: Width of each step in the staircase pattern. If
+          it is 1, a total of ``dims`` exact measurements will be performed.
+          If it equals ``dims``, no exact measurements will be performed (since
+          the staircase pattern would cover the full triangle). The step size
+          regulates this trade-off: Ideally, we want as many exact measurements
+          as possible, but not too many. If no value is provided, ``dims // 2``
+          is chosen by default, such that only 1 exact measurement is performed.
         :param num_serrated_measurements: The leftover entries from the
           staircase measurements are approximated here using an extension of
           the Hutchinson diagonal estimator. This estimator generally requires
@@ -201,58 +204,46 @@ class TriangularLinOp(BaseLinOp):
           :fun:`subdiag_hadamard_pattern` for more details.
         """
         h, w = lop.shape
-        assert h == w, "Only square linear operators supported!"
+        if h != w:
+            raise BadShapeError("Only square linear operators supported!")
         self.dims = h
         self.lop = lop
-        self.n_serrat = num_serrated_measurements
         self.use_fft = use_fft
+        self.lower = lower
+        self.with_main = with_main_diagonal
+        self.n_serrat = num_serrated_measurements
+        self.ssrft = SSRFT((self.n_serrat, self.dims), seed=seed)
+        #
+        self.stair_width = stair_width
+        num_stair_meas = sum(
+            1 for _ in self._iter_stairs(self.dims, stair_width)
+        )
         assert (
-            num_staircase_measurements <= self.dims
+            num_stair_meas <= self.dims
         ), "More staircase measurements than dimensions??"
         assert (
             self.n_serrat <= self.dims
         ), "More serrated measurements than dimensions??"
         assert (
-            num_staircase_measurements + self.n_serrat
+            num_stair_meas + self.n_serrat
         ) <= self.dims, "More total measurements than dimensions??"
-
-        self.lower = lower
-        self.with_main = with_main_diagonal
-        self.stair_steps, self.stair_width = self._get_chunk_dims(
-            self.dims, num_staircase_measurements
-        )
-        self.ssrft = SSRFT((self.n_serrat, self.dims), seed=seed)
+        #
         super().__init__(lop.shape)  # this sets self.shape also
 
     @staticmethod
-    def _get_chunk_dims(dims, num_stair_meas):
-        """Helper method to partition triangular matrix-free computations.
+    def _iter_stairs(dims, stair_width):
+        """Helper method to iterate over staircase indices.
 
-        :param dims: Height (or width) of the (square) linear operator.
-        :param num_stair_meas: Number of exact stair-wise measurements to be
-          done.
-        :returns: The pair ``(stair_steps, stair_width)``. The former is a
-          list of indices in ascending order signaling the beginning of each
-          stair-wise step. The latter is the width of each stair.
-
-
-        For example, a matrix with ``dims=10`` and 3 stair measurements, will
-        yield 3 measurements of width 3, plus one measurement of width 1.
-        Hence the returned value is::
-
-          ([0, 3, 6, 9], 3)
+        This method implements an iterator that yields ``(begin, end)`` index
+        pairs for each staircase-pattern step. It terminates before ``end``
+        is equal or greater than ``self.dims``, since only full steps are
+        considered.
         """
-
-        TODO:
-
-        CHECK THAT NONSQUARE THROWS BADSHAPEERROR
-
-        ALSO: WE ARE DOING ONE MEASUREMENT TOO MANY IN STAIR!!!
-
-        # div, mod = divmod(dims, num_stair_meas + 1)
-        stair_width = dims // (num_stair_meas + 1)
-        stair_steps = torch.arange(0, dims, stair_width)
-        return stair_steps, stair_width
+        beg, end = 0, stair_width
+        while end < dims:
+            yield (beg, end)
+            beg = end
+            end = beg + stair_width
 
     def _matmul_helper(self, x, adjoint=False):
         """ """
@@ -262,7 +253,7 @@ class TriangularLinOp(BaseLinOp):
         buff = torch.zeros_like(x)
         result = torch.zeros_like(x)
         # add step computations to result
-        for beg, end in zip(self.stair_steps[:-1], self.stair_steps[1:]):
+        for beg, end in self._iter_stairs(self.dims, self.stair_width):
             if (not adjoint) and self.lower:
                 buff[beg:end] = x[beg:end]
                 result[end:] += (self.lop @ buff)[end:]
