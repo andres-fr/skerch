@@ -1,3 +1,9 @@
+## 0.7.0 (2024-05-08)
+
+### Feat
+
+- Implemented (sub-)diagonal and (block-)triangular sketched estimators (#1)
+
 ## 0.6.1 (2024-03-25)
 
 ### Fix
