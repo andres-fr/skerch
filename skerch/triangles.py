@@ -222,6 +222,8 @@ class TriangularLinOp(BaseLinOp):
         self.dims = h
         if self.dims < 1:
             raise BadShapeError("Empty linear operators not supported!")
+        if stair_width is None:
+            stair_width = max(1, self.dims // 2)
         assert stair_width > 0, "Stair width must be a positive int!"
         self.lop = lop
         self.use_fft = use_fft

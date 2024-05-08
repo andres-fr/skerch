@@ -67,228 +67,99 @@ def dim_rank_decay_sym_width_hutch_maindiag_rtol(request):
     if request.config.getoption("--quick"):
         dims, rank = 500, 50
     result = [
-        # COMMENT CASE
-        # fast-decay:(dims, rank, 0.5, True, 20, 0, True, 0.01),
-        (dims, rank, 0.5, False, 5, 400, True, 0.1),
-        # (dims, rank, 0.5, False, 5, 400, True, 0.1),
+        # [fast decay, asym]: just step measurements do decently
+        (dims, rank, 0.5, False, 5, 0, True, 0.15),
+        # ... but adding Hutch helps
+        (dims, rank, 0.5, False, 5, 300, True, 0.1),
+        # [fast decay, sym]: stronger diag, just steps is much worse now
+        (dims, rank, 0.5, True, 5, 0, True, 0.5),
+        # Hutch helps a lot, but it is recommended to deflate diagonal.
+        (dims, rank, 0.5, True, 5, 300, True, 0.25),
+        # Not including the diagonal shows that this was indeed the culprit
+        (dims, rank, 0.5, True, 5, 100, False, 0.1),
+        # [slow decay]: behave same as slow decay
+        (dims, rank, 0.01, False, 5, 0, True, 0.15),
+        (dims, rank, 0.01, True, 5, 100, False, 0.1),
     ]
     return result
 
 
 # ##############################################################################
-# # HADAMARD
+# # TRIANGULAR LINOP
 # ##############################################################################
-def test_serrated_hadamard_pattern(
+def test_triangular_linop_correctness(
     rng_seeds,  # noqa: F811
-    hadamard_atol,
     torch_devices,  # noqa: F811
-    serrated_hadamard_dims_chunks,
+    dim_rank_decay_sym_width_hutch_maindiag_rtol,
+    num_tri_tests,
 ):
-    """Test case for serrated Hadamard pattern generator.
+    """Test case for approximated triangulars on larger matrices.
 
-    This particular Hadamard pattern is useful to estimate block-triangulars
-    using Hutchinson.
-
-    This test case checks that serrated patterns of vectors of ones match
-    expected values for:
-    * Lower and upper-triangular patterns
-    * FFT and plain implementations
-    * With and without diagonal
-    * Different block sizes
-
-    Then, it checks that FFT and plain implementations yield same results for
-    random vectors.
+    See :func:`dim_rank_decay_sym_width_hutch_maindiag_rtol` docstring and
+    implementation for details on the use cases.
     """
     for seed in rng_seeds:
-        for dtype, atol in hadamard_atol.items():
+        for dtype in (torch.float32,):  # speed up test by just running low res
             for device in torch_devices:
-                # Simple tests with vector of ones:
-                v = torch.ones(10, dtype=dtype, device=device)
-                # chunk size must be 1 or greater
-                with pytest.raises(ValueError):
-                    serrated_hadamard_pattern(v, 0)
-                #
-                had = serrated_hadamard_pattern(v, 1, use_fft=False)
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(v, 2, use_fft=False)
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(v, 4, use_fft=False)
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 2, 3, 4, 1, 2, 3, 4, 1, 2],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 1, with_main_diagonal=False, use_fft=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 2, with_main_diagonal=False, use_fft=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 4, with_main_diagonal=False, use_fft=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [0, 1, 2, 3, 0, 1, 2, 3, 0, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 1, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 2, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-
-                had = serrated_hadamard_pattern(
-                    v, 4, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [2, 1, 4, 3, 2, 1, 4, 3, 2, 1],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 1, with_main_diagonal=False, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 2, with_main_diagonal=False, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                #
-                had = serrated_hadamard_pattern(
-                    v, 4, with_main_diagonal=False, use_fft=False, lower=False
-                )
-                assert torch.allclose(
-                    had,
-                    torch.tensor(
-                        [1, 0, 3, 2, 1, 0, 3, 2, 1, 0],
-                        dtype=dtype,
-                        device=device,
-                    ),
-                    atol=atol,
-                ), "Incorrect serrated result!"
-                # random test with more complex responses
-                for dims, chunk in serrated_hadamard_dims_chunks:
-                    v = gaussian_noise(
-                        dims,
+                for (
+                    dim,
+                    rank,
+                    decay,
+                    sym,
+                    stair_width,
+                    hutch_meas,
+                    maindiag,
+                    rtol,
+                ) in dim_rank_decay_sym_width_hutch_maindiag_rtol:
+                    # create a linop for this seed/dtype/device and test case
+                    # below, we will loop over lower/upper, left/right matmul
+                    mat = SynthMat.exp_decay(
+                        shape=(dim, dim),
+                        rank=rank,
+                        decay=decay,
+                        symmetric=sym,
                         seed=seed,
                         dtype=dtype,
                         device=device,
+                        psd=False,
                     )
-                    for diag in (True, False):
-                        for lower in (True, False):
-                            had = serrated_hadamard_pattern(
-                                v,
-                                chunk,
-                                with_main_diagonal=diag,
-                                use_fft=False,
-                                lower=lower,
+                    for lower in (True, False):
+                        # create exact triangular and its approximation
+                        diag_idx = int(not maindiag)  # if with main, idx=0
+                        if lower:
+                            tri = torch.tril(mat, diagonal=-diag_idx)
+                        else:
+                            tri = torch.triu(mat, diagonal=diag_idx)
+                        tri_approx = TriangularLinOp(
+                            mat,
+                            stair_width,
+                            hutch_meas,
+                            lower=lower,
+                            with_main_diagonal=maindiag,
+                        )
+                        # do the matmul, and check that error is within rtol
+                        for i in range(num_tri_tests):
+                            v = gaussian_noise(
+                                dim,
+                                seed=seed + i + 1,
+                                dtype=dtype,
+                                device=device,
                             )
-                            had_fft = serrated_hadamard_pattern(
-                                v,
-                                chunk,
-                                with_main_diagonal=diag,
-                                use_fft=True,
-                                lower=lower,
-                            )
-                            assert torch.allclose(
-                                had, had_fft, atol=atol
-                            ), "Inconsistent FFT implementation of serrated!"
+                            for adjoint in (True, False):
+                                if adjoint:
+                                    tri_v = v @ tri
+                                    tri_approx_v = v @ tri_approx
+                                else:
+                                    tri_v = tri @ v
+                                    tri_approx_v = tri_approx @ v
+                                #
+                                dist = torch.dist(tri_v, tri_approx_v)
+                                rel_err = (dist / torch.norm(tri_v)).item()
+                                assert (
+                                    rel_err <= rtol
+                                ), "Incorrect triangular recovery!"
 
 
-# ##############################################################################
-# # TRIANGULAR LINOP
-# ##############################################################################
 def test_triangular_linop_badshape():
     """Test case for non-square or empty inputs to triangular linop."""
     # non-square case
@@ -533,102 +404,212 @@ def test_triangular_linop_corner_cases(
             assert torch.allclose(v @ tri, z), "Result should be zeros!"
 
 
-def test_triangular_linop_correctness(
+# ##############################################################################
+# # SERRATED HADAMARD
+# ##############################################################################
+def test_serrated_hadamard_pattern(
     rng_seeds,  # noqa: F811
+    hadamard_atol,
     torch_devices,  # noqa: F811
-    dim_rank_decay_sym_width_hutch_maindiag_rtol,
-    num_tri_tests,
+    serrated_hadamard_dims_chunks,
 ):
-    """ """
+    """Test case for serrated Hadamard pattern generator.
+
+    This particular Hadamard pattern is useful to estimate block-triangulars
+    using Hutchinson.
+
+    This test case checks that serrated patterns of vectors of ones match
+    expected values for:
+    * Lower and upper-triangular patterns
+    * FFT and plain implementations
+    * With and without diagonal
+    * Different block sizes
+
+    Then, it checks that FFT and plain implementations yield same results for
+    random vectors.
+    """
     for seed in rng_seeds:
-        for dtype in (torch.float64, torch.float32):
+        for dtype, atol in hadamard_atol.items():
             for device in torch_devices:
-                for (
-                    dim,
-                    rank,
-                    decay,
-                    sym,
-                    stair_width,
-                    hutch_meas,
-                    maindiag,
-                    rtol,
-                ) in dim_rank_decay_sym_width_hutch_maindiag_rtol:
-                    mat = SynthMat.exp_decay(
-                        shape=(dim, dim),
-                        rank=rank,
-                        decay=decay,
-                        symmetric=sym,
+                # Simple tests with vector of ones:
+                v = torch.ones(10, dtype=dtype, device=device)
+                # chunk size must be 1 or greater
+                with pytest.raises(ValueError):
+                    serrated_hadamard_pattern(v, 0)
+                #
+                had = serrated_hadamard_pattern(v, 1, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(v, 2, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 2, 1, 2, 1, 2, 1, 2, 1, 2],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(v, 4, use_fft=False)
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 2, 3, 4, 1, 2, 3, 4, 1, 2],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 4, with_main_diagonal=False, use_fft=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 1, 2, 3, 0, 1, 2, 3, 0, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [2, 1, 2, 1, 2, 1, 2, 1, 2, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+
+                had = serrated_hadamard_pattern(
+                    v, 4, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [2, 1, 4, 3, 2, 1, 4, 3, 2, 1],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 1, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 2, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 0, 1, 0, 1, 0, 1, 0, 1, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                #
+                had = serrated_hadamard_pattern(
+                    v, 4, with_main_diagonal=False, use_fft=False, lower=False
+                )
+                assert torch.allclose(
+                    had,
+                    torch.tensor(
+                        [1, 0, 3, 2, 1, 0, 3, 2, 1, 0],
+                        dtype=dtype,
+                        device=device,
+                    ),
+                    atol=atol,
+                ), "Incorrect serrated result!"
+                # random test with more complex responses
+                for dims, chunk in serrated_hadamard_dims_chunks:
+                    v = gaussian_noise(
+                        dims,
                         seed=seed,
                         dtype=dtype,
                         device=device,
-                        psd=False,
                     )
-                    for lower in (True, False):
-                        diag_idx = int(not maindiag)  # if with main, idx=0
-                        if lower:
-                            tri = torch.tril(mat, diagonal=-diag_idx)
-                        else:
-                            tri = torch.triu(mat, diagonal=diag_idx)
-                        #
-                        tri_approx = TriangularLinOp(
-                            mat,
-                            stair_width,
-                            hutch_meas,
-                            lower=lower,
-                            with_main_diagonal=maindiag,
-                        )
-                        for i in range(num_tri_tests):
-                            v = gaussian_noise(
-                                dim,
-                                seed=seed + i + 1,
-                                dtype=dtype,
-                                device=device,
+                    for diag in (True, False):
+                        for lower in (True, False):
+                            had = serrated_hadamard_pattern(
+                                v,
+                                chunk,
+                                with_main_diagonal=diag,
+                                use_fft=False,
+                                lower=lower,
                             )
-                            for adjoint in (True, False):
-                                if adjoint:
-                                    tri_v = v @ tri
-                                    tri_approx_v = v @ tri_approx
-                                else:
-                                    tri_v = tri @ v
-                                    tri_approx_v = tri_approx @ v
-                                #
-                                dist = torch.dist(tri_v, tri_approx_v)
-                                rel_err = (dist / torch.norm(tri_v)).item()
-                                #
-                                try:
-                                    assert (
-                                        rel_err <= rtol
-                                    ), "Incorrect triangular recovery!"
-                                except Exception as e:
-                                    print(e)
-                                    print(
-                                        "\n\n!!!!",
-                                        dim,
-                                        rank,
-                                        decay,
-                                        sym,
-                                        stair_width,
-                                        hutch_meas,
-                                        maindiag,
-                                        rtol,
-                                    )
-                                    print(f"lower={lower}")
-                                    print(f"adjoint={adjoint}")
-                                    print("relerr:", rel_err, "tol:", rtol)
-                                    breakpoint()
-                                    # plt.clf(); plt.plot(tri_v, color="black"); plt.plot(tri_approx_v); plt.show()
-                                    # plt.clf(); plt.plot(tri_approx_v - tri_v); plt.show()
-
-                        # print("\n\n\n", tri_approx._get_chunk_dims(10, 3))
-                        # breakpoint()
-
-                        # tri_approx._get_stair_width(10, 3)
-                        # p list(tri_approx._iter_stairs(7, 3))
-                        # breakpoint()
-                        #
-
-                        # plt.clf(); plt.imshow(tri); plt.show()
-                        #
-                        #
-                        # rel_err = (dist / torch.norm(diag)).item()
-                        # assert rel_err <= rtol, "Incorrect subdiag recovery!"
+                            had_fft = serrated_hadamard_pattern(
+                                v,
+                                chunk,
+                                with_main_diagonal=diag,
+                                use_fft=True,
+                                lower=lower,
+                            )
+                            assert torch.allclose(
+                                had, had_fft, atol=atol
+                            ), "Inconsistent FFT implementation of serrated!"
