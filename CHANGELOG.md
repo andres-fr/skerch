@@ -1,3 +1,10 @@
+## 0.7.0 (2024-05-08)
+
+### Feat
+
+- implemented projection linops, utest passing with warning
+- preliminary implementation of diag estimator using rademacher and ssrft
+
 ## 0.6.1 (2024-03-25)
 
 ### Fix
