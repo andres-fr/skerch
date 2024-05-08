@@ -144,7 +144,7 @@ def serrated_hadamard_pattern(
 # # TRIANGULAR LINOP
 # ##############################################################################
 class TriangularLinOp(BaseLinOp):
-    """Given a square linop, compute products with one of its triangles.
+    r"""Given a square linop, compute products with one of its triangles.
 
     The triangle of a linear operator can be approximated from the full operator
     via a "staircase pattern" of exact measurements, whose computation is exact
@@ -161,15 +161,15 @@ class TriangularLinOp(BaseLinOp):
 
 
     Given a square linear operator :math:`A`, and random vectors
-    :math:`v \\sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider the
-    generalized Hutchinson diagonal estimator:
+    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
+    the generalized Hutchinson diagonal estimator:
 
     .. math::
 
       f(A) =
-      \mathbb{E}_{v \\sim \mathcal{R}} \\big[ \\varphi(v) \\odot Av \\big]
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(v) \odot Av \big]
 
-    In this case, if the :math:`\\varphi` function follows a "serrated
+    In this case, if the :math:`\varphi` function follows a "serrated
     Hadamard pattern", :math:`f(A)` will equal a block-triangular subset of
     :math:`A`.
     """
