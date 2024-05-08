@@ -30,9 +30,12 @@ for any arbitrary matrix or linear operator :math:`A`.
 operations are implemented using ``PyTorch``, which means that **CPU/CUDA can
 be used in a device-agnostic way and automatic differentiation is available**.
 
-It also implements efficient *a priori* methods to choose meaningful hyperparameters
-for the sketched algorithms, and efficient *a posteriori* methods to estimate the
-quality and rank of the sketched approximations.
+It also implements:
+
+* Efficient *a priori* methods to choose meaningful hyperparameters for the sketched algorithms
+* Efficient *a posteriori* methods to estimate the quality and rank of the sketched approximations
+* Matrix-free estimation of (sub-)diagonals for square linear operators
+* Matrix-free estimation of matrix-vector products for upper- and lower-triangular portions of square linear operators.
 
 .. seealso::
 
@@ -48,6 +51,9 @@ quality and rank of the sketched approximations.
     Matrix Approximation with an Application to Scientific Simulation”*. SIAM
     Journal on Scientific Computing 41 (4): A2430–63.
 
+  * `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+    Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds and
+    an improved algorithm”*.  CoRR abs/2201.10684.
 
 .. toctree::
    :maxdepth: 2

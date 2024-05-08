@@ -18,7 +18,7 @@
 </div>
 
 
-`skerch` is a Python package to compute diagonal decompositions (SVD, Hermitian Eigendecomposition) of linear operators via sketched methods.
+`skerch` is a Python package to compute different decompositions (SVD, Hermitian Eigendecomposition, diagonal, subdiagonal, triangular, block-triangular) of linear operators via sketched methods.
 
 * Built on top of PyTorch, with natural support for CPU and CUDA interoperability, and very few dependencies otherwise
 * Works on matrices and matrix-free operators of potentially very large dimensionality
@@ -28,9 +28,10 @@
 References:
 
 * [Streaming Low-Rank Matrix Approximation with an Application to Scientific Simulation](https://arxiv.org/abs/1902.08651) Joel A. Tropp, Alp Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. SIAM Journal on Scientific Computing 41 (4): A2430–63.
+* [Stochastic diagonal estimation: probabilistic bounds and an improved algorithm](https://arxiv.org/abs/2201.10684) Robert A. Baston and Yuji Nakatsukasa. 2022. CoRR abs/2201.10684.
 
 
-See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details.
+See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details, including examples for other decompositions and use cases.
 
 
 # Installation and basic usage
@@ -41,7 +42,7 @@ Install via:
 pip install skerch
 ```
 
-The sketched SVD of a linear operator `op` can be then computed simply via:
+The sketched SVD of a linear operator `op` of shape `(h, w)` can be then computed simply via:
 
 
 ```python
@@ -56,7 +57,8 @@ q, u, s, vt, pt = ssvd(
 )
 ```
 
-Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`.
+Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`, where `q, p` are *thin* orthonormal matrices of shape `(h, NUM_OUTER)` and `(NUM_OUTER, w)` respectively, and `u, vt` are *small* orthogonal matrices of shape `(NUM_OUTER, NUM_OUTER)`.
+
 The `op` object must simply satify the following criteria:
 
 * It must have a `op.shape = (height, width)` attribute

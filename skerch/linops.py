@@ -262,6 +262,86 @@ class DiagonalLinOp(BaseLinOp):
 
 
 # ##############################################################################
+# # DIAGONAL LINEAR OPERATOR
+# ##############################################################################
+class OrthProjLinOp(BaseLinOp):
+    r"""Linear operator for an orthogonal projector.
+
+    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
+    columns, this class implements the orthogonal projector onto its span,
+    i.e. :math:`Q Q^T`.
+    """
+
+    def __init__(self, Q):
+        """Object initialization.
+
+        :param Q: Linear operator of shape ``(h, w)`` with ``h >= w``, expected
+          to be orthonormal (i.e. columns with unit Euclidean norm and all
+          orthogonal to each other). It must implement the left and right
+          matmul operations via the ``@`` operator.
+
+        .. warning::
+
+          This class assumes ``Q`` is orthonormal, but this is not checked.
+        """
+        self.Q = Q
+        #
+        h, w = Q.shape
+        if w > h:
+            raise BadShapeError("Projector matrix must be thin!")
+        super().__init__((h, h))  # this sets self.shape also
+
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        self.check_input(x, adjoint=False)
+        result = self.Q @ (x.T @ self.Q).T
+        return result
+
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+
+        See parent class for more details.
+        """
+        self.check_input(x, adjoint=True)
+        result = self.Q @ (x @ self.Q).T
+        return result.T
+
+    def __repr__(self):
+        """Returns a string in the form <OrthProjLinOp(Q_shape)>."""
+        clsname = self.__class__.__name__
+        s = f"<{clsname}({self.Q.shape})>"
+        return s
+
+
+class NegOrthProjLinOp(OrthProjLinOp):
+    """Linear operator for a negative orthogonal projector.
+
+    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
+    columns, this class implements the orthogonal projector :math:`Q Q^T`.
+    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
+    columns, this class implements the orthogonal projector onto the space
+    orthogonal to its span, i.e. :math:`(I - Q Q^T)`.
+    """
+
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        return x - super().__matmul__(x)
+
+    def __rmatmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        return x - super().__rmatmul__(x)
+
+
+# ##############################################################################
 # # TORCH INTEROPERABILITY
 # ##############################################################################
 class TorchLinOpWrapper:

@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 
-"""Scrambled Subsampled Randomized Fourier Transform (SSRFT) utilities.
+"""Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
-PyTorch-compatible implementation of the SSRFT, from
+PyTorch-compatible implementation of the SSRFT (as a matrix-free linear operator
+and other utilities), from
 `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
 """
 
@@ -13,7 +14,7 @@ import torch
 import torch_dct as dct
 
 from .linops import BaseRandomLinOp
-from .utils import BadShapeError, NoFlatError, rademacher, randperm
+from .utils import BadShapeError, NoFlatError, rademacher_flip, randperm
 
 
 # ##############################################################################
@@ -46,12 +47,12 @@ def ssrft(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
     seeds = [seed + i for i in range(5)]
     # first scramble: permute, rademacher, and DCT
     perm1 = randperm(x_len, seed=seeds[0], device="cpu")
-    x, rad1 = rademacher(x[perm1], seed=seeds[1], inplace=False)
+    x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
     del perm1, rad1
     x = dct.dct(x, norm=dct_norm)
     # second scramble: permute, rademacher and DCT
     perm2 = randperm(x_len, seed=seeds[2], device="cpu")
-    x, rad2 = rademacher(x[perm2], seeds[3], inplace=False)
+    x, rad2 = rademacher_flip(x[perm2], seeds[3], inplace=False)
     del perm2, rad2
     x = dct.dct(x, norm=dct_norm)
     # extract random indices and return
@@ -104,13 +105,13 @@ def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
     del x
     # then do the idct, followed by rademacher and inverse permutation
     result = dct.idct(result, norm=dct_norm)
-    rademacher(result, seeds[3], inplace=True)
+    rademacher_flip(result, seeds[3], inplace=True)
     perm2_inv = randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
     result = result[perm2_inv]
     del perm2_inv
     # second inverse pass
     result = dct.idct(result, norm=dct_norm)
-    rademacher(result, seeds[1], inplace=True)
+    rademacher_flip(result, seeds[1], inplace=True)
     perm1_inv = randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
     result = result[perm1_inv]
     #
@@ -149,3 +150,9 @@ class SSRFT(BaseRandomLinOp):
         See parent class for more details.
         """
         return ssrft_adjoint(x, self.shape[1], seed=self.seed, dct_norm="ortho")
+
+    def get_row(self, idx, dtype, device):
+        """Returns SSRFT[idx, :] via left-matmul with a one-hot vector."""
+        in_buff = torch.zeros(self.shape[0], dtype=dtype, device=device)
+        in_buff[idx] = 1
+        return in_buff @ self

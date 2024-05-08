@@ -9,7 +9,7 @@ import pytest
 import torch
 
 from skerch.synthmat import SynthMat
-from skerch.utils import rademacher
+from skerch.utils import rademacher_flip
 
 from . import exp_decay, poly_decay, rng_seeds, snr_lowrank_noise, torch_devices
 
@@ -280,7 +280,9 @@ def test_symmetric(  # noqa: C901  # ignore "is too complex"
                             ).to(device)
                             if not psd:
                                 # apply rademacher to the decay
-                                rademacher(ew_dec, seed=seed + 1, inplace=True)
+                                rademacher_flip(
+                                    ew_dec, seed=seed + 1, inplace=True
+                                )
                                 # sort recovered eigenvals by descending mag
                                 _, perm = ew.abs().sort(descending=True)
                                 ew = ew[perm]
@@ -328,7 +330,9 @@ def test_symmetric(  # noqa: C901  # ignore "is too complex"
                             ).to(device)
                             if not psd:
                                 # apply rademacher to the decay
-                                rademacher(ew_dec, seed=seed + 1, inplace=True)
+                                rademacher_flip(
+                                    ew_dec, seed=seed + 1, inplace=True
+                                )
                                 # sort recovered eigenvals by descending mag
                                 _, perm = ew.abs().sort(descending=True)
                                 ew = ew[perm]
