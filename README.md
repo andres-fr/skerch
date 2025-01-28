@@ -113,3 +113,17 @@ Contributions are most welcome under this repo's [LICENSE](LICENSE).
 Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, feature requests, etc.
 
 The documentation contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo.
+
+
+# Researchers
+
+If this library is useful for your work, please consider citing it:
+
+```
+@manual{fernandez2024skerch,
+  title={{S}kerch: Sketched matrix decompositions for {PyTorch}},
+  author={Andres Fernandez},
+  year={2024},
+  url={https://github.com/andres-fr/skerch},
+}
+```
