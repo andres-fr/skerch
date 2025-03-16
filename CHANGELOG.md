@@ -1,3 +1,9 @@
+## 0.9.0 (2025-03-16)
+
+### Feat
+
+- Upgraded version of GH actions. Obsolete version was crashing CI
+
 ## 0.8.1 (2025-03-16)
 
 ### Fix
