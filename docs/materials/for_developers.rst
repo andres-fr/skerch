@@ -10,7 +10,7 @@ Typically, developers will want to fork the repository and install the package i
 .. code:: bash
 
   # start a fresh environment
-  conda create -n skerch python==3.9
+  conda create -n skerch python==3.10
   conda activate skerch
 
   # clone e.g. via gh CLI
@@ -43,7 +43,7 @@ They can take several hours though. A quicker (few minutes), yet still represent
 
 .. code:: bash
 
-  make test-quick
+  make test-light
 
 
 
