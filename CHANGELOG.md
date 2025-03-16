@@ -1,3 +1,9 @@
+## 0.8.1 (2025-03-16)
+
+### Fix
+
+- Also updated readthedocs builder to 3.10 (doesn't affect code)
+
 ## 0.8.0 (2025-03-16)
 
 ### Feat
