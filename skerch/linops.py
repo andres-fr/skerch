@@ -121,7 +121,7 @@ class BaseLinOp:
 
 
 # ##############################################################################
-# # BASE LINEAR OPERATOR INVOLVING RANDOMNESS
+# # BASE LINEAR OPERATORS INVOLVING RANDOMNESS
 # ##############################################################################
 class BaseRandomLinOp(BaseLinOp):
     """Linear operators with pseudo-random behaviour.
@@ -146,8 +146,104 @@ class BaseRandomLinOp(BaseLinOp):
         return s
 
 
+class NoiseLinOp(BaseRandomLinOp):
+    """Base class for noisy linear operators.
+
+    Consider a matrix of shape ``(h, w)`` composed of random-generated entries.
+    For very large dimensions, the ``h * w`` memory requirement is intractable.
+    Instead, this matrix-free operator generates each row (or column) one by
+    one during matrix multiplication, while respecting two properties:
+
+    * Both forward and adjoint operations are deterministic given a random seed
+    * Both forward and adjoint operations are consistent with each other
+
+    Users need to override :meth:`.sample` with their desired way of
+    producing rows/columns (as specified by the ``partition`` given at
+    initialization).
+    """
+
+    PARTITIONS = {"row", "column", "longer", "shorter"}
+
+    def __init__(self, shape, seed=0b1110101001010101011, partition="longer"):
+        """Instantiates a random linear operator.
+
+        :param shape: ``(height, width)`` of linear operator.
+        :param int seed: Seed for random behaviour.
+        :param partition: Which kind of vectors will be produced by
+          :meth:`.sample`. They can correspond to columns or rows of this
+          linear operator. Longer means that the larger dimension is
+          automatically used (e.g. columns in a thin linop, rows in a fat
+          linop). Longer is generally recommended as it involves less
+          iterations and can leverage more parallelization.
+        """
+        super().__init__(shape)
+        self.seed = seed
+        #
+        self.partition = partition
+        if partition not in self.PARTITIONS:
+            raise ValueError(f"partition must be one of {self.PARTITIONS}!")
+
+    def _get_partition(self):
+        """Dispatch behaviour for :meth:`.sample`.
+
+        :returns: A boolean depending on the chosen partitioning behaviour.
+          True value corresponds to column, and false to row.
+        """
+
+        # if row or column is hardcoded, use that partition
+        if self.partition in {"row", "column"}:
+            by_column = self.partition == "column"
+        #
+        elif self.shape[0] >= self.shape[1]:  # if linop is tall...
+            by_column = 1 if (self.partition == "longer") else 0
+        else:  # if linop is fat...
+            by_column = 0 if (self.partition == "longer") else 1
+        #
+        return by_column
+
+    def matmul(self, x):
+        h, w = self.shape
+        result = torch.zeros(h, device=x.device, dtype=x.dtype)
+        by_column = self._get_partition()
+        if by_column:
+            for idx in range(w):
+                result += x[idx] * self.sample(h, idx).to(x.device)
+        else:
+            for idx in range(h):
+                result[idx] += (x * self.sample(w, idx).to(x.device)).sum()
+        #
+        return result
+
+    def rmatmul(self, x):
+        h, w = self.shape
+        result = torch.zeros(w, device=x.device, dtype=x.dtype)
+        by_column = self._get_partition()
+        if by_column:
+            for idx in range(w):
+                result[idx] = (x * self.sample(h, idx).to(x.device)).sum()
+        else:
+            for idx in range(h):
+                result += x[idx] * self.sample(w, idx).to(x.device)
+        #
+        return result
+
+    def sample(self, dims, idx):
+        """Method used to sample random entries for this linear operator.
+
+        Override this method with the desired behaviour. E.g. the following
+        code results in a random matrix with i.i.d. Rademacher noise entries::
+
+          return rademacher_noise(dims, seed=idx + self.seed, device="cpu")
+
+        :param dims: Length of the produced random vector.
+        :param idx: Index of the row/column to be sampled. Can be combined with
+          ``self.seed`` to induce random behaviour.
+        """
+        raise NotImplementedError
+
+
 # ##############################################################################
-# # COMPOSITE LINEAR OPERATOR
+# # COMPOSITE LINEAR OPERATORS
 # ##############################################################################
 class CompositeLinOp:
     """Composite linear operator.
@@ -206,8 +302,59 @@ class CompositeLinOp:
         return result
 
 
+class SumLinOp(BaseLinOp):
+    """Sum of linear operators.
+
+    Given a collection of same-shape linear operators ``A, B, C, ...``, this
+    clsas behaves like the sum ``A + B + C ...``.
+    """
+
+    def __init__(self, named_operators):
+        """Instantiates a summation linear operator.
+
+        :param named_operators: Collection in the form ``{(n_1, o_1), ...}``
+          where each ``n_i`` is a string with the name of operator ``o_i``.
+          Each ``o_i`` operator must implement ``__matmul__``
+          and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
+          object will then become the operator ``o_1 + o_2 + ...``
+        """
+        self.names, self.operators = zip(*named_operators)
+        shapes = [o.shape for o in self.operators]
+        for shape in shapes:
+            if shape != shapes[0]:
+                raise BadShapeError(f"All shapes must be equal! {shapes}")
+        super().__init__(shapes[0])  # this sets self.shape also
+
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        self.check_input(x, adjoint=False)
+        result = self.operators[0] @ x
+        for o in self.operators[1:]:
+            result += o @ x
+        return result
+
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+
+        See parent class for more details.
+        """
+        self.check_input(x, adjoint=True)
+        result = x @ self.operators[0]
+        for o in self.operators[1:]:
+            result += x @ o
+        return result
+
+    def __repr__(self):
+        """Returns a string in the form op1 + op2 + op3 ..."""
+        result = " + ".join(self.names)
+        return result
+
+
 # ##############################################################################
-# # DIAGONAL LINEAR OPERATOR
+# # DIAGONAL LINEAR OPERATORS
 # ##############################################################################
 class DiagonalLinOp(BaseLinOp):
     r"""Diagonal linear operator.
@@ -261,8 +408,143 @@ class DiagonalLinOp(BaseLinOp):
         return s
 
 
+class BandedLinOp(BaseLinOp):
+    r"""Banded linear operator (composed of diagonals).
+
+    Given a collection of :math:`k` vectors, this class implements a banded
+    linear operator, where each given vector is a (sub)-diagonal. It is
+    composed :math:`k` :class:`DiagonalLinOp` operators, thus its memory
+    and runtime is equivalent to storing and running the individual diagonals.
+
+    .. note::
+
+    All given vectors must be of appropriate length with respect to their
+    position. For example, a square tridiagonal matrix of shape ``(n, n)`` has
+    a main diagonal at index 0 with length ``n``, and two subdiagonals at
+    indices 1, -1 with length ``n - 1``. Still, this linop can also be
+    non-square (unless it is symmetric), as long as all given diagonals fit in
+    the implicit shape.
+
+    Usage example::
+
+      diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
+      B = BandedLinOp(diags, symmetric=False)
+      w = B @ v
+    """
+
+    MAX_PRINT_ENTRIES = 20
+
+    def __init__(self, indexed_diags, symmetric=False):
+        """Instantiates a banded linear operator.
+
+        :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
+          ``diag`` is a torch vector containing a diagonal, and ``idx``
+          indicates the location of the diagonal: 0 is the main diagonal, 1 the
+          superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
+        :param symmetric: If true, only diagonals with nonnegative indices are
+          admitted. Each positive index will be replicated as a negative one.
+
+        .. note::
+          The shape of this linear operator is implicitly given by the
+          diagonal lengths and indices. Any inconsistent input will result in
+          a ``BadShapeError``. In particular, symmetric banded matrices must
+          also be square.
+        """
+        # extract diagonal lengths and check they are vectors
+        diag_lengths = {}
+        for idx in sorted(indexed_diags):
+            diag = indexed_diags[idx]
+            if len(diag.shape) == 1:
+                diag_lengths[idx] = len(diag)
+            else:
+                raise BadShapeError("All diagonals must be vectors!")
+        # check that all given diagonals fit the linop shape tightly
+        end_coords = {}
+        height, width = 0, 0
+        for idx, length in diag_lengths.items():
+            i0, j0 = (0, idx) if idx >= 0 else (abs(idx), 0)
+            i1, j1 = i0 + length, j0 + length
+            height, width = max(height, i1), max(width, j1)
+            end_coords[idx] = (i1, j1)
+        inconsistent_idxs = set()
+        for idx, (i1, j1) in end_coords.items():
+            if (i1 != height) and (j1 != width):
+                inconsistent_idxs.add(idx)
+        #
+        if inconsistent_idxs:
+            raise BadShapeError(
+                f"Inconsistent diagonal indices/lengths! {diag_lengths}, "
+                + f"triggered by indices {inconsistent_idxs} "
+                + f" for shape {(height, width)}"
+            )
+        # if symmetric, no negative idxs, and linop must be square
+        if symmetric:
+            if height != width:
+                raise BadShapeError(
+                    f"Symmetric banded linop must be square! {diag_lengths}"
+                )
+            if any(idx < 0 for idx in indexed_diags):
+                raise BadShapeError(
+                    "Symmetric banded linop only admits nonnegative indices!"
+                    + f" {diag_lengths}"
+                )
+        # done checking, initialize object
+        self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
+        self.symmetric = symmetric
+        super().__init__((height, width))
+
+    def __matmul_helper(self, x, adjoint=False):
+        """Helper method to perform multiple diagonal matmuls."""
+        self.check_input(x, adjoint=adjoint)
+        #
+        diags = {}
+        for idx, diag in self.diags.items():
+            diags[idx] = diag
+            if self.symmetric and idx > 0:
+                diags[-idx] = diag
+        #
+        outdim = self.shape[1] if adjoint else self.shape[0]
+        result = torch.zeros(outdim, dtype=x.dtype, device=x.device)
+        #
+        for idx, d in diags.items():
+            if adjoint:
+                in_beg = abs(min(idx, 0))
+                out_beg = max(idx, 0)
+            else:
+                in_beg = max(idx, 0)
+                out_beg = abs(min(idx, 0))
+            dlen = d.shape[0]
+            result[out_beg : out_beg + dlen] += d @ x[in_beg : in_beg + dlen]
+        #
+        return result
+
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        return self.__matmul_helper(x, adjoint=False)
+
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+
+        See parent class for more details.
+        """
+        return self.__matmul_helper(x, adjoint=True)
+
+    def __repr__(self):
+        """Returns a string in the form <DiagonalLinOp(shape)[v1, v2, ...]>."""
+        clsname = self.__class__.__name__
+        idxs = ", ".join(str(idx) for idx in sorted(D.diags))
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]})[{idxs}, "
+            + f"sym={self.symmetric}]>"
+        )
+        return s
+
+
 # ##############################################################################
-# # DIAGONAL LINEAR OPERATOR
+# # PROJECTION LINEAR OPERATORS
 # ##############################################################################
 class OrthProjLinOp(BaseLinOp):
     r"""Linear operator for an orthogonal projector.
