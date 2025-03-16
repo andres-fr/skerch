@@ -1,3 +1,9 @@
+## 0.9.1 (2025-03-16)
+
+### Fix
+
+- Upgraded sigstore action, was also crashing CI
+
 ## 0.9.0 (2025-03-16)
 
 ### Feat
