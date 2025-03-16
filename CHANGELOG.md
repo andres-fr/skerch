@@ -1,3 +1,10 @@
+## 0.8.0 (2025-03-16)
+
+### Feat
+
+- Upgraded version requirements to python 3.10 and curvlinops >=2
+- Implemented (sub-)diagonal and (block-)triangular sketched estimators (#1)
+
 ## 0.7.0 (2024-05-08)
 
 ### Feat
