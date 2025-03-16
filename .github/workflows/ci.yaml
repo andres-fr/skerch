@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.9"]
+        python-version: ["3.10"]
     steps:
     - uses: actions/checkout@v4
     - uses: actions/setup-python@v4
@@ -64,13 +64,13 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: "3.9"
+        python-version: "3.10"
     - name: Install pypa/build
       run: pip install build
     - name: Build a binary wheel and a source tarball
       run: python3 -m build
     - name: Store the dist
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -89,7 +89,7 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for trusted publishing
     steps:
     - name: Download dist
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
@@ -108,12 +108,12 @@ jobs:
       id-token: write  # IMPORTANT: mandatory for sigstore
     steps:
     - name: Download dist
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: python-package-distributions
         path: dist/
     - name: Sign dist with Sigstore
-      uses: sigstore/gh-action-sigstore-python@v2.1.1
+      uses: sigstore/gh-action-sigstore-python@v3.0.0
       with:
         inputs: >-
           ./dist/*.tar.gz
