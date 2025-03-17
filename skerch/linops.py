@@ -501,7 +501,7 @@ class BandedLinOp(BaseLinOp):
         """
         # extract diagonal lengths and check they are vectors
         # also check that symmetric mode does not accept negative indices
-        diag_lengths = self.__init_helper(indexed_diags, symmetric)
+        diag_lengths = self.__initial_checks(indexed_diags, symmetric)
         # figure out the smallest matrix that fits all diagonals
         # note that in symmetric mode we need to add the negative indices
         end_coords = {}
