@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for linop (linear operator) utils."""
+"""Pytest for composite and diagonal linops."""
 
 
 import pytest
