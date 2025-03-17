@@ -1,3 +1,16 @@
+## 0.10.1 (2025-03-17)
+
+### Fix
+
+- updated method name
+
+## 0.10.0 (2025-03-17)
+
+### Feat
+
+- Finished unit tests for added linops. All tests and precommits passing, ready to merge
+- Added NoiseLinOp, SumLinOp, BandedLinOp. With docstrings
+
 ## 0.9.1 (2025-03-16)
 
 ### Fix

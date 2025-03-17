@@ -168,10 +168,10 @@ def test_proj_shapes(torch_devices, dtypes_atols, tall_heights_widths):
                 #
                 assert (proj @ test_vec).shape == (h,)
                 assert (proj @ test_mat).shape == (h, 2)
-                assert (test_vec.T @ proj).shape == (h,)
+                assert (test_vec @ proj).shape == (h,)
                 assert (test_mat.T @ proj).shape == (2, h)
                 #
                 assert (negproj @ test_vec).shape == (h,)
                 assert (negproj @ test_mat).shape == (h, 2)
-                assert (test_vec.T @ negproj).shape == (h,)
+                assert (test_vec @ negproj).shape == (h,)
                 assert (test_mat.T @ negproj).shape == (2, h)
