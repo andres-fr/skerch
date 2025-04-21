@@ -177,13 +177,14 @@ def subdiagpp(
         deflated_lop = lop
     # estimate deflated diagonal. We don't use subdiag_hadamard_pattern
     # because this direct way is more memory-efficient.
+    squares_buff = torch.zeros_like(result_buff)
     if num_meas > 0:
         ssrft = SSRFT((num_meas, dims), seed=seed)
         for i in range(num_meas):
             v = ssrft.get_row(i, lop_dtype, lop_device)
             if diag_idx == 0:
                 result_buff += v * (v @ deflated_lop)
-                # squares_buff += v * v
+                squares_buff += v * v
             elif diag_idx > 0:
                 result_buff += (
                     v[:-abs_diag_idx] * (v @ deflated_lop)[abs_diag_idx:]
@@ -192,11 +193,12 @@ def subdiagpp(
                 result_buff += (
                     v[abs_diag_idx:] * (v @ deflated_lop)[:-abs_diag_idx]
                 )
-        # note that here we would typically apply result_buff /= squares_buff
-        # but l2 norm of SSRFT rows is always 1, so no need.
+        #
+        result_buff /= squares_buff
     bottom_norm = result_buff.norm().item()
     # add estimated deflated diagonal to exact top-rank diagonal
     top_norm = 0
+    buf2 = result_buff.clone()
     if deflation_rank > 0:
         for i in range(len(result_buff)):
             row = i if (diag_idx > 0) else i + abs_diag_idx
@@ -296,32 +298,4 @@ def xdiag(
         if with_variance
         else None
     )
-    return result, (Q, S), var
-
-    # import matplotlib.pyplot as plt
-
-    # # tttt = var_buffer1 + (half_meas * var_buffer2.T / denominator).T
-    # # torch.dist(torch.diag(lop), tttt.mean(1))
-    # breakpoint()
-    # """
-    # TODO:
-    # ALSO SOMEWHERE UTEST THAT THE S-VECTOR INDEED IS THE PROJECTOR
-
-    # TODO:
-    # SO DIAGPP IS NOT NORMALIZING? IS THAT A BUG??
-    # """
-
-    # #
-    # # meas_3 = torch.empty(
-    # #     (dims, half_meas - 1), dtype=lop_dtype, device=lop_device
-    # # )
-    # # rangelist = list(range(half_meas))
-    # # rangelist.pop(3)
-    # # for i, iskip in enumerate(rangelist):
-    # #     meas_3[:, i] = lop @ rand_lop.get_row(iskip, lop_dtype, lop_device)
-    # # Q_3, R_3 = orthogonalize(meas_3, overwrite=False, return_R=True)
-    # # Proj_3 = Q_3 @ Q_3.T
-    # # Proj = Q @ Q.T
-    # # Qs3 = Q @ S[:, 3]
-    # # # torch.dist(Proj_3, Proj)  # dist is 1
-    # # # torch.dist(Proj_3, Proj - torch.outer(Qs3, Qs3))  # dist is 0
+    return result, (Q, S, rand_lop), var

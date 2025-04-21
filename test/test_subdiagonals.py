@@ -313,8 +313,62 @@ def test_subdiags_diagpp(
 
 
 # ##############################################################################
-# # DIAGPP
+# # XDIAG
 # ##############################################################################
+def test_deflation_projector_xdiag(
+    rng_seeds,  # noqa: F811
+    torch_devices,  # noqa: F811
+    dim_rank_decay_sym_meas_rtol_xdiag,
+):
+    """Test case for rank-1 deflation in XDiag.
+
+    This test creates an ``exp_decay`` random (square) test matrix, and checks
+    that the rank-1 deflation via the ``s`` vectors is indeed equivalent to
+    removing one measurement.
+    """
+    for seed in rng_seeds:
+        for dtype, atol in ((torch.float64, 1e-12), (torch.float32, 1e-4)):
+            for device in torch_devices:
+                dim, rank, meas = 50, 5, 20
+                mat = SynthMat.exp_decay(
+                    shape=(dim, dim),
+                    rank=rank,
+                    decay=0.5,
+                    symmetric=False,
+                    seed=seed,
+                    dtype=dtype,
+                    device=device,
+                    psd=False,
+                )
+                _, (Q, S, rand_lop), _ = xdiag(
+                    mat, meas, dtype, device, seed + 1, with_variance=False
+                )
+                for i in range(meas // 2):
+                    range_skip = list(range(meas // 2))
+                    range_skip.pop(i)
+                    meas_skip = torch.zeros(
+                        (dim, meas // 2 - 1), dtype=dtype, device=device
+                    )
+                    for j, jskip in enumerate(range_skip):
+                        meas_skip[:, j] = mat @ rand_lop.get_row(
+                            jskip, dtype, device
+                        )
+                    Q_i = torch.linalg.qr(meas_skip)[0]
+                    #
+                    Proj = Q @ Q.T
+                    Proj_i = Q_i @ Q_i.T
+                    QSi = Q @ S[:, i]
+                    dist1 = torch.dist(Proj_i, Proj)
+                    dist2 = torch.dist(Proj_i, Proj - torch.outer(QSi, QSi))
+                    #
+                    assert torch.isclose(
+                        dist1, torch.ones_like(dist1), atol=atol
+                    ), "Projectors not having a distance of 1"
+                    assert torch.isclose(
+                        dist2, torch.zeros_like(dist1), atol=atol
+                    ), "Projectors should have near-zero distance!"
+
+
 def test_main_diags_xdiag(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
@@ -349,7 +403,7 @@ def test_main_diags_xdiag(
                     # retrieve the true diag
                     diag = torch.diag(mat, diagonal=0)
                     # matrix-free estimation of the diag
-                    diag_est, _, _ = xdiag(
+                    diag_est, (Q, S), _ = xdiag(
                         mat, meas, dtype, device, seed + 1, with_variance=False
                     )
                     # then assert
