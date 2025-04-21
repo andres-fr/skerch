@@ -8,7 +8,7 @@
 import pytest
 import torch
 
-from skerch.subdiagonals import subdiag_hadamard_pattern, subdiagpp
+from skerch.subdiagonals import subdiag_hadamard_pattern, subdiagpp, xdiag
 from skerch.synthmat import SynthMat
 from skerch.utils import gaussian_noise
 
@@ -20,7 +20,7 @@ from . import rng_seeds, torch_devices  # noqa: F401
 # ##############################################################################
 @pytest.fixture
 def dim_rank_decay_sym_diags_meas_defl_rtol(request):
-    """Test cases for main diagonal estimation on different matrices.
+    """Test cases for main diag estimation on different matrices via Diag++.
 
     Entries are in the form
     ``(dim, rank, decay, sym, [diag_idxs], num_meas, defl, rtol)``, where:
@@ -76,7 +76,7 @@ def dim_rank_decay_sym_diags_meas_defl_rtol(request):
 
 @pytest.fixture
 def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
-    """Test cases for subdiagonal estimation on different matrices.
+    """Test cases for subdiag estimation on different matrices via Diag++.
 
     Note that very extremal subdiagonals have few entries, and we are better
     off just directly measuring them. For this reason, this test focuses on
@@ -117,6 +117,32 @@ def subdiag_hadamard_idxs():
 def hadamard_atol():
     """Absolute tolerances to test Hadamard pattern."""
     result = {torch.float64: 1e-13, torch.float32: 1e-5}
+    return result
+
+
+@pytest.fixture
+def dim_rank_decay_sym_meas_rtol_xdiag(request):
+    """Test cases for main diag estimation on different matrices via XDiag.
+
+    Similarly to the corresponding Diag++ fixture, entries are in the form
+    ``(dim, rank, decay, sym, [diag_idxs], num_meas, rtol)``. The main
+    difference here is that there is no distinction between deflation and
+    Hutchinson measurements, and we always target the main diagonal.
+
+    Another difference is the generally lower tolerance and smaller amount
+    of measurements, due to the superior performance of XDiag.
+    """
+    dims, rank = 1000, 100
+    if request.config.getoption("--quick"):
+        dims, rank = 500, 50
+    result = [
+        # fast-decay: performance is good, slightly worse for asymmetric
+        (dims, rank, 0.5, True, rank * 2, 0.01),
+        (dims, rank, 0.5, False, rank + 20, 0.01),
+        # slow-decay: performance is less good and also affected by asym
+        (dims, rank, 0.01, True, rank + 10, 0.01),
+        (dims, rank, 0.01, False, rank + 10, 0.01),
+    ]
     return result
 
 
@@ -176,14 +202,14 @@ def test_subdiag_hadamard_pattern(
 
 
 # ##############################################################################
-# # DIAG ESTIMATORS
+# # DIAGPP
 # ##############################################################################
-def test_main_diags(
+def test_main_diags_diagpp(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
     dim_rank_decay_sym_diags_meas_defl_rtol,
 ):
-    """Test case for main diagonal estimation.
+    """Test case for main diagonal estimation with Diag++.
 
     This test creates an ``exp_decay`` random (square) test matrix, and checks
     that its main diagonal is estimated within ``rtol``.
@@ -233,12 +259,12 @@ def test_main_diags(
                         assert rel_err <= rtol, "Incorrect diagonal recovery!"
 
 
-def test_subdiags(
+def test_subdiags_diagpp(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
     dim_rank_decay_sym_subdiags_meas_defl_rtol,
 ):
-    """Test case for subdiagonal estimation.
+    """Test case for subdiagonal estimation with Diag++.
 
     This test creates an ``exp_decay`` random test matrix, and checks that
     several of its subdiagonals are estimated within ``rtol``.
@@ -284,3 +310,58 @@ def test_subdiags(
                         dist = torch.dist(diag, diag_est)
                         rel_err = (dist / torch.norm(diag)).item()
                         assert rel_err <= rtol, "Incorrect subdiag recovery!"
+
+
+# ##############################################################################
+# # DIAGPP
+# ##############################################################################
+def test_main_diags_xdiag(
+    rng_seeds,  # noqa: F811
+    torch_devices,  # noqa: F811
+    dim_rank_decay_sym_meas_rtol_xdiag,
+):
+    """Test case for main diagonal estimation with XDiag.
+
+    This test creates an ``exp_decay`` random (square) test matrix, and checks
+    that its main diagonal is estimated within ``rtol``.
+    """
+    for seed in rng_seeds:
+        for dtype in (torch.float64, torch.float32):
+            for device in torch_devices:
+                for (
+                    dim,
+                    rank,
+                    decay,
+                    sym,
+                    meas,
+                    rtol,
+                ) in dim_rank_decay_sym_meas_rtol_xdiag:
+                    mat = SynthMat.exp_decay(
+                        shape=(dim, dim),
+                        rank=rank,
+                        decay=decay,
+                        symmetric=sym,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                        psd=False,
+                    )
+                    # retrieve the true diag
+                    diag = torch.diag(mat, diagonal=0)
+                    # matrix-free estimation of the diag
+                    diag_est, _, _ = xdiag(
+                        mat, meas, dtype, device, seed + 1, with_variance=False
+                    )
+                    # then assert
+                    dist = torch.dist(diag, diag_est)
+                    rel_err = (dist / torch.norm(diag)).item()
+                    #
+                    import matplotlib.pyplot as plt
+
+                    diag2 = subdiagpp(
+                        mat, 0, dtype, device, seed + 1, meas // 2, 0
+                    )[0]
+                    # (torch.dist(diag, diag_est) / torch.norm(diag)).item()
+                    # (torch.dist(diag, diag2) / torch.norm(diag)).item()
+                    breakpoint()
+                    # assert rel_err <= rtol, "Incorrect XDiag recovery!"

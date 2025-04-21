@@ -47,13 +47,23 @@ It also implements:
     SIAM Review, 53 (2): 217-288.
 
   * `[TYUC2019] <https://arxiv.org/abs/1902.08651>`_: Joel A. Tropp, Alp
-    Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. *“Streaming Low-rank
+    Yurtsever, Madeleine Udell, Volkan Cevher. 2019. *“Streaming Low-rank
     Matrix Approximation with an Application to Scientific Simulation”*. SIAM
     Journal on Scientific Computing 41 (4): A2430–63.
 
-  * `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+  * `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston, Yuji
     Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds and
     an improved algorithm”*.  CoRR abs/2201.10684.
+
+  * `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_: Ethan N. Epperly,
+    Joel A. Tropp, Robert J. Webber. 2024. *“XTrace: Making the most of every
+    sample in stochastic trace estimation”*. SIAM Journal on Matrix Analysis
+    and Applications.
+
+  * `[FSMH2025] <https://openreview.net/forum?id=yGGoOVpBVP>`_ Andres Fernandez,
+    Frank Schneider, Maren Mahsereci, Philipp Hennig. 2025. *“Connecting Parameter
+    Magnitudes and Hessian Eigenspaces at Scale using Sketched Methods”*.
+    Transactions on Machine Learning Research.
 
 .. toctree::
    :maxdepth: 2

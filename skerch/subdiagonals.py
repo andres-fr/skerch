@@ -14,7 +14,7 @@ Including:
 
 import torch
 
-from .distributed_decompositions import orthogonalize
+from .distributed_decompositions import orthogonalize, pinvert
 from .linops import CompositeLinOp, NegOrthProjLinOp
 from .ssrft import SSRFT
 
@@ -86,7 +86,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 
 
 # ##############################################################################
-# # SKETCHED (SUB)-DIAGONAL ESTIMATOR
+# # SKETCHED (SUB)-DIAGONAL ESTIMATORS
 # ##############################################################################
 def subdiagpp(
     lop,
@@ -149,7 +149,8 @@ def subdiagpp(
       each part of the algorithm.
     """
     h, w = lop.shape
-    assert h == w, "Only square linear operators supported!"
+    if h != w:
+        raise ValueError("Only square linear operators supported!")
     dims = h
     abs_diag_idx = abs(diag_idx)
     result_buff = torch.zeros(
@@ -206,3 +207,121 @@ def subdiagpp(
         top_norm = top_norm**0.5
     #
     return result_buff, deflation_matrix, (top_norm, bottom_norm)
+
+
+def xdiag(
+    lop,
+    num_meas,
+    lop_dtype,
+    lop_device,
+    seed=0b1110101001010101011,
+    with_variance=True,
+):
+    """Matrix-free (sub-) diagonal sketched estimator via XTrace.
+
+    .. seealso::
+
+      Reference for this algorithm:
+
+      `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_: Ethan N. Epperly,
+      Joel A. Tropp, Robert J. Webber. 2024. *“XTrace: Making the most of every
+      sample in stochastic trace estimation”*. SIAM Journal on Matrix Analysis
+      and Applications.
+    """
+    h, w = lop.shape
+    if h != w:
+        raise ValueError("Only square linear operators supported!")
+    if num_meas % 2 != 0:
+        raise ValueError("num_meas must be multiple of 2!")
+    half_meas = num_meas // 2
+    dims = h
+    # compute and orthogonalize random measurements
+    rand_lop = SSRFT((half_meas, dims), seed=seed + 100)
+    # from .utils import rademacher_noise
+
+    # rand_lop = (
+    #     rademacher_noise((dims, half_meas), seed=seed + 100, device="cpu")
+    #     .to(lop_dtype)
+    #     .to(lop_device)
+    # )
+    meas = torch.empty((dims, half_meas), dtype=lop_dtype, device=lop_device)
+    for i in range(half_meas):
+        meas[:, i] = lop @ rand_lop.get_row(i, lop_dtype, lop_device)
+        # meas[:, i] = lop @ rand_lop[:, i]
+    Q, R = orthogonalize(meas, overwrite=False, return_R=True)
+    # compute Q-top diagonal as preliminary result (efficient and exact)
+    Qt_lop = torch.empty_like(Q.T)
+    for i in range(half_meas):
+        Qt_lop[i, :] = Q[:, i] @ lop
+    top_result = (Q * Qt_lop.T).sum(1)
+    # compute S-matrix, needed to form the estimators via rank-1 deflations
+    S = pinvert(R.T)
+    S /= torch.linalg.norm(S, dim=0)
+    # refine preliminary result with rank-1 deflations
+    top_negproj = torch.zeros_like(top_result)
+    numerator = torch.zeros_like(top_result)
+    denominator = torch.zeros_like(top_result)
+    if with_variance:
+        var_buffer1 = torch.zeros_like(Q)
+        var_buffer2 = torch.zeros_like(Q)
+    for i in range(half_meas):
+        v_i = rand_lop.get_row(i, lop_dtype, lop_device)
+        # v_i = rand_lop[:, i]
+        s_i = S[:, i]
+        #
+        # Qt_lop_vi = Qt_lop @ v_i
+        # defl = Qt_lop_vi - (s_i.T @ Qt_lop_vi) * s_i
+        # numer_i = v_i * (meas[:, i] - Q @ defl)
+        # numerator += numer_i
+        # denominator += v_i * v_i
+
+        #
+        right_i = Qt_lop @ v_i
+        left_i = s_i @ Qt_lop
+        #
+        negproj = left_i * (Q @ s_i)
+        top_negproj -= negproj
+        numer = v_i * (meas[:, i] - (Q @ (right_i - (s_i.T @ right_i) * s_i)))
+        numerator += numer
+        denominator += v_i * v_i
+        #
+        if with_variance:
+            var_buffer1[:, i] = top_result - negproj
+            var_buffer2[:, i] = numer
+    #
+    result = top_result + (top_negproj / half_meas)
+    result += numerator / denominator
+    var = (
+        (var_buffer1 + (half_meas * var_buffer2.T / denominator).T).var(1)
+        if with_variance
+        else None
+    )
+    return result, (Q, S), var
+
+    # import matplotlib.pyplot as plt
+
+    # # tttt = var_buffer1 + (half_meas * var_buffer2.T / denominator).T
+    # # torch.dist(torch.diag(lop), tttt.mean(1))
+    # breakpoint()
+    # """
+    # TODO:
+    # ALSO SOMEWHERE UTEST THAT THE S-VECTOR INDEED IS THE PROJECTOR
+
+    # TODO:
+    # SO DIAGPP IS NOT NORMALIZING? IS THAT A BUG??
+    # """
+
+    # #
+    # # meas_3 = torch.empty(
+    # #     (dims, half_meas - 1), dtype=lop_dtype, device=lop_device
+    # # )
+    # # rangelist = list(range(half_meas))
+    # # rangelist.pop(3)
+    # # for i, iskip in enumerate(rangelist):
+    # #     meas_3[:, i] = lop @ rand_lop.get_row(iskip, lop_dtype, lop_device)
+    # # Q_3, R_3 = orthogonalize(meas_3, overwrite=False, return_R=True)
+    # # Proj_3 = Q_3 @ Q_3.T
+    # # Proj = Q @ Q.T
+    # # Qs3 = Q @ S[:, 3]
+    # # # torch.dist(Proj_3, Proj)  # dist is 1
+    # # # torch.dist(Proj_3, Proj - torch.outer(Qs3, Qs3))  # dist is 0
