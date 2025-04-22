@@ -138,10 +138,10 @@ def dim_rank_decay_sym_meas_rtol_xdiag(request):
     result = [
         # fast-decay: performance is good, slightly worse for asymmetric
         (dims, rank, 0.5, True, rank * 2, 0.01),
-        (dims, rank, 0.5, False, rank + 20, 0.01),
+        (dims, rank, 0.5, False, rank * 2, 0.01),
         # slow-decay: performance is less good and also affected by asym
-        (dims, rank, 0.01, True, rank + 10, 0.01),
-        (dims, rank, 0.01, False, rank + 10, 0.01),
+        (dims, rank, 0.01, True, rank * 2, 0.01),
+        (dims, rank, 0.01, False, rank * 2, 0.01),
     ]
     return result
 
@@ -340,7 +340,7 @@ def test_deflation_projector_xdiag(
                     device=device,
                     psd=False,
                 )
-                _, (Q, S, rand_lop), _ = xdiag(
+                _, (Q, _, S, rand_lop), _ = xdiag(
                     mat, meas, dtype, device, seed + 1, with_variance=False
                 )
                 for i in range(meas // 2):
@@ -403,19 +403,40 @@ def test_main_diags_xdiag(
                     # retrieve the true diag
                     diag = torch.diag(mat, diagonal=0)
                     # matrix-free estimation of the diag
-                    diag_est, (Q, S), _ = xdiag(
-                        mat, meas, dtype, device, seed + 1, with_variance=False
+                    diag_est, _, _ = xdiag(
+                        mat,
+                        meas,  # rank of Q is actually half this
+                        dtype,
+                        device,
+                        seed + 1,
+                        with_variance=False,
                     )
                     # then assert
                     dist = torch.dist(diag, diag_est)
                     rel_err = (dist / torch.norm(diag)).item()
-                    #
-                    import matplotlib.pyplot as plt
+                    # assert rel_err <= rtol, "Incorrect XDiag recovery!"
+
+                    print(
+                        "\n\n",
+                        dim,
+                        rank,
+                        decay,
+                        sym,
+                        meas,
+                        rtol,
+                        "\n",
+                        rel_err,
+                    )
 
                     diag2 = subdiagpp(
-                        mat, 0, dtype, device, seed + 1, meas // 2, 0
+                        mat,
+                        0,
+                        dtype,
+                        device,
+                        seed + 1,
+                        meas // 2,
+                        0,
                     )[0]
-                    # (torch.dist(diag, diag_est) / torch.norm(diag)).item()
-                    # (torch.dist(diag, diag2) / torch.norm(diag)).item()
-                    breakpoint()
-                    # assert rel_err <= rtol, "Incorrect XDiag recovery!"
+                    dist2 = torch.dist(diag2, diag_est)
+                    rel_err2 = (dist2 / torch.norm(diag)).item()
+                    print(rel_err2)

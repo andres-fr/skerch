@@ -184,29 +184,33 @@ def subdiagpp(
             v = ssrft.get_row(i, lop_dtype, lop_device)
             if diag_idx == 0:
                 result_buff += v * (v @ deflated_lop)
-                squares_buff += v * v
+                squares_buff += v**2
             elif diag_idx > 0:
                 result_buff += (
                     v[:-abs_diag_idx] * (v @ deflated_lop)[abs_diag_idx:]
                 )
+                squares_buff += v[:-abs_diag_idx] ** 2
             elif diag_idx < 0:
                 result_buff += (
                     v[abs_diag_idx:] * (v @ deflated_lop)[:-abs_diag_idx]
                 )
+                squares_buff += v[abs_diag_idx:] ** 2
         #
         result_buff /= squares_buff
     bottom_norm = result_buff.norm().item()
     # add estimated deflated diagonal to exact top-rank diagonal
-    top_norm = 0
-    buf2 = result_buff.clone()
+    top_component = torch.zeros_like(result_buff)
     if deflation_rank > 0:
-        for i in range(len(result_buff)):
-            row = i if (diag_idx > 0) else i + abs_diag_idx
-            col = i if (diag_idx <= 0) else i + abs_diag_idx
-            entry = ((deflation_matrix @ deflation_matrix[row]) @ lop)[col]
-            result_buff[i] += entry
-            top_norm += entry**2
-        top_norm = top_norm**0.5
+        for q_i in deflation_matrix.T:
+            p_i = q_i @ lop
+            if diag_idx == 0:
+                top_component += q_i * p_i
+            elif diag_idx > 0:
+                top_component += q_i[:-abs_diag_idx] * p_i[abs_diag_idx:]
+            else:
+                top_component += q_i[abs_diag_idx:] * p_i[:-abs_diag_idx]
+    top_norm = top_component.norm().item()
+    result_buff += top_component
     #
     return result_buff, deflation_matrix, (top_norm, bottom_norm)
 
@@ -219,7 +223,7 @@ def xdiag(
     seed=0b1110101001010101011,
     with_variance=True,
 ):
-    """Matrix-free (sub-) diagonal sketched estimator via XTrace.
+    """Matrix-free diagonal sketched estimator via XTrace.
 
     .. seealso::
 
@@ -229,6 +233,56 @@ def xdiag(
       Joel A. Tropp, Robert J. Webber. 2024. *“XTrace: Making the most of every
       sample in stochastic trace estimation”*. SIAM Journal on Matrix Analysis
       and Applications.
+
+    This method also leverages the :math:`A = Q_i Q_i^T A + (I - Q_i Q_i^T) A`
+    decomposition, with the key insight that every :math:`Q_i` matrix, resulting
+    of leaving the i-th measurement out, can be expressed as a rank-1 deflation
+    of the full matrix as follows: :math:`Q_i Q_i^T = Q [I - s_i s_i^T] Q^T`.
+
+    With this, we can derive the following decomposition:
+
+    .. math::
+
+        \begin{aligned}
+        A &= \frac{1}{m} \sum_i  Q_i Q_i^T A + (I - Q_i Q_i^T) A \\
+          &= Q [I - \frac{1}{m} \sum_i s_i s_i^T] Q^T A
+             + [I - \frac{1}{m} \sum_i Q_i Q_i^T] A \\
+          &= Q [I - \frac{1}{m} S S^T] Q^T A
+             + [I - Q (I - \frac{1}{m} S S^T) Q^T] A
+          &= Q \Gamma^T + A - Q \Gamma^T
+        \end{aligned}
+
+    For :math:`\Gamma^T = [I - \frac{1}{m} S S^T] Q^T A`. This may seem
+    redundant, but it is useful because now we can estimate the diagonal:
+    :math:`diag(A) &= diag(Q \Gamma^T)+\mathbb{E}[v \odot (Av-Q \Gamma^T v)]`.
+    The first term can be obtained exactly and efficiently. The expectation
+    also involves efficient or known computations.
+    The main difference wit Diag++ is in the :math:`\frac{1}{m} S S^T`
+    correction term, which amounts to taking the average of all leave-one-out
+    subspaces, resulting in reduced variance.
+
+
+    :param lop: The linear operator to extract diagonals from. It must
+      implement a ``lop.shape = (h, w)`` attribute as well as the left- and
+      right- matmul operator ``@``, interacting with torch tensors.
+    :param num_meas: Number of measurements to be performed on the linear
+      operator. It must be divisible by 2, since the rank of :math:`Q` will
+      be half this number.
+    :param lop_dtype: Datatype of ``lop``.
+    :param lop_device: Device of ``lop``.
+    :param with_variance: This unbiased estimator works by averaging all the
+      leave-one-out subspaces for the given measurements. A useful quantity
+      to gauge uncertainty in computation is the variance among said subspaces.
+      If this flag is true, a vector with this variance will be computed and
+      returned.
+
+    :returns: The tuple ``result, (Q, R, S, rand_lop), var``. The first element
+      is the estimated diagonal. ``Q, R`` is the QR decomposition of the
+      performed random measurements using random vectors ``rand_lop``. ``S`` is
+      the column-normalized inverse of ``R``. If ``with_variance`` is true,
+      ``var`` will contain a nonnegative vector of same shape as ``result``
+      with the per-entry variance of the XDiag estimator. Otherwise, this value
+      is set to ``None``.
     """
     h, w = lop.shape
     if h != w:
@@ -239,63 +293,48 @@ def xdiag(
     dims = h
     # compute and orthogonalize random measurements
     rand_lop = SSRFT((half_meas, dims), seed=seed + 100)
-    # from .utils import rademacher_noise
-
-    # rand_lop = (
-    #     rademacher_noise((dims, half_meas), seed=seed + 100, device="cpu")
-    #     .to(lop_dtype)
-    #     .to(lop_device)
-    # )
     meas = torch.empty((dims, half_meas), dtype=lop_dtype, device=lop_device)
     for i in range(half_meas):
         meas[:, i] = lop @ rand_lop.get_row(i, lop_dtype, lop_device)
-        # meas[:, i] = lop @ rand_lop[:, i]
     Q, R = orthogonalize(meas, overwrite=False, return_R=True)
-    # compute Q-top diagonal as preliminary result (efficient and exact)
-    Qt_lop = torch.empty_like(Q.T)
-    for i in range(half_meas):
-        Qt_lop[i, :] = Q[:, i] @ lop
-    top_result = (Q * Qt_lop.T).sum(1)
-    # compute S-matrix, needed to form the estimators via rank-1 deflations
+    # compute S-matrix, needed for the rank-1 deflations
+    # also compute the gamma matrix involving a second round of measurements
     S = pinvert(R.T)
     S /= torch.linalg.norm(S, dim=0)
-    # refine preliminary result with rank-1 deflations
-    top_negproj = torch.zeros_like(top_result)
-    numerator = torch.zeros_like(top_result)
-    denominator = torch.zeros_like(top_result)
+    SSt_m = S @ S.T / -half_meas
+    SSt_m[range(half_meas), range(half_meas)] += 1
+    # Gamma = SSt_m @ Q.T
+    Gamma = Q.T  ########################################################
+    for i in range(half_meas):
+        Gamma[i, :] = Gamma[i, :] @ lop
+    # compute top diagonal as preliminary result (efficient and exact)
+    result = (Q * Gamma.T).sum(1)
+    # refine result with rank-1 deflated Girard-Hutchinson
+    squares_buff = torch.zeros_like(result)
+    result_hutch = torch.zeros_like(result)
     if with_variance:
-        var_buffer1 = torch.zeros_like(Q)
-        var_buffer2 = torch.zeros_like(Q)
+        raise NotImplementedError("Variance of diag currently not supported")
+    else:
+        var = None
+
+    # rand_lop = SSRFT((half_meas, dims), seed=seed + 200)  ###################
     for i in range(half_meas):
         v_i = rand_lop.get_row(i, lop_dtype, lop_device)
-        # v_i = rand_lop[:, i]
         s_i = S[:, i]
-        #
-        # Qt_lop_vi = Qt_lop @ v_i
-        # defl = Qt_lop_vi - (s_i.T @ Qt_lop_vi) * s_i
-        # numer_i = v_i * (meas[:, i] - Q @ defl)
-        # numerator += numer_i
-        # denominator += v_i * v_i
-
-        #
-        right_i = Qt_lop @ v_i
-        left_i = s_i @ Qt_lop
-        #
-        negproj = left_i * (Q @ s_i)
-        top_negproj -= negproj
-        numer = v_i * (meas[:, i] - (Q @ (right_i - (s_i.T @ right_i) * s_i)))
-        numerator += numer
-        denominator += v_i * v_i
-        #
-        if with_variance:
-            var_buffer1[:, i] = top_result - negproj
-            var_buffer2[:, i] = numer
+        # result_hutch += v_i * (meas[:, i] - Q @ (Gamma @ v_i))
+        result_hutch += v_i * meas[:, i]  ####################################
+        squares_buff += v_i * v_i
     #
-    result = top_result + (top_negproj / half_meas)
-    result += numerator / denominator
-    var = (
-        (var_buffer1 + (half_meas * var_buffer2.T / denominator).T).var(1)
-        if with_variance
-        else None
-    )
-    return result, (Q, S, rand_lop), var
+    result += result_hutch / squares_buff
+
+    """
+    INTERESTING BUG!
+
+    * if we use the commented out gamma/result_hutch, both xdiag and diagpp
+      errors are low, but diagpp is slightly lower
+    * if we shift here to the pseudovanilla gamma and hutch, then both errors
+      explode! meaning changing code inside this fn causes diagpp to change.
+      It shouldnt at all, so maybe thats a source of other bugs
+    """
+    #
+    return result, (Q, R, S, rand_lop), var
