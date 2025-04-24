@@ -223,7 +223,7 @@ def xdiag(
     seed=0b1110101001010101011,
     with_variance=True,
 ):
-    """Matrix-free diagonal sketched estimator via XTrace.
+    r"""Matrix-free diagonal sketched estimator via XTrace.
 
     .. seealso::
 
@@ -303,10 +303,12 @@ def xdiag(
     S /= torch.linalg.norm(S, dim=0)
     SSt_m = S @ S.T / -half_meas
     SSt_m[range(half_meas), range(half_meas)] += 1
-    # Gamma = SSt_m @ Q.T
-    Gamma = Q.T  ########################################################
+    Gamma = torch.empty_like(Q.T)
     for i in range(half_meas):
-        Gamma[i, :] = Gamma[i, :] @ lop
+        # Gamma[i, :] = Gamma[i, :] @ lop
+        Gamma[i, :] = (
+            Q.T[i, :] if True else SSt_m[i, :] @ Q.T
+        ) @ lop  ##############################################################
     # compute top diagonal as preliminary result (efficient and exact)
     result = (Q * Gamma.T).sum(1)
     # refine result with rank-1 deflated Girard-Hutchinson
@@ -320,21 +322,23 @@ def xdiag(
     # rand_lop = SSRFT((half_meas, dims), seed=seed + 200)  ###################
     for i in range(half_meas):
         v_i = rand_lop.get_row(i, lop_dtype, lop_device)
-        s_i = S[:, i]
         # result_hutch += v_i * (meas[:, i] - Q @ (Gamma @ v_i))
-        result_hutch += v_i * meas[:, i]  ####################################
+        result_hutch += (
+            v_i * meas[:, i]
+            if True
+            else v_i * (meas[:, i] - Q @ (Gamma @ v_i))
+        )  ####################################
         squares_buff += v_i * v_i
     #
     result += result_hutch / squares_buff
-
-    """
-    INTERESTING BUG!
-
-    * if we use the commented out gamma/result_hutch, both xdiag and diagpp
-      errors are low, but diagpp is slightly lower
-    * if we shift here to the pseudovanilla gamma and hutch, then both errors
-      explode! meaning changing code inside this fn causes diagpp to change.
-      It shouldnt at all, so maybe thats a source of other bugs
-    """
     #
+    """
+    False, False: xdiag is epsilon worse
+
+    True, false: xdiag is identical
+
+    False, True: xdiag is much worse
+
+    True, True: xdiag is much worse
+    """
     return result, (Q, R, S, rand_lop), var

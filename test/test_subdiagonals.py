@@ -403,6 +403,7 @@ def test_main_diags_xdiag(
                     # retrieve the true diag
                     diag = torch.diag(mat, diagonal=0)
                     # matrix-free estimation of the diag
+                    testt = mat.clone()
                     diag_est, _, _ = xdiag(
                         mat,
                         meas,  # rank of Q is actually half this
@@ -437,6 +438,8 @@ def test_main_diags_xdiag(
                         meas // 2,
                         0,
                     )[0]
-                    dist2 = torch.dist(diag2, diag_est)
+                    dist2 = torch.dist(diag, diag2)
                     rel_err2 = (dist2 / torch.norm(diag)).item()
-                    print(rel_err2)
+                    print(dist, dist2)
+
+                    # breakpoint()
