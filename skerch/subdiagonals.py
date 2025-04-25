@@ -105,7 +105,7 @@ def subdiagpp(  # noqa: C901
 
       `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
       Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds
-      and an improved algorithm”*.  CoRR abs/2201.10684.
+      and an improved algorithm”*. CoRR abs/2201.10684.
 
     Given a linear operator ``lop``, implements an unbiased diagonal estimator,
     composed of orthogonal deflation followed by Hutchinson estimation.
