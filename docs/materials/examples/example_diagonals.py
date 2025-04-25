@@ -10,7 +10,7 @@ and perform sketched estimations of its main diagonal and subdiagonals.
 import matplotlib.pyplot as plt
 import torch
 
-from skerch.subdiagonals import subdiagpp
+from skerch.subdiagonals import subdiagpp, xdiag
 from skerch.synthmat import SynthMat
 
 # %%
@@ -68,7 +68,7 @@ print("Norm of upper subdiagonal:", super_diag.norm().item())
 # ---------------------------------------
 #
 # for this initial approximation we do not deflate, and just rely on the
-# Hutchinson estimator:
+# Girard-Hutchinson estimator:
 
 main_diag_est, _, (top_norm, bottom_norm) = subdiagpp(
     linop,
@@ -152,7 +152,7 @@ print(
 # ---------
 #
 # Since our test matrix can be well-approximated with low rank, deflation can
-# help a lot. Here we combine deflation with Hutchinson measurements, and show
+# help a lot. Here we combine deflation with G-H measurements, and show
 # that the recovery is much better, and that most of it is due to the deflation.
 
 main_diag_est, defl_mat, (top_norm, bottom_norm) = subdiagpp(
@@ -175,5 +175,35 @@ print(
     torch.dist(main_diag, main_diag_est).item(),
 )
 print("Shape of deflation matrix:", tuple(defl_mat.shape))
-print("Norm of top-rank component:", top_norm.item())
+print("Norm of top-rank component:", top_norm)
 print("Norm of deflated component:", bottom_norm)
+
+
+# %%
+#
+# ##############################################################################
+#
+# XDiag
+# ---------
+#
+# It is also possible to cleverly combine the measurements used for deflation
+# with the measurements used for G-H, leading to a more measurement-efficient
+# method, called XDiag. This is also implemented in skerch and can be used
+# as follows:
+
+xdiag_est = xdiag(
+    linop,
+    RANK * 3,
+    DTYPE,
+    DEVICE,
+    SEED + 1,
+)[0]
+
+
+fig, ax = plt.subplots()
+ax.plot(main_diag.cpu()[:100], color="black")
+ax.plot(xdiag_est.cpu()[:100], color="pink")
+fig.tight_layout()
+
+xdiag_err = torch.dist(main_diag, xdiag_est) / torch.norm(main_diag)
+print("Relative error:", xdiag_err.item())

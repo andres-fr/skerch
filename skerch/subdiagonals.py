@@ -221,7 +221,7 @@ def xdiag(
     lop_dtype,
     lop_device,
     seed=0b1110101001010101011,
-    with_variance=True,
+    with_variance=False,
 ):
     r"""Matrix-free diagonal sketched estimator via XTrace.
 
@@ -237,30 +237,42 @@ def xdiag(
     This method also leverages the :math:`A = Q_i Q_i^T A + (I - Q_i Q_i^T) A`
     decomposition, with the key insight that every :math:`Q_i` matrix, resulting
     of leaving the i-th measurement out, can be expressed as a rank-1 deflation
-    of the full matrix as follows: :math:`Q_i Q_i^T = Q [I - s_i s_i^T] Q^T`.
-
+    of the full matrix as follows: :math:`Q_i Q_i^T = Q [I - s_i s_i^T] Q^T`,
+    so the average of all leave-one-out subspaces can be expressed as follows:
+    :math:`\frac{1}{m} \sum_i Q_i Q_i^T = Q [I - \frac{S S^T}{m}] Q^T`.
     With this, we can derive the following decomposition:
 
     .. math::
 
         \begin{aligned}
         A &= \frac{1}{m} \sum_i  Q_i Q_i^T A + (I - Q_i Q_i^T) A \\
-          &= Q [I - \frac{1}{m} \sum_i s_i s_i^T] Q^T A
-             + [I - \frac{1}{m} \sum_i Q_i Q_i^T] A \\
-          &= Q [I - \frac{1}{m} S S^T] Q^T A
-             + [I - Q (I - \frac{1}{m} S S^T) Q^T] A
-          &= Q \Gamma^T + A - Q \Gamma^T
+          &= Q (I - \frac{S S^T}{m}) Q^T A
+             + [I - Q \frac{S S^T}{m} Q^T] A
         \end{aligned}
 
-    For :math:`\Gamma^T = [I - \frac{1}{m} S S^T] Q^T A`. This may seem
-    redundant, but it is useful because now we can estimate the diagonal:
-    :math:`diag(A) &= diag(Q \Gamma^T)+\mathbb{E}[v \odot (Av-Q \Gamma^T v)]`.
-    The first term can be obtained exactly and efficiently. The expectation
-    also involves efficient or known computations.
+    The first term can be then computed exactly and efficiently, and the
+    second term is estimated via Girard-Hutchinson (note that the `diag_X`
+    equation in Section 2.4, version 2 of the arXiv paper has a typo):
+
+    .. math::
+
+        \begin{aligned}
+        [I - Q \frac{S S^T}{m} Q^T] A &= \mathbb{E}[v \odot Av -
+                                                Q \frac{S S^T}{m} Q^T] A v \\
+        &\approx \frac{\sum_i v_i \odot (A v_i -Q \frac{S S^T}{m} Q^T] A v_i)}{
+                       \sum_i v_i \odot v_i}
+        \end{aligned}
+
     The main difference wit Diag++ is in the :math:`\frac{1}{m} S S^T`
     correction term, which amounts to taking the average of all leave-one-out
-    subspaces, resulting in reduced variance.
+    subspaces, resulting in reduced variance for the trace.
 
+    .. note::
+
+      Empirically, we observe that this correction does not necessarily
+      improve on the Diag++ estimation for rank-defficient matrices, which
+      suggests that the orders-of-magnitude improvement reported for Xtrace
+      may not apply to Xdiag as described here.
 
     :param lop: The linear operator to extract diagonals from. It must
       implement a ``lop.shape = (h, w)`` attribute as well as the left- and
@@ -298,47 +310,28 @@ def xdiag(
         meas[:, i] = lop @ rand_lop.get_row(i, lop_dtype, lop_device)
     Q, R = orthogonalize(meas, overwrite=False, return_R=True)
     # compute S-matrix, needed for the rank-1 deflations
-    # also compute the gamma matrix involving a second round of measurements
+    # also compute the X-matrix averaging over all subspaces
     S = pinvert(R.T)
     S /= torch.linalg.norm(S, dim=0)
-    SSt_m = S @ S.T / -half_meas
-    SSt_m[range(half_meas), range(half_meas)] += 1
-    Gamma = torch.empty_like(Q.T)
+    Smat = (S @ S.T) / -half_meas
+    Smat[range(half_meas), range(half_meas)] += 1
+    #
+    Xt = torch.empty_like(Q.T)
     for i in range(half_meas):
-        # Gamma[i, :] = Gamma[i, :] @ lop
-        Gamma[i, :] = (
-            Q.T[i, :] if True else SSt_m[i, :] @ Q.T
-        ) @ lop  ##############################################################
+        Xt[i, :] = (Q @ Smat[:, i]) @ lop
     # compute top diagonal as preliminary result (efficient and exact)
-    result = (Q * Gamma.T).sum(1)
+    result = (Q * Xt.T).sum(1)
     # refine result with rank-1 deflated Girard-Hutchinson
-    squares_buff = torch.zeros_like(result)
     result_hutch = torch.zeros_like(result)
+    squares_buff = torch.zeros_like(result)
     if with_variance:
         raise NotImplementedError("Variance of diag currently not supported")
     else:
         var = None
-
-    # rand_lop = SSRFT((half_meas, dims), seed=seed + 200)  ###################
     for i in range(half_meas):
         v_i = rand_lop.get_row(i, lop_dtype, lop_device)
-        # result_hutch += v_i * (meas[:, i] - Q @ (Gamma @ v_i))
-        result_hutch += (
-            v_i * meas[:, i]
-            if True
-            else v_i * (meas[:, i] - Q @ (Gamma @ v_i))
-        )  ####################################
+        result_hutch += v_i * (meas[:, i] - Q @ (Xt @ v_i))
         squares_buff += v_i * v_i
     #
     result += result_hutch / squares_buff
-    #
-    """
-    False, False: xdiag is epsilon worse
-
-    True, false: xdiag is identical
-
-    False, True: xdiag is much worse
-
-    True, True: xdiag is much worse
-    """
     return result, (Q, R, S, rand_lop), var
