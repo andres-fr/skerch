@@ -85,9 +85,9 @@ def create_hdf5_layout(
 
 
 # ##############################################################################
-# # QR DECOMPOSITIONS
+# # MATRIX ROUTINE WRAPPERS
 # ##############################################################################
-def orthogonalize(matrix, overwrite=False):
+def orthogonalize(matrix, overwrite=False, return_R=False):
     """Orthogonalization of given matrix.
 
     :param matrix: matrix to orthogonalize, needs to be compatible with either
@@ -100,17 +100,34 @@ def orthogonalize(matrix, overwrite=False):
     assert h >= w, "Only non-fat matrices supported!"
     #
     if isinstance(matrix, torch.Tensor):
-        Q = torch.linalg.qr(matrix, mode="reduced")[0]
+        Q, R = torch.linalg.qr(matrix, mode="reduced")
     else:
-        Q = scipy.linalg.qr(
+        Q, R, _ = scipy.linalg.qr(
             matrix,
             mode="economic",
             pivoting=True,
-        )[0]
+        )
     #
     if overwrite:
         matrix[:] = Q
-    return Q
+    if return_R:
+        return Q, R
+    else:
+        return Q
+
+
+def pinvert(matrix):
+    """Pseudo-inversion of a given matrix.
+
+    :param matrix: matrix to pseudo-invert, of shape ``(h, w)``. It needs to be
+      compatible with either ``scipy.linalg.pinv`` or ``torch.linalg.qr``.
+    :returns: Pseudoinverse of shape ``(w, h)``.
+    """
+    if isinstance(matrix, torch.Tensor):
+        result = torch.linalg.pinv(matrix)
+    else:
+        result = scipy.linalg.pinv(matrix)
+    return result
 
 
 # ##############################################################################

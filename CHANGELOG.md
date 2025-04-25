@@ -1,3 +1,9 @@
+## 0.11.0 (2025-04-25)
+
+### Feat
+
+- noOp commit to force commitizen to do a minor bump
+
 ## 0.10.1 (2025-03-17)
 
 ### Fix

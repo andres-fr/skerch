@@ -8,7 +8,7 @@
 import pytest
 import torch
 
-from skerch.subdiagonals import subdiag_hadamard_pattern, subdiagpp
+from skerch.subdiagonals import subdiag_hadamard_pattern, subdiagpp, xdiag
 from skerch.synthmat import SynthMat
 from skerch.utils import gaussian_noise
 
@@ -20,7 +20,7 @@ from . import rng_seeds, torch_devices  # noqa: F401
 # ##############################################################################
 @pytest.fixture
 def dim_rank_decay_sym_diags_meas_defl_rtol(request):
-    """Test cases for main diagonal estimation on different matrices.
+    """Test cases for main diag estimation on different matrices via Diag++.
 
     Entries are in the form
     ``(dim, rank, decay, sym, [diag_idxs], num_meas, defl, rtol)``, where:
@@ -69,14 +69,14 @@ def dim_rank_decay_sym_diags_meas_defl_rtol(request):
         # slow-decay: A lot of Hutch are needed, but deflation tends to help
         # for asym
         (dims, rank, 0.01, True, [0], round(dims * 0.7), rank * 3, 0.02),
-        (dims, rank, 0.01, False, [0], round(dims * 0.7), rank * 4, 0.04),
+        (dims, rank, 0.01, False, [0], round(dims * 0.7), rank * 4, 0.05),
     ]
     return result
 
 
 @pytest.fixture
 def dim_rank_decay_sym_subdiags_meas_defl_rtol(request):
-    """Test cases for subdiagonal estimation on different matrices.
+    """Test cases for subdiag estimation on different matrices via Diag++.
 
     Note that very extremal subdiagonals have few entries, and we are better
     off just directly measuring them. For this reason, this test focuses on
@@ -117,6 +117,36 @@ def subdiag_hadamard_idxs():
 def hadamard_atol():
     """Absolute tolerances to test Hadamard pattern."""
     result = {torch.float64: 1e-13, torch.float32: 1e-5}
+    return result
+
+
+@pytest.fixture
+def dim_rank_decay_sym_meas_rtol_xdiag(request):
+    """Test cases for main diag estimation on different matrices via XDiag.
+
+    Similarly to the corresponding Diag++ fixture, entries are in the form
+    ``(dim, rank, decay, sym, [diag_idxs], num_meas, rtol)``. The main
+    difference here is that there is no distinction between deflation and
+    Hutchinson measurements, and we always target the main diagonal.
+
+    Another difference is the generally lower tolerance and smaller amount
+    of measurements, due to the superior performance of XDiag.
+    """
+    dims, rank = 1000, 100
+    if request.config.getoption("--quick"):
+        dims, rank = 500, 50
+    result = [
+        # fast-decay: performance is good, but needs 2x more measurements than
+        # diagpp since projector has half the rank. Also worse for asymmetric
+        (dims, rank, 0.5, True, rank * 2 + 20, 5e-5),
+        (dims, rank, 0.5, False, rank * 2 + 20, 5e-4),
+        # slow-decay: problem here is that a lot of Hutch are needed, but
+        # in xdiag those are tied to the projector rank, so we can't
+        # regulate the memory-runtime tradeoff.
+        # rank-limited performance is thus less good. Also affected by asym.
+        (dims, rank, 0.01, True, rank * 5, 0.07),
+        (dims, rank, 0.01, False, rank * 6, 0.17),
+    ]
     return result
 
 
@@ -176,14 +206,14 @@ def test_subdiag_hadamard_pattern(
 
 
 # ##############################################################################
-# # DIAG ESTIMATORS
+# # DIAGPP
 # ##############################################################################
-def test_main_diags(
+def test_main_diags_diagpp(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
     dim_rank_decay_sym_diags_meas_defl_rtol,
 ):
-    """Test case for main diagonal estimation.
+    """Test case for main diagonal estimation with Diag++.
 
     This test creates an ``exp_decay`` random (square) test matrix, and checks
     that its main diagonal is estimated within ``rtol``.
@@ -233,12 +263,12 @@ def test_main_diags(
                         assert rel_err <= rtol, "Incorrect diagonal recovery!"
 
 
-def test_subdiags(
+def test_subdiags_diagpp(
     rng_seeds,  # noqa: F811
     torch_devices,  # noqa: F811
     dim_rank_decay_sym_subdiags_meas_defl_rtol,
 ):
-    """Test case for subdiagonal estimation.
+    """Test case for subdiagonal estimation with Diag++.
 
     This test creates an ``exp_decay`` random test matrix, and checks that
     several of its subdiagonals are estimated within ``rtol``.
@@ -284,3 +314,108 @@ def test_subdiags(
                         dist = torch.dist(diag, diag_est)
                         rel_err = (dist / torch.norm(diag)).item()
                         assert rel_err <= rtol, "Incorrect subdiag recovery!"
+
+
+# ##############################################################################
+# # XDIAG
+# ##############################################################################
+def test_deflation_projector_xdiag(
+    rng_seeds,  # noqa: F811
+    torch_devices,  # noqa: F811
+    dim_rank_decay_sym_meas_rtol_xdiag,
+):
+    """Test case for rank-1 deflation in XDiag.
+
+    This test creates an ``exp_decay`` random (square) test matrix, and checks
+    that the rank-1 deflation via the ``s`` vectors is indeed equivalent to
+    removing one measurement.
+    """
+    for seed in rng_seeds:
+        for dtype, atol in ((torch.float64, 1e-12), (torch.float32, 1e-4)):
+            for device in torch_devices:
+                dim, rank, meas = 50, 5, 20
+                mat = SynthMat.exp_decay(
+                    shape=(dim, dim),
+                    rank=rank,
+                    decay=0.5,
+                    symmetric=False,
+                    seed=seed,
+                    dtype=dtype,
+                    device=device,
+                    psd=False,
+                )
+                _, (Q, _, S, rand_lop), _ = xdiag(
+                    mat, meas, dtype, device, seed + 1, with_variance=False
+                )
+                for i in range(meas // 2):
+                    range_skip = list(range(meas // 2))
+                    range_skip.pop(i)
+                    meas_skip = torch.zeros(
+                        (dim, meas // 2 - 1), dtype=dtype, device=device
+                    )
+                    for j, jskip in enumerate(range_skip):
+                        meas_skip[:, j] = mat @ rand_lop.get_row(
+                            jskip, dtype, device
+                        )
+                    Q_i = torch.linalg.qr(meas_skip)[0]
+                    #
+                    Proj = Q @ Q.T
+                    Proj_i = Q_i @ Q_i.T
+                    QSi = Q @ S[:, i]
+                    dist1 = torch.dist(Proj_i, Proj)
+                    dist2 = torch.dist(Proj_i, Proj - torch.outer(QSi, QSi))
+                    #
+                    assert torch.isclose(
+                        dist1, torch.ones_like(dist1), atol=atol
+                    ), "Projectors not having a distance of 1"
+                    assert torch.isclose(
+                        dist2, torch.zeros_like(dist1), atol=atol
+                    ), "Projectors should have near-zero distance!"
+
+
+def test_main_diags_xdiag(
+    rng_seeds,  # noqa: F811
+    torch_devices,  # noqa: F811
+    dim_rank_decay_sym_meas_rtol_xdiag,
+):
+    """Test case for main diagonal estimation with XDiag.
+
+    This test creates an ``exp_decay`` random (square) test matrix, and checks
+    that its main diagonal is estimated within ``rtol``.
+    """
+    for seed in rng_seeds:
+        for dtype in (torch.float64, torch.float32):
+            for device in torch_devices:
+                for (
+                    dim,
+                    rank,
+                    decay,
+                    sym,
+                    meas,
+                    rtol,
+                ) in dim_rank_decay_sym_meas_rtol_xdiag:
+                    mat = SynthMat.exp_decay(
+                        shape=(dim, dim),
+                        rank=rank,
+                        decay=decay,
+                        symmetric=sym,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                        psd=False,
+                    )
+                    # retrieve the true diag
+                    diag = torch.diag(mat, diagonal=0)
+                    # matrix-free estimation of the diag
+                    diag_est, _, _ = xdiag(
+                        mat,
+                        meas,  # rank of Q is actually half this
+                        dtype,
+                        device,
+                        seed + 1,
+                        with_variance=False,
+                    )
+                    # then assert
+                    dist = torch.dist(diag, diag_est)
+                    rel_err = (dist / torch.norm(diag)).item()
+                    assert rel_err <= rtol, "Incorrect XDiag recovery!"
