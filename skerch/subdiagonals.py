@@ -88,7 +88,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 # ##############################################################################
 # # SKETCHED (SUB)-DIAGONAL ESTIMATORS
 # ##############################################################################
-def subdiagpp(
+def subdiagpp(  # noqa: C901
     lop,
     num_meas,
     lop_dtype,

@@ -102,7 +102,7 @@ def orthogonalize(matrix, overwrite=False, return_R=False):
     if isinstance(matrix, torch.Tensor):
         Q, R = torch.linalg.qr(matrix, mode="reduced")
     else:
-        Q, R = scipy.linalg.qr(
+        Q, R, _ = scipy.linalg.qr(
             matrix,
             mode="economic",
             pivoting=True,
