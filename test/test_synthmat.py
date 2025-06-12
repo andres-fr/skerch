@@ -5,15 +5,6 @@
 """Pytest for synthetic matrix utilities."""
 
 
-"""
-TODO:
-
-
-* Check valueerrors (rank, diagratio, nonsquare...) and other corner cases for input
-* Check seed consistency
-"""
-
-
 import pytest
 import torch
 
@@ -64,7 +55,7 @@ def poly_decays():
 @pytest.fixture
 def exp_decays():
     """ """
-    result = [2, 1, 0.5]
+    result = [0.5, 0.1, 0.01]
     return result
 
 
@@ -80,43 +71,124 @@ def small_shapes_ranks():
         ((11, 10), 1),
         ((10, 11), 2),
         ((11, 10), 10),
+        #
+        ((50, 50), 10),
     ]
     return result
 
 
-# @pytest.fixture
-# def dims_ranks_square(request):
-#     """Dimension and rank for square matrices."""
-#     result = [
-#         (1, 1),
-#         (10, 1),
-#         (100, 10),
-#         (1_000, 10),
-#         (1_000, 50),
-#     ]
-#     if request.config.getoption("--quick"):
-#         result = result[:3]
-#     return result
+@pytest.fixture
+def bad_shapes():
+    """ """
+    result = [
+        "x",
+        0,
+        None,
+        (1,),
+        (-3, -4),
+        (),
+    ]
+    return result
 
 
-# @pytest.fixture
-# def heights_widths_ranks_fat(request):
-#     """Shape and rank for non-square matrices."""
-#     result = [
-#         (1, 10, 1),
-#         (10, 100, 1),
-#         (100, 1_000, 10),
-#         (1_000, 10_000, 100),
-#     ]
-#     if request.config.getoption("--quick"):
-#         result = result[:2]
-#     return result
+@pytest.fixture
+def bad_decay_types():
+    """ """
+    result = ["x", 0, None, "asdf", "noise"]
+    return result
+
+
+# ##############################################################################
+# # FORMAL
+# ##############################################################################
+def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
+    """Various formal tests for synthetic matrices.
+
+    * _decay_helper svals mut be real, and also >=0 if PSD
+    * shape must be matrix-compatible
+    * ``diag_ratio`` must be >= 0
+    * ``rank`` must be >= 0
+    * noise matrix must be square
+    * unsupported decay types for get_decay_svals
+    """
+    for device in torch_devices:
+        # _decay_helper svals mut be real, and also >=0 if PSD
+        svals_neg = torch.zeros(10, dtype=torch.float32) - 1
+        svals_complex = torch.zeros(10, dtype=torch.complex64)
+        with pytest.raises(ValueError):
+            RandomLordMatrix._decay_helper(svals_complex, (10, 10), 3)
+        with pytest.raises(ValueError):
+            RandomLordMatrix._decay_helper(
+                svals_neg, (10, 10), 3, symmetric=True, psd=True
+            )
+        for dtype in dtypes_tols.keys():
+            # shape must be matrix-compatible
+            for bad_shape in bad_shapes:
+                with pytest.raises((ValueError, TypeError, RuntimeError)):
+                    _ = RandomLordMatrix.noise(
+                        bad_shape, rank=3, dtype=dtype, device=device
+                    )
+                with pytest.raises((ValueError, TypeError, RuntimeError)):
+                    _ = RandomLordMatrix.poly(
+                        bad_shape, rank=3, dtype=dtype, device=device
+                    )
+                with pytest.raises((ValueError, TypeError, RuntimeError)):
+                    _ = RandomLordMatrix.exp(
+                        bad_shape, rank=3, dtype=dtype, device=device
+                    )
+            # diag_ratio must be >= 0
+            r = -0.01
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.noise(
+                    (10, 10), rank=3, diag_ratio=r, dtype=dtype, device=device
+                )
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.poly(
+                    (10, 10), rank=3, diag_ratio=r, dtype=dtype, device=device
+                )
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.exp(
+                    (10, 10), rank=3, diag_ratio=r, dtype=dtype, device=device
+                )
+            # rank must be >= 0
+            rank = -1
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.noise(
+                    (10, 10), rank, dtype=dtype, device=device
+                )
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.poly(
+                    (10, 10), rank, dtype=dtype, device=device
+                )
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.exp(
+                    (10, 10), rank, dtype=dtype, device=device
+                )
+            # noise_matrix must be square
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.noise((5, 10), dtype=dtype, device=device)
+            with pytest.raises(ValueError):
+                _ = RandomLordMatrix.noise((10, 5), dtype=dtype, device=device)
+            # unsupported decay types for get_decay_svals
+            for decay_type in bad_decay_types:
+                with pytest.raises(ValueError):
+                    RandomLordMatrix.get_decay_svals(
+                        10, 3, decay_type, 0.1, dtype, device
+                    )
 
 
 # ##############################################################################
 # # SEED CONSISTENCY
 # ##############################################################################
-def helper_lord_correctness(
+def test_seed_consistency():
+    """ """
+    breakpoint()
+
+
+# ##############################################################################
+# # MATRIX CORRECTNESS
+# ##############################################################################
+def _helper_lord_correctness(
     mat,
     diag,
     device,
@@ -136,10 +208,7 @@ def helper_lord_correctness(
     * Matrix and diagonal have right device, dtype and shape
     * Matrix and diagonal follow diag_ratio
     * Symmetry and PSD-ness is respected
-    *
-
-    Add formulas for spectra and check them
-
+    * Absvals of recovered spectrum are correct for exp and poly
     """
     assert mat.norm() > 0, "Zero matrix?"
     assert not mat.isnan().any(), f"NaNs in {mat.shape, mat.dtype, mat.device}"
@@ -170,18 +239,18 @@ def helper_lord_correctness(
     else:
         S = torch.linalg.svdvals(mat)
 
-        #     # SVD
-        #     breakpoint()
-
-        """
-        * check that diag norm corresponds to diag_ratio
-        * decompose deflated matrix
-          - if psd,check >=0. else, significant entries.
-          - apply decay formula and compare to spectrum
-          -
-
-
-        """
+    #
+    if mat_type in {"poly", "exp"}:
+        S_ref = RandomLordMatrix.get_decay_svals(
+            min(shape), rank, mat_type, decay, dtype, device
+        )
+        assert torch.allclose(
+            S.abs().sort()[0], S_ref.abs().sort()[0], atol=tol
+        ), "Wrong recovered spectrum for lowrank mat!"
+    elif mat_type == "noise":
+        pass
+    else:
+        raise ValueError(f"Unknown mat_type! {mat_type}")
 
 
 def test_lord_correctness(
@@ -202,7 +271,7 @@ def test_lord_correctness(
     * symmetric+square, nonsym+psd, nonsym+nonpsd
     * poly, exp, and noise if square
 
-    Runs :func:`helper_lord_correctness`.
+    Runs :func:`_helper_lord_correctness`.
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -224,7 +293,7 @@ def test_lord_correctness(
                                         dtype,
                                         device,
                                     )
-                                    helper_lord_correctness(
+                                    _helper_lord_correctness(
                                         mat,
                                         diag,
                                         device,
@@ -257,7 +326,7 @@ def test_lord_correctness(
                                         device,
                                         psd,
                                     )
-                                    helper_lord_correctness(
+                                    _helper_lord_correctness(
                                         mat,
                                         diag,
                                         device,
@@ -284,7 +353,7 @@ def test_lord_correctness(
                                         device,
                                         psd,
                                     )
-                                    helper_lord_correctness(
+                                    _helper_lord_correctness(
                                         mat,
                                         diag,
                                         device,

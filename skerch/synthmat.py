@@ -159,7 +159,7 @@ class RandomLordMatrix:
             raise ValueError("Symmetric matrices must be square!")
         # check that svals are nonnegative real
         if svals.dtype != dtype_to_real(svals.dtype):
-            raise valueError("Singular/eigenvalues must be real!")
+            raise ValueError("Singular/eigenvalues must be real!")
         try:
             if psd and (svals < 0).any():
                 raise ValueError("Negative eigenvalues not allowed for PSD!")
@@ -195,6 +195,19 @@ class RandomLordMatrix:
             result = (U * svals) @ V.H
         #
         return result
+
+    @staticmethod
+    def get_decay_svals(dims, rank, decay_type, decay, dtype, device):
+        """ """
+        svals = torch.zeros(dims, dtype=dtype, device=device)
+        svals[:rank] = 1
+        if decay_type == "poly":
+            svals[rank:] = torch.arange(2, dims - rank + 2) ** (-float(decay))
+        elif decay_type == "exp":
+            svals[rank:] = 10 ** -(decay * torch.arange(1, dims - rank + 1))
+        else:
+            raise ValueError(f"Unknown decay_type: {decay_type}")
+        return svals
 
     @classmethod
     def poly(
@@ -234,9 +247,9 @@ class RandomLordMatrix:
         svals_dtype = dtype_to_real(dtype)
         min_shape = min(shape)
         # a few ones, followed by a poly decay
-        svals = torch.zeros(min_shape, dtype=svals_dtype, device=device)
-        svals[:rank] = 1
-        svals[rank:] = torch.arange(2, min_shape - rank + 2) ** (-float(decay))
+        svals = cls.get_decay_svals(
+            min_shape, rank, "poly", decay, svals_dtype, device
+        )
         i = 1
         if (not psd) and symmetric:
             # ensure at least one val is negative
@@ -286,9 +299,9 @@ class RandomLordMatrix:
         svals_dtype = dtype_to_real(dtype)
         min_shape = min(shape)
         # a few ones, followed by exp decay
-        svals = torch.zeros(min_shape, dtype=svals_dtype, device=device)
-        svals[:rank] = 1
-        svals[rank:] = 10 ** -(decay * torch.arange(1, min_shape - rank + 1))
+        svals = cls.get_decay_svals(
+            min_shape, rank, "exp", decay, svals_dtype, device
+        )
         i = 1
         if (not psd) and symmetric:
             # ensure at least one val is negative
