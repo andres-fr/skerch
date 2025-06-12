@@ -9,7 +9,7 @@ import torch
 
 
 # ##############################################################################
-# # DTYPES
+# # STR
 # ##############################################################################
 def torch_dtype_as_str(dtype):
     """Torch dtype to string.
@@ -21,11 +21,6 @@ def torch_dtype_as_str(dtype):
     dot_idx = full_str.index(".")
     result = full_str[dot_idx + 1 :]
     return result
-
-
-def dtype_to_real(dtype):
-    """"""
-    return torch.zeros(0, dtype=dtype).real.dtype
 
 
 # ##############################################################################
