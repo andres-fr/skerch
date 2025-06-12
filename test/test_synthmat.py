@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for synthetic matrix utilities."""
+"""Pytest for synthetic matrix utilities.
+
+
+* Formal tests (ValueError for bad inputs, etc)
+* Consistency (for seed reproducibility)
+* Correctness (NaN, device, dtype, shape, diag_ratio, symmetry, PSD, svals)
+"""
 
 
 import pytest
@@ -180,9 +186,65 @@ def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
 # ##############################################################################
 # # SEED CONSISTENCY
 # ##############################################################################
-def test_seed_consistency():
+def _helper_seed_consistency(m1, m2, m3, d1, d2, d3, atol):
     """ """
-    breakpoint()
+    assert torch.allclose(m1, m2, atol=atol), "Same seed, different matrix?"
+    assert not torch.allclose(m1, m3, atol=atol), "Different seed, same mat?"
+    assert torch.allclose(d1, d2, atol=atol), "Same seed, different diag?"
+    assert not torch.allclose(d1, d3, atol=atol), "Different seed, same diag?"
+
+
+def test_seed_consistency(rng_seeds, torch_devices, dtypes_tols):
+    """
+
+    Tests:
+    * Running the same function twice with same seed yields same results
+    * Different seeds yield different results
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                # noise
+                mat1, diag1 = RandomLordMatrix.noise(
+                    (5, 5), 3, 0.1, 1.0, seed, dtype, device
+                )
+                mat2, diag2 = RandomLordMatrix.noise(
+                    (5, 5), 3, 0.1, 1.0, seed, dtype, device
+                )
+                mat3, diag3 = RandomLordMatrix.noise(
+                    (5, 5), 3, 0.1, 1.0, seed + 1, dtype, device
+                )
+                _helper_seed_consistency(
+                    mat1, mat2, mat3, diag1, diag2, diag3, tol
+                )
+                #
+                for sym, psd in ((False, False), (True, False), (True, True)):
+                    # poly
+                    mat1, diag1 = RandomLordMatrix.poly(
+                        (5, 5), 3, 0.1, 1.0, sym, seed, dtype, device, psd
+                    )
+                    mat2, diag2 = RandomLordMatrix.poly(
+                        (5, 5), 3, 0.1, 1.0, sym, seed, dtype, device, psd
+                    )
+                    mat3, diag3 = RandomLordMatrix.poly(
+                        (5, 5), 3, 0.1, 1.0, sym, seed + 1, dtype, device, psd
+                    )
+                    _helper_seed_consistency(
+                        mat1, mat2, mat3, diag1, diag2, diag3, tol
+                    )
+                    # exp
+                    mat1, diag1 = RandomLordMatrix.exp(
+                        (5, 5), 3, 0.1, 1.0, sym, seed, dtype, device, psd
+                    )
+                    mat2, diag2 = RandomLordMatrix.exp(
+                        (5, 5), 3, 0.1, 1.0, sym, seed, dtype, device, psd
+                    )
+                    mat3, diag3 = RandomLordMatrix.exp(
+                        (5, 5), 3, 0.1, 1.0, sym, seed + 1, dtype, device, psd
+                    )
+                    _helper_seed_consistency(
+                        mat1, mat2, mat3, diag1, diag2, diag3, tol
+                    )
 
 
 # ##############################################################################
@@ -367,372 +429,3 @@ def test_lord_correctness(
                                         decay,
                                         "poly",
                                     )
-
-
-def test_seed_consistency():
-    """ """
-    pass
-    # seed = 12345
-    # m1, d1 = RandomLordMatrix.exp(
-    #     (100, 100), 10, 0.5, diag_ratio=-1.0, seed=seed, dtype=torch.float64
-    # )
-    # m2, d2 = RandomLordMatrix.exp(
-    #     (100, 100), 10, 0.5, diag_ratio=1.0, seed=seed, dtype=torch.complex128
-    # )
-    # import matplotlib.pyplot as plt
-
-    # aa, bb, cc = torch.linalg.svd(m1 - 0 * torch.diag(d1))
-    # aaa, bbb, ccc = torch.linalg.svd(m2 - 0 * torch.diag(d2))
-    # breakpoint()
-    # # plt.clf(); plt.plot(bb); plt.show()
-    # # plt.clf(); plt.imshow(aa.real); plt.show()
-    # # torch.dist(m1, (aa * bb) @ cc)
-    # # torch.dist(m2, (aaa * bbb) @ ccc)
-
-    # # torch.dist(m1, m1.H)
-
-    # for snr in snr_lowrank_noise:
-    #     mat1 = SynthMat.lowrank_noise(
-    #         shape=(h, h),  # L+N must be square
-    #         rank=r,
-    #         snr=snr,
-    #         seed=seed,
-    #         dtype=dtype,
-    #         device=device,
-    #     )
-    #     mat2 = SynthMat.lowrank_noise(
-    #         shape=(h, h),  # L+N must be square
-    #         rank=r,
-    #         snr=snr,
-    #         seed=seed + 1,
-    #         dtype=dtype,
-    #         device=device,
-    #     )
-    #     mat3 = SynthMat.lowrank_noise(
-    #         shape=(h, h),  # L+N must be square
-    #         rank=r,
-    #         snr=snr,
-    #         seed=seed,
-    #         dtype=dtype,
-    #         device=device,
-    #     )
-    #     assert torch.allclose(
-    #         mat1, mat3, rtol
-    #     ), "Same seed different matrix?"
-    #     assert (
-    #         mat1 != mat2
-    #     ).any(), f"Different seed same matrix?, {mat1, mat3}"
-    # # exp decay
-    # for dec in exp_decay:
-    #     for psd in (True, False):
-    #         mat1 = SynthMat.exp_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         mat2 = SynthMat.exp_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed + 1,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         mat3 = SynthMat.exp_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         assert torch.allclose(
-    #             mat1, mat3, rtol
-    #         ), "Same seed different matrix?"
-    #         assert (
-    #             mat1 != mat2
-    #         ).any(), (
-    #             f"Different seed same matrix?, {mat1, mat3}"
-    #         )
-    # # poly decay
-    # for dec in poly_decay:
-    #     for psd in (True, False):
-    #         mat1 = SynthMat.poly_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         mat2 = SynthMat.poly_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed + 1,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         mat3 = SynthMat.poly_decay(
-    #             shape=(h, w),
-    #             rank=r,
-    #             decay=dec,
-    #             symmetric=False,
-    #             seed=seed,
-    #             dtype=dtype,
-    #             device=device,
-    #             psd=psd,
-    #         )
-    #         assert torch.allclose(
-    #             mat1, mat3, rtol
-    #         ), "Same seed different matrix?"
-    #         assert (
-    #             mat1 != mat2
-    #         ).any(), (
-    #             f"Different seed same matrix?, {mat1, mat3}"
-    #         )
-
-
-# # ##############################################################################
-# # # SYMMETRIC
-# # ##############################################################################
-# def test_symmetric(  # noqa: C901  # ignore "is too complex"
-#     rng_seeds,
-#     torch_devices,
-#     f64_rtol,
-#     f32_rtol,
-#     dims_ranks_square,
-#     snr_lowrank_noise,
-#     exp_decay,
-#     poly_decay,
-#     decay_ew_atol,
-# ):
-#     """Tests assumed properties for symmetric synthetic matrices.
-
-#     Creates square, symmetric synthetic matrices and tests that:
-
-#     * there are no NaNs
-#     * they are indeed symmetric
-#     * their diagonals/spectra are correct
-#     * if non-PSD, spectra have significantly negative entries and recovery is
-#       still correct
-#     """
-#     for seed in rng_seeds:
-#         for device in torch_devices:
-#             for dtype, rtol in {**f64_rtol, **f32_rtol}.items():
-#                 # symmetric tests
-#                 for dim, r in dims_ranks_square:
-#                     # lowrank+noise
-#                     for snr in snr_lowrank_noise:
-#                         mat = SynthMat.lowrank_noise(
-#                             shape=(dim, dim),
-#                             rank=r,
-#                             snr=snr,
-#                             seed=seed,
-#                             dtype=dtype,
-#                             device=device,
-#                         )
-#                         assert not mat.isnan().any(), f"{mat, device, dtype}"
-#                         assert torch.allclose(
-#                             mat, mat.T, rtol=rtol
-#                         ), "Matrix not symmetric?"
-#                         assert all(
-#                             mat[range(r), range(r)] >= 1
-#                         ), "mat[:rank] is not >=1 for given rank?"
-#                     # exp decay
-#                     for dec in exp_decay:
-#                         for psd in (True, False):
-#                             mat = SynthMat.exp_decay(
-#                                 shape=(dim, dim),
-#                                 rank=r,
-#                                 decay=dec,
-#                                 symmetric=True,
-#                                 seed=seed,
-#                                 dtype=dtype,
-#                                 device=device,
-#                                 psd=psd,
-#                             )
-#                             ew = torch.linalg.eigvalsh(mat).flip(0)  # desc ord
-#                             assert (
-#                                 not mat.isnan().any()
-#                             ), f"{mat, device, dtype}"
-#                             assert torch.allclose(
-#                                 mat, mat.T, rtol=rtol
-#                             ), "Matrix not symmetric?"
-#                             assert torch.allclose(
-#                                 ew[:r], torch.ones_like(ew[:r]), rtol=rtol
-#                             ), "ew[:rank] should be == 1"
-#                             ew_dec = 10.0 ** -(
-#                                 dec * torch.arange(1, dim - r + 1, dtype=dtype)
-#                             ).to(device)
-#                             if not psd:
-#                                 # apply rademacher to the decay
-#                                 rademacher_flip(
-#                                     ew_dec, seed=seed + 1, inplace=True
-#                                 )
-#                                 # sort recovered eigenvals by descending mag
-#                                 _, perm = ew.abs().sort(descending=True)
-#                                 ew = ew[perm]
-#                                 # check that we actually have negatives
-#                                 if ew_dec.numel() > 0:
-#                                     assert (
-#                                         ew_dec < -abs(decay_ew_atol[dtype])
-#                                     ).any(), (
-#                                         "non-PSD should have "
-#                                         + "negative eigvals!"
-#                                     )
-#                             assert torch.allclose(
-#                                 ew[r:],
-#                                 ew_dec,
-#                                 rtol=rtol,
-#                                 # added atol due to eigvalsh
-#                                 atol=decay_ew_atol[dtype],
-#                             ), "Eigenval decay mismatch!"
-#                     # poly decay
-#                     for dec in poly_decay:
-#                         for psd in (True, False):
-#                             mat = SynthMat.poly_decay(
-#                                 shape=(dim, dim),
-#                                 rank=r,
-#                                 decay=dec,
-#                                 symmetric=True,
-#                                 seed=seed,
-#                                 dtype=dtype,
-#                                 device=device,
-#                                 psd=psd,
-#                             )
-#                             ew = torch.linalg.eigvalsh(mat).flip(0)  # desc ord
-#                             assert (
-#                                 not mat.isnan().any()
-#                             ), f"{mat, device, dtype}"
-#                             assert torch.allclose(
-#                                 mat, mat.T, rtol=rtol
-#                             ), "Matrix not symmetric?"
-#                             assert torch.allclose(
-#                                 ew[:r], torch.ones_like(ew[:r]), rtol=rtol
-#                             ), "ew[:rank] should be == 1"
-#                             ew_dec = (
-#                                 torch.arange(2, dim - r + 2, dtype=dtype)
-#                                 ** (-float(dec))
-#                             ).to(device)
-#                             if not psd:
-#                                 # apply rademacher to the decay
-#                                 rademacher_flip(
-#                                     ew_dec, seed=seed + 1, inplace=True
-#                                 )
-#                                 # sort recovered eigenvals by descending mag
-#                                 _, perm = ew.abs().sort(descending=True)
-#                                 ew = ew[perm]
-#                                 # check that we actually have negatives
-#                                 if ew_dec.numel() > 0:
-#                                     assert (
-#                                         ew_dec < -abs(decay_ew_atol[dtype])
-#                                     ).any(), (
-#                                         "non-PSD should have "
-#                                         + "negative eigvals!"
-#                                     )
-#                             assert torch.allclose(
-#                                 ew[r:],
-#                                 ew_dec,
-#                                 rtol=rtol,
-#                                 # added atol due to eigvalsh
-#                                 atol=decay_ew_atol[dtype],
-#                             ), "Eigenval decay mismatch!"
-
-
-# # ##############################################################################
-# # # ASYMMETRIC
-# # ##############################################################################
-# def test_asymmetric_nonsquare(
-#     rng_seeds,
-#     torch_devices,
-#     f64_rtol,
-#     f32_rtol,
-#     heights_widths_ranks_fat,
-#     snr_lowrank_noise,
-#     exp_decay,
-#     poly_decay,
-#     decay_ew_atol,
-# ):
-#     """Tests assumed properties for asymmetric synthetic matrices.
-
-#     Create square, symmetric synthetic matrices and tests that:
-#     * there are no NaNs
-#     * their diagonals/spectra are correct
-
-#     .. note::
-
-#       Since lowrank+noise must be symmetric, it is omitted here.
-#     """
-#     for seed in rng_seeds:
-#         for device in torch_devices:
-#             for dtype, rtol in {**f64_rtol, **f32_rtol}.items():
-#                 # symmetric tests
-#                 for h, w, r in heights_widths_ranks_fat:
-#                     min_dim = min(h, w)
-#                     # exp decay
-#                     for dec in exp_decay:
-#                         mat = SynthMat.exp_decay(
-#                             shape=(h, w),
-#                             rank=r,
-#                             decay=dec,
-#                             symmetric=False,
-#                             seed=seed,
-#                             dtype=dtype,
-#                             device=device,
-#                         )
-#                         ew = torch.linalg.svdvals(mat)  # desc order
-#                         assert not mat.isnan().any(), f"{mat, device, dtype}"
-#                         assert torch.allclose(
-#                             ew[:r], torch.ones_like(ew[:r]), rtol=rtol
-#                         ), f"ew[:rank] should be == 1, {ew}"
-#                         ew_dec = 10.0 ** -(
-#                             dec * torch.arange(1, min_dim - r + 1, dtype=dtype)
-#                         ).to(device)
-#                         assert torch.allclose(
-#                             ew[r:],
-#                             ew_dec,
-#                             rtol=rtol,
-#                             # added atol due to eigvalsh
-#                             atol=decay_ew_atol[dtype],
-#                         ), "Eigenval decay mismatch!"
-#                     # poly decay
-#                     for dec in poly_decay:
-#                         mat = SynthMat.poly_decay(
-#                             shape=(h, w),
-#                             rank=r,
-#                             decay=dec,
-#                             symmetric=False,
-#                             seed=seed,
-#                             dtype=dtype,
-#                             device=device,
-#                         )
-#                         ew = torch.linalg.svdvals(mat)  # desc order
-#                         assert not mat.isnan().any(), f"{mat, device, dtype}"
-#                         assert torch.allclose(
-#                             ew[:r], torch.ones_like(ew[:r]), rtol=rtol
-#                         ), "ew[:rank] should be == 1"
-#                         ew_dec = (
-#                             torch.arange(2, min_dim - r + 2, dtype=dtype)
-#                             ** (-float(dec))
-#                         ).to(device)
-#                         assert torch.allclose(
-#                             ew[r:],
-#                             ew_dec,
-#                             rtol=rtol,
-#                             # added atol due to eigvalsh
-#                             atol=decay_ew_atol[dtype],
-#                         ), "Eigenval decay mismatch!"
