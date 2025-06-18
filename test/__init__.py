@@ -35,26 +35,3 @@ def rng_seeds(request):
     """
     result = request.config.getoption("--seeds")
     return result
-
-
-# ##############################################################################
-# # HELPERS
-# ##############################################################################
-def linop_to_matrix(lop, dtype=torch.float32, device="cpu", adjoint=False):
-    """Convert a linop to a matrix via one-hot matrix-vector products."""
-    h, w = lop.shape
-    result = torch.zeros(lop.shape, dtype=dtype, device=device)
-    if adjoint:
-        oh = torch.zeros(h, dtype=dtype, device=device)
-        for i in range(h):
-            oh *= 0
-            oh[i] = 1
-            result[i, :] = oh @ lop
-    else:
-        oh = torch.zeros(w, dtype=dtype, device=device)
-        for i in range(w):
-            oh *= 0
-            oh[i] = 1
-            result[:, i] = lop @ oh
-    #
-    return result

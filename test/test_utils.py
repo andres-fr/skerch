@@ -1,0 +1,197 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+
+"""Pytest for :mod:`skerch.utils`."""
+
+
+import pytest
+import torch
+
+from skerch.utils import torch_dtype_as_str, dtype_to_real
+from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
+from skerch.utils import randperm, rademacher_flip
+
+from . import rng_seeds, torch_devices
+
+
+# ##############################################################################
+# # FIXTURES
+# ##############################################################################
+@pytest.fixture
+def dtypes_tols():
+    """Error tolerances for each dtype."""
+    result = {
+        torch.float32: 1e-5,
+        torch.complex64: 1e-5,
+        torch.float64: 1e-10,
+        torch.complex128: 1e-10,
+    }
+    return result
+
+
+@pytest.fixture
+def rand_dims_samples(request):
+    """Shapes to test linop_to_matrix"""
+    if request.config.getoption("--quick"):
+        num_samples = 3
+    else:
+        num_samples = 10
+    result = [
+        (1000, num_samples),
+    ]
+    return result
+
+
+# ##############################################################################
+# # DTYPES
+# ##############################################################################
+def test_dtype_utils():
+    """Test case for dtype manipulation utils"""
+    dtype = torch.float16
+    assert "float16" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.float16 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.float32
+    assert "float32" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.float32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.float64
+    assert "float64" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.float64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    #
+    dtype = torch.complex32
+    assert "complex32" == torch_dtype_as_str(
+        dtype
+    ), "Bad str(type) conversion!"
+    assert torch.float16 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.complex64
+    assert "complex64" == torch_dtype_as_str(
+        dtype
+    ), "Bad str(dtype) conversion!"
+    assert torch.float32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.complex128
+    assert "complex128" == torch_dtype_as_str(
+        dtype
+    ), "Bad str(dtype) conversion!"
+    assert torch.float64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    #
+    dtype = torch.uint8
+    assert "uint8" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.uint8 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.int32
+    assert "int32" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.int32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    dtype = torch.int64
+    assert "int64" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
+    assert torch.int64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+
+
+# ##############################################################################
+# # NOISE SOURCES
+# ##############################################################################
+def autocorrelation_test_helper(vec):
+    """If vec is iid noise, its autocorrelation resembles a delta."""
+    # normalize and compute unit-norm autocorrelation
+    vec_mean = vec.mean()
+    vec_norm = (vec - vec_mean).norm()
+    vec = (vec - vec_mean) / vec_norm
+    autocorr = torch.fft.fft(vec, norm="ortho")
+    autocorr = (autocorr * autocorr.conj()) ** 0.5
+    autocorr = abs(torch.fft.ifft(autocorr, norm="ortho"))
+    # check that autocorrelation is close to standard unit delta
+    assert abs(autocorr.norm() - 1) < 1e-5, "Autocorr should have unit norm"
+    assert autocorr[0] > 0.8, "Noise autocorr does not have a strong delta"
+    assert (autocorr[1:] < 0.1).all(), "Noise autocorr has strong non-delta!"
+
+
+def test_noise_sources(
+    rng_seeds, dtypes_tols, torch_devices, rand_dims_samples
+):
+    """Test case for noise sources in ``utils``.
+
+    For all devices and datatypes, and a variety of shapes:
+    * Same-seed consistency
+    * Quasi-delta autocorelation
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for dims, num_samples in rand_dims_samples:
+                    for n in range(num_samples):
+                        sd = seed + n
+                        # uniform
+                        noise1 = uniform_noise(dims, sd, dtype, device)
+                        noise2 = uniform_noise(dims, sd, dtype, device)
+                        noise3 = uniform_noise(dims, sd + 1, dtype, device)
+                        autocorrelation_test_helper(noise1)
+                        assert torch.allclose(
+                            noise1, noise2, atol=tol
+                        ), "Same seed, different noise? (uniform)"
+                        assert not torch.allclose(
+                            noise1, noise3, atol=tol
+                        ), "Different seed, same noise? (uniform)"
+                        # gaussian
+                        noise1 = gaussian_noise(dims, 0, 1, sd, dtype, device)
+                        noise2 = gaussian_noise(dims, 0, 1, sd, dtype, device)
+                        noise3 = gaussian_noise(
+                            dims, 0, 1, sd + 1, dtype, device
+                        )
+                        autocorrelation_test_helper(noise1)
+                        assert torch.allclose(
+                            noise1, noise2, atol=tol
+                        ), "Same seed, different noise? (Gaussian)"
+                        assert not torch.allclose(
+                            noise1, noise3, atol=tol
+                        ), "Different seed, same noise? (gaussian)"
+                        # rademacher
+                        noise1 = rademacher_noise(dims, sd, device)
+                        noise2 = rademacher_noise(dims, sd, device)
+                        noise3 = rademacher_noise(dims, sd + 1, device)
+                        autocorrelation_test_helper(noise1.to(dtype))
+                        assert torch.allclose(
+                            noise1, noise2, atol=tol
+                        ), "Same seed, different noise? (Rademacher)"
+                        assert not torch.allclose(
+                            noise1, noise3, atol=tol
+                        ), "Different seed, same noise? (Rademacher)"
+                        ones = torch.ones(dims, dtype=dtype, device=device)
+                        # rademacher flip
+                        noise1, m1 = rademacher_flip(
+                            ones, sd, inplace=False, rng_device=device
+                        )
+                        noise2, _ = rademacher_flip(
+                            ones, sd, inplace=False, rng_device=device
+                        )
+                        noise3, _ = rademacher_flip(
+                            ones, sd + 1, inplace=False, rng_device=device
+                        )
+                        autocorrelation_test_helper(noise1)
+                        assert torch.allclose(
+                            noise1, noise2, atol=tol
+                        ), "Same seed, different noise? (Rademacher flip)"
+                        assert not torch.allclose(
+                            noise1, noise3, atol=tol
+                        ), "Different seed, same noise? (Rademacher flip)"
+                        assert (
+                            noise1 == m1
+                        ).all(), (
+                            "Inconsistent output and mask in Rademacher flip?"
+                        )
+                        # randperm
+                        perm1a = randperm(dims, sd, device, inverse=False)
+                        perm1b = randperm(dims, sd, device, inverse=True)
+                        perm2 = randperm(dims, sd, device, inverse=False)
+                        perm3 = randperm(dims, sd + 1, device, inverse=False)
+                        arange = torch.arange(dims, device=device)
+                        autocorrelation_test_helper(perm1a.to(dtype))
+                        assert (
+                            perm1a[perm1b] == arange
+                        ).all(), "Wrong permutation inverse?"
+                        assert (
+                            perm1b[perm1a] == arange
+                        ).all(), "Wrong permutation inverse? (commuted)"
+                        assert torch.allclose(
+                            perm1a, perm2, atol=tol
+                        ), "Same seed, different noise? (permutation)"
+                        assert not torch.allclose(
+                            perm1a, perm3, atol=tol
+                        ), "Different seed, same noise? (permutation)"

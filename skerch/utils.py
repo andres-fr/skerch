@@ -54,7 +54,8 @@ def uniform_noise(shape, seed=None, dtype=torch.float64, device="cpu"):
       reproducible behaviour fixed to given random seed.
     """
     rng = torch.Generator(device=device)
-    rng.manual_seed(seed)
+    if seed is not None:
+        rng.manual_seed(seed)
     noise = torch.rand(shape, generator=rng, dtype=dtype, device=device)
     return noise
 
@@ -69,7 +70,8 @@ def gaussian_noise(
       reproducible behaviour fixed to given random seed.
     """
     rng = torch.Generator(device=device)
-    rng.manual_seed(seed)
+    if seed is not None:
+        rng.manual_seed(seed)
     #
     noise = torch.zeros(shape, dtype=dtype, device=device)
     noise.normal_(mean=mean, std=std, generator=rng)
@@ -110,7 +112,8 @@ def randperm(n, seed=None, device="cpu", inverse=False):
       permutations are inverse to each other, i.e. ``v == v[P][Q] == v[Q][P]``.
     """
     rng = torch.Generator(device=device)
-    rng.manual_seed(seed)
+    if seed is not None:
+        rng.manual_seed(seed)
     #
     perm = torch.randperm(n, generator=rng, device=device)
     if inverse:

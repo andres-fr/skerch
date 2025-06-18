@@ -53,25 +53,48 @@ def perform_measurement(lop, meas_lop, parallel_mode=None):
     if parallel_mode is None:
         print("WARNING: speedup can be gained. see docs")
     pass
+
+
+TTODO:
+
+1. test baselinop functionality and random somehow
+2. test that transposed works for matmat and also complex
+3. test .t() method
+
 """
 
 
 import pytest
 import torch
 
-from skerch.linops import BaseLinOp
+from skerch.linops import linop_to_matrix, BaseLinOp, ByVectorLinOp
 from skerch.utils import BadShapeError, gaussian_noise
 
-from . import linop_to_matrix, rng_seeds, torch_devices
+from . import rng_seeds, torch_devices
 
 
 # ##############################################################################
 # # FIXTURES
 # ##############################################################################
 @pytest.fixture
-def dtypes():
-    """Absolute error tolerance for float64."""
-    return [torch.float64, torch.float32]
+def dtypes_tols():
+    """Error tolerances for each dtype."""
+    result = {
+        torch.float32: 1e-5,
+        torch.complex64: 1e-5,
+        torch.float64: 1e-10,
+        torch.complex128: 1e-10,
+    }
+    return result
+
+
+@pytest.fixture
+def linop_to_mat_dims(request):
+    """Shapes to test linop_to_matrix"""
+    result = [1, 2, 3, 5, 20]
+    if request.config.getoption("--quick"):
+        result = result[:4]
+    return result
 
 
 @pytest.fixture
@@ -96,153 +119,211 @@ def shapes(request):
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-class IdentityLinOp(BaseLinOp):
+class DiffLinOp(BaseLinOp):
+    """Testing linear operator as a differentiator of shape ``(n, n+1)``."""
+
+    def __init__(self, shape):
+        """Initializer. See class docstring."""
+        h, w = shape
+        if w != (h + 1):
+            raise ValueError("Shape must be in the form (n, n+1)")
+        super().__init__(shape)
+
+    def matmul(self, x):
+        """Returns the discrete difference ``x[i + 1] - x[i]``"""
+        return x[1:] - x[:-1]
+
+    def rmatmul(self, x):
+        """ """
+        result = torch.zeros(len(x) + 1, dtype=x.dtype, device=x.device)
+        result[1:] = x
+        result[:-1] -= x
+        return result
+
+
+class RampedLinOp(ByVectorLinOp):
     """Testing linear operator with ``torch.arange`` entries."""
 
-    def sample(self, dims, idx, device):
+    def sample(self, idx, device):
         """Produces a vector in the form ``[1, 2, ... dims]``."""
-        result = torch.arange(dims) + 1
-        return result.to(device)
-
-
-class RampedIidLinOp(NoiseLinOp):
-    """Testing linear operator with ``torch.arange`` entries."""
-
-    def sample(self, dims, idx, device):
-        """Produces a vector in the form ``[1, 2, ... dims]``."""
-        result = torch.arange(dims) + 1
-        return result.to(device)
+        h, w = self.shape
+        dims = w if self.by_row else h
+        result = torch.arange(dims, device=device) + 1
 
 
 # ##############################################################################
-# # TESTS
+# # BASE LINOP TESTS
 # ##############################################################################
-def test_noiselinop_reproducibility(rng_seeds, torch_devices, dtypes, shapes):
-    """Test case for random reproducibility of ``NoisyLinOp``.
-
-    Tests that:
-    * Running the same instance twice yields same results
-    * Running two instances of same seed yields same results
-    * Running two instances of different seed yields same results
-    * Left and right matmul result are consistent (i.e. lead to same matrix)
-    """
-    for seed in rng_seeds:
-        for dtype in dtypes:
-            for shape in shapes:
-                for device in torch_devices:
-                    for part in ("longer", "shorter", "row", "column"):
-                        # create 3 noisy linear operators
-                        lop = GaussianIidLinOp(shape, seed, partition=part)
-                        lop_same = GaussianIidLinOp(
-                            shape, seed, partition=part
-                        )
-                        lop_diff = GaussianIidLinOp(
-                            shape, seed + 1, partition=part
-                        )
-                        # convert them to matrices, from left and right
-                        A = linop_to_matrix(lop, dtype, device, adjoint=False)
-                        A_twice = linop_to_matrix(
-                            lop, dtype, device, adjoint=False
-                        )
-                        A_same = linop_to_matrix(
-                            lop_same, dtype, device, adjoint=False
-                        )
-                        A_diff = linop_to_matrix(
-                            lop_diff, dtype, device, adjoint=False
-                        )
-                        B = linop_to_matrix(lop, dtype, device, adjoint=True)
-                        B_twice = linop_to_matrix(
-                            lop, dtype, device, adjoint=True
-                        )
-                        B_same = linop_to_matrix(
-                            lop_same, dtype, device, adjoint=True
-                        )
-                        B_diff = linop_to_matrix(
-                            lop_diff, dtype, device, adjoint=True
-                        )
-                        # check that running matmul twice yields same results
-                        assert (
-                            A == A_twice
-                        ).all(), "Inconsistent forward matmul in same instance"
-                        assert (
-                            B == B_twice
-                        ).all(), "Inconsistent adjoint matmul in same instance"
-                        # check that 2 objects of same seed yield same results
-                        assert (
-                            A == A_same
-                        ).all(), "Inconsistent forward matmul for same seed!"
-                        assert (
-                            B == B_same
-                        ).all(), "Inconsistent adjoint matmul for same seed!"
-                        # check that 2 objects of different seed are different
-                        assert not torch.allclose(
-                            A, A_diff
-                        ), "Different seed -> similar noisy linops? (fwd.)"
-                        assert not torch.allclose(
-                            B, B_diff
-                        ), "Different seed -> similar noisy linops? (adj.)"
-                        #
-                        # finally check that forward and adjoint are same
-                        assert (
-                            A == B
-                        ).all(), "Forward and adjoint matmul differ!"
-
-
 def test_input_shape_mismatch():
     """Test case for input shape consistency.
 
-    Tests that providing vectors of mismatching shape raises BadShapeError,
-    both in forward and adjoint matmul.
+    For forward and adjoint matmul with ``BaseLinOp``, test:
+    * Providing vectors of mismatching shape raises ``BadShapeError``
+    * Providing tensors that aren't vectors/matrices raises ``BadShapeError``
     """
-    lop = GaussianIidLinOp((10, 20), seed=12345, partition="longer")
+    lop = BaseLinOp((10, 20))
+    #
     v1, v2 = torch.empty(lop.shape[0] + 1), torch.empty(lop.shape[1] + 1)
     with pytest.raises(BadShapeError):
         _ = v1 @ lop
     with pytest.raises(BadShapeError):
         _ = lop @ v2
+    #
+    t1, t2 = torch.empty(0), torch.empty(3, 4, 5)
+    with pytest.raises(BadShapeError):
+        _ = lop @ t1
+    with pytest.raises(BadShapeError):
+        _ = lop @ t2
+    with pytest.raises(BadShapeError):
+        _ = t1 @ lop
+    with pytest.raises(BadShapeError):
+        _ = t2 @ lop
 
 
-def test_noiselinop_partition(shapes):
-    """Test case for different partitions in noisy linop.
+def test_linop_to_matrix(
+    rng_seeds, torch_devices, dtypes_tols, linop_to_mat_dims
+):
+    """Test case to convert matrix-free linops into matrices.
 
-    Creates a ramped linop, as well as ramped matrices of same shape, and tests
-    that:
+    For all devices and datatypes, samples Gaussian noise and checks that:
+    * The linop and matrix matmuls yield same results
+    * The forward matmul is indeed a differen
 
-    * Providing an unknown partition name raises a valueError
-    * Partition by row generates Row-ramped matrices, both in fwd and adjoint
-    * Partition by col generates Col-ramped matrices, both in fwd and adjoint
-    * Partition by longer generates matching matrices, both in fwd and adjoint
-    * Partition by shorter generates matching matrices, both in fwd and adjoint
     """
-    with pytest.raises(ValueError):
-        lop = RampedIidLinOp((10, 10), partition="made up partition XXX")
-    for shape in shapes:
-        # create test matrices, by row and by column
-        Col = torch.outer(torch.arange(shape[0]) + 1, torch.ones(shape[1]))
-        Row = torch.outer(torch.ones(shape[0]), torch.arange(shape[1]) + 1)
-        # partition by column
-        lop = RampedIidLinOp(shape, partition="column")
-        A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
-        B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
-        assert (A == Col).all(), "Wrong forward matmul by [col]"
-        assert (B == Col).all(), "Wrong adjoint matmul by [col]"
-        # partition by row
-        lop = RampedIidLinOp(shape, partition="row")
-        A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
-        B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
-        assert (A == Row).all(), "Wrong forward matmul by [row]"
-        assert (B == Row).all(), "Wrong adjoint matmul by [row]"
-        # partition by longer
-        lop = RampedIidLinOp(shape, partition="longer")
-        A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
-        B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
-        Test = Col if (shape[0] >= shape[1]) else Row
-        assert (A == Test).all(), "Wrong forward matmul by [longer]"
-        assert (B == Test).all(), "Wrong adjoint matmul by [longer]"
-        # partition by shorter
-        lop = RampedIidLinOp(shape, partition="shorter")
-        A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
-        B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
-        Test = Row if (shape[0] >= shape[1]) else Col
-        assert (A == Test).all(), "Wrong forward matmul by [longer]"
-        assert (B == Test).all(), "Wrong adjoint matmul by [longer]"
+    for dtype, tol in dtypes_tols.items():
+        for dim in linop_to_mat_dims:
+            lop = DiffLinOp((dim, dim + 1))
+            for seed in rng_seeds:
+                v = gaussian_noise(dim + 1, dtype=dtype, device="cpu")
+                for device in torch_devices:
+                    mat = linop_to_matrix(lop, dtype, device)
+                    v = v.to(device)
+                    w1, w2, w3 = lop @ v, mat @ v, v.diff()
+                    assert torch.allclose(
+                        w1, w2, atol=tol
+                    ), "Lop and mat different?"
+                    assert torch.allclose(
+                        w1, w3, atol=tol
+                    ), "Lop is not a differentiator?"
+                    #
+                    w1, w2 = v[1:] @ lop, v[1:] @ mat
+                    assert torch.allclose(
+                        w1, w2, atol=tol
+                    ), "Lop and mat  different? (adjoint)"
+
+
+# def test_noiselinop_reproducibility(rng_seeds, torch_devices, dtypes, shapes):
+#     """Test case for random reproducibility of ``NoisyLinOp``.
+
+#     Tests that:
+#     * Running the same instance twice yields same results
+#     * Running two instances of same seed yields same results
+#     * Running two instances of different seed yields same results
+#     * Left and right matmul result are consistent (i.e. lead to same matrix)
+#     """
+#     for seed in rng_seeds:
+#         for dtype in dtypes:
+#             for shape in shapes:
+#                 for device in torch_devices:
+#                     for part in ("longer", "shorter", "row", "column"):
+#                         # create 3 noisy linear operators
+#                         lop = GaussianIidLinOp(shape, seed, partition=part)
+#                         lop_same = GaussianIidLinOp(
+#                             shape, seed, partition=part
+#                         )
+#                         lop_diff = GaussianIidLinOp(
+#                             shape, seed + 1, partition=part
+#                         )
+#                         # convert them to matrices, from left and right
+#                         A = linop_to_matrix(lop, dtype, device, adjoint=False)
+#                         A_twice = linop_to_matrix(
+#                             lop, dtype, device, adjoint=False
+#                         )
+#                         A_same = linop_to_matrix(
+#                             lop_same, dtype, device, adjoint=False
+#                         )
+#                         A_diff = linop_to_matrix(
+#                             lop_diff, dtype, device, adjoint=False
+#                         )
+#                         B = linop_to_matrix(lop, dtype, device, adjoint=True)
+#                         B_twice = linop_to_matrix(
+#                             lop, dtype, device, adjoint=True
+#                         )
+#                         B_same = linop_to_matrix(
+#                             lop_same, dtype, device, adjoint=True
+#                         )
+#                         B_diff = linop_to_matrix(
+#                             lop_diff, dtype, device, adjoint=True
+#                         )
+#                         # check that running matmul twice yields same results
+#                         assert (
+#                             A == A_twice
+#                         ).all(), "Inconsistent forward matmul in same instance"
+#                         assert (
+#                             B == B_twice
+#                         ).all(), "Inconsistent adjoint matmul in same instance"
+#                         # check that 2 objects of same seed yield same results
+#                         assert (
+#                             A == A_same
+#                         ).all(), "Inconsistent forward matmul for same seed!"
+#                         assert (
+#                             B == B_same
+#                         ).all(), "Inconsistent adjoint matmul for same seed!"
+#                         # check that 2 objects of different seed are different
+#                         assert not torch.allclose(
+#                             A, A_diff
+#                         ), "Different seed -> similar noisy linops? (fwd.)"
+#                         assert not torch.allclose(
+#                             B, B_diff
+#                         ), "Different seed -> similar noisy linops? (adj.)"
+#                         #
+#                         # finally check that forward and adjoint are same
+#                         assert (
+#                             A == B
+#                         ).all(), "Forward and adjoint matmul differ!"
+
+
+# def test_noiselinop_partition(shapes):
+#     """Test case for different partitions in noisy linop.
+
+#     Creates a ramped linop, as well as ramped matrices of same shape, and tests
+#     that:
+
+#     * Providing an unknown partition name raises a valueError
+#     * Partition by row generates Row-ramped matrices, both in fwd and adjoint
+#     * Partition by col generates Col-ramped matrices, both in fwd and adjoint
+#     * Partition by longer generates matching matrices, both in fwd and adjoint
+#     * Partition by shorter generates matching matrices, both in fwd and adjoint
+#     """
+#     with pytest.raises(ValueError):
+#         lop = RampedIidLinOp((10, 10), partition="made up partition XXX")
+#     for shape in shapes:
+#         # create test matrices, by row and by column
+#         Col = torch.outer(torch.arange(shape[0]) + 1, torch.ones(shape[1]))
+#         Row = torch.outer(torch.ones(shape[0]), torch.arange(shape[1]) + 1)
+#         # partition by column
+#         lop = RampedIidLinOp(shape, partition="column")
+#         A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
+#         B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
+#         assert (A == Col).all(), "Wrong forward matmul by [col]"
+#         assert (B == Col).all(), "Wrong adjoint matmul by [col]"
+#         # partition by row
+#         lop = RampedIidLinOp(shape, partition="row")
+#         A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
+#         B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
+#         assert (A == Row).all(), "Wrong forward matmul by [row]"
+#         assert (B == Row).all(), "Wrong adjoint matmul by [row]"
+#         # partition by longer
+#         lop = RampedIidLinOp(shape, partition="longer")
+#         A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
+#         B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
+#         Test = Col if (shape[0] >= shape[1]) else Row
+#         assert (A == Test).all(), "Wrong forward matmul by [longer]"
+#         assert (B == Test).all(), "Wrong adjoint matmul by [longer]"
+#         # partition by shorter
+#         lop = RampedIidLinOp(shape, partition="shorter")
+#         A = linop_to_matrix(lop, torch.float32, "cpu", adjoint=False)
+#         B = linop_to_matrix(lop, torch.float32, "cpu", adjoint=True)
+#         Test = Row if (shape[0] >= shape[1]) else Col
+#         assert (A == Test).all(), "Wrong forward matmul by [longer]"
+#         assert (B == Test).all(), "Wrong adjoint matmul by [longer]"
