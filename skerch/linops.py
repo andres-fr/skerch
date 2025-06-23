@@ -15,7 +15,7 @@ default linear operators (composite, diagonal...).
 
 import torch
 
-from .utils import BadShapeError, NoFlatError
+from .utils import BadShapeError
 
 
 # ##############################################################################
@@ -63,74 +63,80 @@ class BaseLinOp:
         s = f"<{clsname}({self.shape[0]}x{self.shape[1]})>"
         return s
 
-    def check_input(self, x, adjoint):
-        """Checking that input has compatible shape.
+    @staticmethod
+    def check_input(x, lop_shape, adjoint):
+        """Checking that input is a mat/vec of the right shape.
 
         :param x: The input to this linear operator.
         :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
           ``self @ x``.
         """
-        try:
-            assert len(x.shape) in {
-                1,
-                2,
-            }, "Only vector or matrix input supported"
-            #
-            if adjoint:
-                assert (
-                    x.shape[-1] == self.shape[0]
-                ), f"Mismatching shapes! {x.shape} <--> {self.shape}"
-            else:
-                assert (
-                    x.shape[0] == self.shape[1]
-                ), f"Mismatching shapes! {self.shape} <--> {x.shape}"
-        except AssertionError as ae:
-            raise BadShapeError from ae
+        if not len(x.shape) in {1, 2}:
+            raise BadShapeError("Only vector or matrix supported!")
+        if adjoint:
+            if x.shape[-1] != lop_shape[0]:
+                raise BadShapeError(
+                    f"Mismatching shapes! {x.shape} <--> {lop_shape}"
+                )
+        if not adjoint:
+            if x.shape[0] != lop_shape[1]:
+                raise BadShapeError(
+                    f"Mismatching shapes! {lop_shape} <--> {x.shape}"
+                )
 
-    def matmul(self, x):
+    @classmethod
+    def matmul_vectorizer(cls, x, lop_shape, vecmul_fn, rvecmul_fn, adjoint):
+        """ """
+        lop_h, lop_w = lop_shape
+        cls.check_input(x, lop_shape, adjoint=adjoint)
+        if len(x.shape) == 1:
+            result = rvecmul_fn(x) if adjoint else vecmul_fn(x)
+        else:
+            x_h, x_w = x.shape
+            num_vecs = x_h if adjoint else x_w
+            result = torch.zeros(
+                (num_vecs, lop_w) if adjoint else (lop_h, num_vecs),
+                dtype=x.dtype,
+                device=x.device,
+            )
+            for i in range(num_vecs):
+                if adjoint:
+                    result[i, :] = rvecmul_fn(x[i, :])
+                else:
+                    result[:, i] = vecmul_fn(x[:, i])
+        return result
+
+    def vecmul(self, x):
         """Forward (right) matrix-vector multiplication ``self @ x``.
 
-        :param x: Expected a tensor of shape ``(w,)``.
-          Note that shapes ``(w, k)`` will be automatically passed as ``k``
-          vectors of length ``w``.
+        :param x: Expected to be a vector of shape ``(w,)`` where this linop
+          has shape ``(h, w)``. Note that inputs of shape ``(w, k)`` will be
+          automatically passed to this method as ``k`` vectors of length ``w``.
+        :returns: A vector of shape ``(h,)`` equaling ``self @ x``.
         """
         raise NotImplementedError
 
-    def rmatmul(self, x):
+    def rvecmul(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
-        :param x: Expected a tensor of shape ``(h,)``.
-          Note that shapes ``(h, k)`` will be automatically passed as ``k``
-          vectors of length ``h``.
+        Like :meth:`matmul`, but with adjoint shapes.
         """
         raise NotImplementedError
 
     # operator interfaces
     def __matmul__(self, x):
-        """Convenience wrapper to :meth:`.matmul`."""
-        self.check_input(x, adjoint=False)
-        try:
-            return self.matmul(x)
-        except NoFlatError:
-            result = torch.zeros(
-                (self.shape[0], x.shape[1]), dtype=x.dtype
-            ).to(x.device)
-            for i in range(x.shape[1]):
-                result[:, i] = self.matmul(x[:, i])
-            return result
+        """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
+        result = self.matmul_vectorizer(
+            x, self.shape, self.vecmul, self.rvecmul, adjoint=False
+        )
+        return result
 
     def __rmatmul__(self, x):
-        """Convenience wrapper to :meth:`.rmatmul`."""
-        self.check_input(x, adjoint=True)
-        try:
-            return self.rmatmul(x)
-        except NoFlatError:
-            result = torch.zeros(
-                (x.shape[0], self.shape[1]), dtype=x.dtype
-            ).to(x.device)
-            for i in range(x.shape[0]):
-                result[i, :] = self.rmatmul(x[i, :])
-            return result
+        """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
+        result = self.matmul_vectorizer(
+            x, self.shape, self.vecmul, self.rvecmul, adjoint=True
+        )
+        return result
 
     def __imatmul__(self, x):
         """Assignment matmul operator ``@=``.
@@ -139,7 +145,13 @@ class BaseLinOp:
           This method is deactivated by default since linear operators may be
           matrix-free.
         """
-        raise NotImplementedError("Matmul assignment not supported!")
+        raise NotImplementedError(
+            "Unsupported matmul assignment: not matrix-free compatible!"
+        )
+
+    def t(self):
+        """(Hermitian) transposition."""
+        return TransposedLinOp(self)
 
 
 class ByVectorLinOp(BaseLinOp):
@@ -170,8 +182,8 @@ class ByVectorLinOp(BaseLinOp):
         super().__init__(shape)
         self.by_row = by_row
 
-    def get_vector(self, dims, idx, device):
-        """Method used to ibtaub vector entries for this linear operator.
+    def get_vector(self, idx, device):
+        """Method to gather vector entries for this linear operator.
 
         Override this method with the desired behaviour. For a shape of
         ``(h, w)``, it should return vectors of length ``w`` if
@@ -184,7 +196,7 @@ class ByVectorLinOp(BaseLinOp):
         """
         raise NotImplementedError
 
-    def matmul(self, x):
+    def vecmul(self, x):
         """Forward (right) matrix-vector multiplication ``self @ x``.
 
         See class docstring and parent class for more details.
@@ -199,7 +211,7 @@ class ByVectorLinOp(BaseLinOp):
                 result += x[idx] * self.get_vector(idx, x.device)
         return result
 
-    def rmatmul(self, x):
+    def rvecmul(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
         See class dostring and parent class for more details.
@@ -211,7 +223,7 @@ class ByVectorLinOp(BaseLinOp):
                 result += x[idx] * self.get_vector(idx, x.device)
         else:
             for idx in range(w):
-                result[idx] = (x * self.get_vector(h, idx, x.device)).sum()
+                result[idx] = (x * self.get_vector(idx, x.device)).sum()
         #
         return result
 
@@ -221,26 +233,41 @@ class TransposedLinOp:
 
     def __init__(self, lop):
         """Initializer. See class docstring."""
+        if isinstance(lop, TransposedLinOp):
+            raise ValueError("LinOp is already transposed! use x.lop")
         self.lop = lop
+        self.shape = self.lop.shape[::-1]
 
+    # operator interfaces
     def __matmul__(self, x):
-        """(Hermitian) transposed matmul: ``lop.H @ x``."""
-        # A.H @ x = (A.H @ x).H.H = (x.H @ A).H
-        print("TODO: implement transposed matmul")
-        breakpoint()
-        return (x.H @ self.lop).H
+        """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
+        x_vec = len(x.shape) == 1
+        result = BaseLinOp.matmul_vectorizer(
+            x.conj() if x_vec else x.H,
+            self.lop.shape,
+            self.lop.vecmul,
+            self.lop.rvecmul,
+            adjoint=True,
+        )
+        result = result.conj() if x_vec else result.H
+        return result
 
     def __rmatmul__(self, x):
-        """(Hermitian) transposed rmatmul: ``x @ lop.H``."""
-        # x @ A.H = (x @ A.H).H.H = (A @ x.H).H
-        print("TODO: implement transposed rmatmul")
-        breakpoint()
-        return (self.lop @ x.H).H
+        """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
+        x_vec = len(x.shape) == 1
+        result = BaseLinOp.matmul_vectorizer(
+            x.conj() if x_vec else x.H,
+            self.lop.shape,
+            self.lop.vecmul,
+            self.lop.rvecmul,
+            adjoint=False,
+        )
+        result = result.conj() if x_vec else result.H
+        return result
 
-    def __repr__(self):
-        """Returns a string in the form ``linop_string``.T"""
-        s = str(self.lop) + ".T"
-        return s
+    def t(self):
+        """Undo transposition"""
+        return self.lop
 
 
 # ##############################################################################

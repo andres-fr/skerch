@@ -15,7 +15,7 @@ import pytest
 import torch
 
 from skerch.synthmat import RandomLordMatrix
-from skerch.utils import rademacher_flip, dtype_to_real
+from skerch.utils import rademacher_flip, complex_dtype_to_real
 
 from . import rng_seeds, torch_devices
 
@@ -280,7 +280,9 @@ def _helper_lord_correctness(
     assert device == diag.device.type, "Wrong diagonal device?"
     #
     assert dtype == mat.dtype, "Wrong matrix dtype?"
-    diag_dtype = dtype_to_real(dtype) if (mat_type == "noise") else dtype
+    diag_dtype = (
+        complex_dtype_to_real(dtype) if (mat_type == "noise") else dtype
+    )
     assert diag_dtype == diag.dtype, "Wrong diagonal dtype?"
     #
     assert mat.shape == shape, "Wrong matrix shape?"

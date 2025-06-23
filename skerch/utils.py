@@ -23,20 +23,37 @@ def torch_dtype_as_str(dtype):
     return result
 
 
-def dtype_to_real(dtype):
+def complex_dtype_to_real(dtype):
     """"""
-    return torch.zeros(0, dtype=dtype).real.dtype
+    out_dtype = None
+    if dtype in {
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+    }:
+        out_dtype = dtype
+    elif dtype == torch.complex128:
+        out_dtype = torch.float64
+    elif dtype == torch.complex64:
+        out_dtype = torch.float32
+    elif dtype == torch.complex32:
+        out_dtype = torch.float16
+    else:
+        raise ValueError(f"Unknown dtype: {dtype}")
+    return out_dtype
 
 
 # ##############################################################################
 # # ERRORS
 # ##############################################################################
-class NoFlatError(Exception):
-    """Error to be thrown when a tensor is not flat (i.e. not a vector)."""
-
-    pass
-
-
 class BadShapeError(Exception):
     """Error to be thrown when a shape is not as it should."""
 

@@ -67,7 +67,12 @@ TTODO:
 import pytest
 import torch
 
-from skerch.linops import linop_to_matrix, BaseLinOp, ByVectorLinOp
+from skerch.linops import (
+    linop_to_matrix,
+    BaseLinOp,
+    ByVectorLinOp,
+    TransposedLinOp,
+)
 from skerch.utils import BadShapeError, gaussian_noise
 
 from . import rng_seeds, torch_devices
@@ -89,77 +94,73 @@ def dtypes_tols():
 
 
 @pytest.fixture
-def linop_to_mat_dims(request):
-    """Shapes to test linop_to_matrix"""
-    result = [1, 2, 3, 5, 20]
-    if request.config.getoption("--quick"):
-        result = result[:4]
-    return result
-
-
-@pytest.fixture
-def shapes(request):
-    """Shapes for correctness of SumLinOp."""
+def linop_correctness_shapes(request):
+    """Shapes to test linop correctness"""
     result = [
         (1, 1),
-        (1, 2),
         (2, 1),
-        (5, 5),
-        (7, 19),
-        (19, 7),
-        (20, 20),
-        (10, 51),
-        (51, 10),
+        (1, 2),
+        (2, 2),
+        (1, 10),
+        (10, 1),
+        (10, 10),
+        (10, 100),
+        (100, 10),
     ]
     if request.config.getoption("--quick"):
-        result = result[:6]
+        result = result[:7]
     return result
+
+
+# @pytest.fixture
+# def shapes(request):
+#     """Shapes for correctness of SumLinOp."""
+#     result = [
+#         (1, 1),
+#         (1, 2),
+#         (2, 1),
+#         (5, 5),
+#         (7, 19),
+#         (19, 7),
+#         (20, 20),
+#         (10, 51),
+#         (51, 10),
+#     ]
+#     if request.config.getoption("--quick"):
+#         result = result[:6]
+#     return result
 
 
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-class DiffLinOp(BaseLinOp):
-    """Testing linear operator as a differentiator of shape ``(n, n+1)``."""
+class MatrixAsLinOp(ByVectorLinOp):
+    """ """
 
-    def __init__(self, shape):
-        """Initializer. See class docstring."""
-        h, w = shape
-        if w != (h + 1):
-            raise ValueError("Shape must be in the form (n, n+1)")
-        super().__init__(shape)
-
-    def matmul(self, x):
-        """Returns the discrete difference ``x[i + 1] - x[i]``"""
-        return x[1:] - x[:-1]
-
-    def rmatmul(self, x):
+    def __init__(self, mat, by_row=False):
         """ """
-        result = torch.zeros(len(x) + 1, dtype=x.dtype, device=x.device)
-        result[1:] = x
-        result[:-1] -= x
-        return result
+        super().__init__(mat.shape, by_row)
+        self.mat = mat
 
-
-class RampedLinOp(ByVectorLinOp):
-    """Testing linear operator with ``torch.arange`` entries."""
-
-    def sample(self, idx, device):
-        """Produces a vector in the form ``[1, 2, ... dims]``."""
-        h, w = self.shape
-        dims = w if self.by_row else h
-        result = torch.arange(dims, device=device) + 1
+    def get_vector(self, idx, device):
+        """ """
+        if self.by_row:
+            return self.mat[idx]
+        else:
+            return self.mat[:, idx]
 
 
 # ##############################################################################
 # # BASE LINOP TESTS
 # ##############################################################################
-def test_input_shape_mismatch():
-    """Test case for input shape consistency.
+def test_linop_formal():
+    """Test case for input shape consistency and value errors
 
     For forward and adjoint matmul with ``BaseLinOp``, test:
     * Providing vectors of mismatching shape raises ``BadShapeError``
     * Providing tensors that aren't vectors/matrices raises ``BadShapeError``
+    * Trying to transpose a transposedlinop raises ``valueError``
+
     """
     lop = BaseLinOp((10, 20))
     #
@@ -178,38 +179,66 @@ def test_input_shape_mismatch():
         _ = t1 @ lop
     with pytest.raises(BadShapeError):
         _ = t2 @ lop
+    #
+    lopT = TransposedLinOp(lop)
+    with pytest.raises(ValueError):
+        _ = TransposedLinOp(lopT)
 
 
-def test_linop_to_matrix(
-    rng_seeds, torch_devices, dtypes_tols, linop_to_mat_dims
+def test_linop_correctness(
+    rng_seeds, torch_devices, dtypes_tols, linop_correctness_shapes
 ):
-    """Test case to convert matrix-free linops into matrices.
+    """Test case for correctness of linop matmuls.
 
     For all devices and datatypes, samples Gaussian noise and checks that:
-    * The linop and matrix matmuls yield same results
-    * The forward matmul is indeed a differen
-
+    * MatrixAsLinOp yields same results as direct matmul. This tests
+      correctness of the baselinop->byvectorlinop pipeline.
+    * linop_to_matrix yields the original matrix.
+    * Same thing but with (Hermitian) transposed linop
+    * Double transposed is same as original lop
     """
-    for dtype, tol in dtypes_tols.items():
-        for dim in linop_to_mat_dims:
-            lop = DiffLinOp((dim, dim + 1))
-            for seed in rng_seeds:
-                v = gaussian_noise(dim + 1, dtype=dtype, device="cpu")
+    for seed in rng_seeds:
+        for dtype, tol in dtypes_tols.items():
+            for h, w in linop_correctness_shapes:
                 for device in torch_devices:
-                    mat = linop_to_matrix(lop, dtype, device)
-                    v = v.to(device)
-                    w1, w2, w3 = lop @ v, mat @ v, v.diff()
-                    assert torch.allclose(
-                        w1, w2, atol=tol
-                    ), "Lop and mat different?"
-                    assert torch.allclose(
-                        w1, w3, atol=tol
-                    ), "Lop is not a differentiator?"
-                    #
-                    w1, w2 = v[1:] @ lop, v[1:] @ mat
-                    assert torch.allclose(
-                        w1, w2, atol=tol
-                    ), "Lop and mat  different? (adjoint)"
+                    mat = gaussian_noise(
+                        (h, w), dtype=dtype, device=device, seed=seed
+                    )
+                    for adj in (True, False):
+                        phi = gaussian_noise(
+                            (2, h) if adj else (w, 2),
+                            dtype=dtype,
+                            device=device,
+                            seed=2 * seed,
+                        )
+                        for by_row in (True, False):
+                            lop = MatrixAsLinOp(mat, by_row=by_row)
+                            mat2 = linop_to_matrix(
+                                lop, dtype=dtype, device=device, adjoint=adj
+                            )
+                            assert (
+                                mat == mat2
+                            ).all(), f"Wrong linop_to_matrix! {adj, by_row}"
+                            # matmat operations
+                            matmeas = phi @ mat if adj else mat @ phi
+                            lopmeas = phi @ lop if adj else lop @ phi
+                            assert torch.allclose(
+                                matmeas, lopmeas, atol=tol
+                            ), "lop@v does not equal mat@v in mat-mat!"
+                            # matvec operations
+                            matmeas = phi[0] @ mat if adj else mat @ phi[:, 0]
+                            lopmeas = phi[0] @ lop if adj else lop @ phi[:, 0]
+                            assert torch.allclose(
+                                matmeas, lopmeas, atol=tol
+                            ), "lop@v does not equal mat@v in mat-vec!"
+                            # now test transposition
+                            lopT = lop.t()
+                            lopTT = lopT.t()
+                            matT = linop_to_matrix(
+                                lopT, dtype=dtype, device=device, adjoint=adj
+                            )
+                            assert (matT == mat.H).all(), "Wrong transp?"
+                            assert lopTT is lop, "Wrong double transp?"
 
 
 # def test_noiselinop_reproducibility(rng_seeds, torch_devices, dtypes, shapes):

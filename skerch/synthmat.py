@@ -28,7 +28,7 @@ polynomial matrices are symmetric. here, we extend them as follows:
 
 import torch
 
-from .utils import gaussian_noise, rademacher_flip, dtype_to_real
+from .utils import gaussian_noise, rademacher_flip, complex_dtype_to_real
 
 
 # ##############################################################################
@@ -123,7 +123,7 @@ class RandomLordMatrix:
         result[range(rank), range(rank)] += 1
         #
         diag_dim = min(h, w)
-        diag_dtype = dtype_to_real(dtype)
+        diag_dtype = complex_dtype_to_real(dtype)
         diag = gaussian_noise(
             diag_dim,
             mean=0,
@@ -158,7 +158,7 @@ class RandomLordMatrix:
         if (h != w) and symmetric:
             raise ValueError("Symmetric matrices must be square!")
         # check that svals are nonnegative real
-        if svals.dtype != dtype_to_real(svals.dtype):
+        if svals.dtype != complex_dtype_to_real(svals.dtype):
             raise ValueError("Singular/eigenvalues must be real!")
         try:
             if psd and (svals < 0).any():
@@ -244,7 +244,7 @@ class RandomLordMatrix:
         if rank <= 0:
             raise ValueError("Rank must be positive!")
         h, w = shape
-        svals_dtype = dtype_to_real(dtype)
+        svals_dtype = complex_dtype_to_real(dtype)
         min_shape = min(shape)
         # a few ones, followed by a poly decay
         svals = cls.get_decay_svals(
@@ -296,7 +296,7 @@ class RandomLordMatrix:
         if rank <= 0:
             raise ValueError("Rank must be positive!")
         h, w = shape
-        svals_dtype = dtype_to_real(dtype)
+        svals_dtype = complex_dtype_to_real(dtype)
         min_shape = min(shape)
         # a few ones, followed by exp decay
         svals = cls.get_decay_svals(

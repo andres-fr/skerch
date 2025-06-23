@@ -8,7 +8,7 @@
 import pytest
 import torch
 
-from skerch.utils import torch_dtype_as_str, dtype_to_real
+from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 
@@ -50,39 +50,51 @@ def test_dtype_utils():
     """Test case for dtype manipulation utils"""
     dtype = torch.float16
     assert "float16" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.float16 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float16 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     dtype = torch.float32
     assert "float32" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.float32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float32 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     dtype = torch.float64
     assert "float64" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.float64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float64 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     #
     dtype = torch.complex32
     assert "complex32" == torch_dtype_as_str(
         dtype
     ), "Bad str(type) conversion!"
-    assert torch.float16 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float16 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     dtype = torch.complex64
     assert "complex64" == torch_dtype_as_str(
         dtype
     ), "Bad str(dtype) conversion!"
-    assert torch.float32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float32 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     dtype = torch.complex128
     assert "complex128" == torch_dtype_as_str(
         dtype
     ), "Bad str(dtype) conversion!"
-    assert torch.float64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.float64 == complex_dtype_to_real(
+        dtype
+    ), "Bad real(dtype) cast!"
     #
     dtype = torch.uint8
     assert "uint8" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.uint8 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.uint8 == complex_dtype_to_real(dtype), "Bad real(dtype) cast!"
     dtype = torch.int32
     assert "int32" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.int32 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.int32 == complex_dtype_to_real(dtype), "Bad real(dtype) cast!"
     dtype = torch.int64
     assert "int64" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
-    assert torch.int64 == dtype_to_real(dtype), "Bad real(dtype) cast!"
+    assert torch.int64 == complex_dtype_to_real(dtype), "Bad real(dtype) cast!"
 
 
 # ##############################################################################
