@@ -46,7 +46,7 @@ class BaseLinOp:
 
     Implements the ``.shape`` attribute and basic matmul functionality with
     vectors and matrices (also via the ``@`` operator). Intended to be
-    extended with further functionality via :meth:`matmul` and :meth:`rmatmul`.
+    extended with further functionality via :meth:`vecmul` and :meth:`rvecmul`.
 
     :param shape: ``(height, width)`` of linear operator.
     """
@@ -229,7 +229,18 @@ class ByVectorLinOp(BaseLinOp):
 
 
 class TransposedLinOp:
-    """ """
+    """Hermitian transposition of a linear operator.
+
+    :param lop: Any object supporting a shape ``(h, w)`` attribute as well as
+      the right- and left- matmul operator ``@``.
+
+    Given a linear operator :math:`A`, real or complex, this class wraps its
+    functionality, such that ``TransposedLinOp(lop)`` behaves line the
+    (Hermitian) transposition :math:`A^H`. This is done by swapping dimensions
+    and matmul methods leveraging the following identity:
+
+    :math:`A^H v = ((A^H v)^H)^H = (v^H A)^H`.
+    """
 
     def __init__(self, lop):
         """Initializer. See class docstring."""
@@ -241,33 +252,29 @@ class TransposedLinOp:
     # operator interfaces
     def __matmul__(self, x):
         """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
+        # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
         x_vec = len(x.shape) == 1
-        result = BaseLinOp.matmul_vectorizer(
-            x.conj() if x_vec else x.H,
-            self.lop.shape,
-            self.lop.vecmul,
-            self.lop.rvecmul,
-            adjoint=True,
-        )
-        result = result.conj() if x_vec else result.H
-        return result
+        x = x.conj() if x_vec else x.H
+        x = x @ self.lop
+        x = x.conj() if x_vec else x.H
+        return x
 
     def __rmatmul__(self, x):
         """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
+        # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
         x_vec = len(x.shape) == 1
-        result = BaseLinOp.matmul_vectorizer(
-            x.conj() if x_vec else x.H,
-            self.lop.shape,
-            self.lop.vecmul,
-            self.lop.rvecmul,
-            adjoint=False,
-        )
-        result = result.conj() if x_vec else result.H
-        return result
+        x = x.conj() if x_vec else x.H
+        x = self.lop @ x
+        x = x.conj() if x_vec else x.H
+        return x
 
     def t(self):
         """Undo transposition"""
         return self.lop
+
+    def __repr__(self):
+        """Returns a string in the form (str(lop)).H"""
+        return f"({str(self.lop)}).H"
 
 
 # ##############################################################################
@@ -380,8 +387,11 @@ class SumLinOp(BaseLinOp):
         """
         self.check_input(x, self.shape, adjoint=True)
         result = x @ self.operators[0]
-        for o in self.operators[1:]:
-            result += x @ o
+        for o, s in zip(self.operators[1:], self.signs[1:]):
+            if s:
+                result += x @ o
+            else:
+                result -= x @ o
         return result
 
     def __repr__(self):

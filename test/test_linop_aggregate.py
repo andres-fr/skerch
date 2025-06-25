@@ -217,7 +217,7 @@ def test_sum_correctness(
     Creates a set of random matrices and linops. Then sums them explicitly, and
     creates a ``SumLinOp``. Tests that:
     * Matmul and rmatmul with sum linop is same as with matrix
-    * Same with (Hermitian) transposed sum linop
+    * Transposed ``SumLinOp`` is correct
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -239,24 +239,13 @@ def test_sum_correctness(
                     lop = SumLinOp(
                         (f"M_{i}", 1, m) for i, m in enumerate(submatrices, 1)
                     )
-                    v = gaussian_noise(
-                        mat.shape[1],
-                        dtype=dtype,
-                        device=device,
-                        seed=seed + 100,
-                    )
-                    w = gaussian_noise(
-                        mat.shape[0],
-                        dtype=dtype,
-                        device=device,
-                        seed=seed + 101,
-                    )
-                    assert torch.allclose(
-                        mat @ v, lop @ v, atol=tol
-                    ), "Incorrect forward sum+ linop!"
-                    assert torch.allclose(
-                        w @ mat, w @ lop, atol=tol
-                    ), "Incorrect adjoint sum+ linop!"
+                    lopmat = linop_to_matrix(lop, dtype, device)
+                    assert (mat == lopmat).all(), "Incorrect sum+ linop!"
+                    lopT = TransposedLinOp(lop)
+                    lopmatT = linop_to_matrix(lopT, dtype, device)
+                    assert (
+                        mat.H == lopmatT
+                    ).all(), "Incorrect sum+ transposition!"
                     # alternating sum and diff: M1 - M2 + M3 ...
                     mat = submatrices[0].clone()
                     for i, m in enumerate(submatrices[1:]):
@@ -269,18 +258,15 @@ def test_sum_correctness(
                         (f"M_{i}", i % 2, m)
                         for i, m in enumerate(submatrices, 1)
                     )
-                    assert torch.allclose(
-                        mat @ v, lop @ v, atol=tol
-                    ), "Incorrect alternating sum linop!"
-                    try:
-                        assert torch.allclose(
-                            w @ mat, w @ lop, atol=tol
-                        ), "Incorrect adjoint alternating sum linop!"
-                    except:
-                        print(
-                            "THIS TEST IS FAILING PROBABLY DUE TO SIGN ORDER"
-                        )
-                        breakpoint()
+                    lopmat = linop_to_matrix(lop, dtype, device)
+                    assert (
+                        mat == lopmat
+                    ).all(), "Incorrect alternating sum linop!"
+                    lopT = TransposedLinOp(lop)
+                    lopmatT = linop_to_matrix(lopT, dtype, device)
+                    assert (
+                        mat.H == lopmatT
+                    ).all(), "Incorrect alternating sum transposition!"
 
 
 def test_composite_correctness(
