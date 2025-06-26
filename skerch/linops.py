@@ -403,240 +403,245 @@ class SumLinOp(BaseLinOp):
         return result
 
 
-# # ##############################################################################
-# # # DIAGONAL LINEAR OPERATORS
-# # ##############################################################################
-# class DiagonalLinOp(BaseLinOp):
-#     r"""Diagonal linear operator.
+# ##############################################################################
+# # DIAGONAL LINEAR OPERATORS
+# ##############################################################################
+class DiagonalLinOp(BaseLinOp):
+    r"""Diagonal linear operator.
 
-#     Given a vector ``v`` of ``d`` dimensions, this class implements a diagonal
-#     linear operator of shape ``(d, d)`` via left- and right-matrix
-#     multiplication, as well as the ``shape`` attribute, only requiring linear
-#     (:math:`\mathcal{O}(d)`) memory and runtime.
-#     """
+    Given a vector ``v`` of ``d`` dimensions, this class implements a diagonal
+    linear operator of shape ``(d, d)`` via left- and right-matrix
+    multiplication, as well as the ``shape`` attribute, only requiring linear
+    (:math:`\mathcal{O}(d)`) memory and runtime.
+    """
 
-#     MAX_PRINT_ENTRIES = 20
+    MAX_PRINT_ENTRIES = 20
 
-#     def __init__(self, diag):
-#         """:param diag: Vector to be casted as diagonal linop."""
-#         if len(diag.shape) != 1:
-#             raise BadShapeError("Diag must be a vector!")
-#         self.diag = diag
-#         super().__init__((len(diag),) * 2)  # this sets self.shape also
+    def __init__(self, diag):
+        """:param diag: Vector to be casted as diagonal linop."""
+        if len(diag.shape) != 1 or diag.numel() <= 0:
+            raise BadShapeError("Diag must be a nonempty vector!")
+        self.diag = diag
+        super().__init__((len(diag),) * 2)  # this sets self.shape also
 
-#     def __matmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
 
-#         See parent class for more details.
-#         """
-#         self.check_input(x, self.shape, adjoint=False)
-#         if len(x.shape) == 2:
-#             result = (x.T * self.diag).T
-#         else:
-#             # due to torch warning, can't transpose shapes other than 2
-#             result = x * self.diag
-#         return result
+        See parent class for more details.
+        """
+        self.check_input(x, self.shape, adjoint=False)
+        if len(x.shape) == 2:
+            result = (x.T * self.diag).T
+        else:
+            # due to torch warning, can't transpose shapes other than 2
+            result = x * self.diag
+        return result
 
-#     def __rmatmul__(self, x):
-#         """Adjoint (left) matrix-vector multiplication ``x @ self``.
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
-#         See parent class for more details.
-#         """
-#         self.check_input(x, self.shape, adjoint=True)
-#         result = x * self.diag
-#         return result
+        See parent class for more details.
+        """
+        self.check_input(x, self.shape, adjoint=True)
+        result = x * self.diag
+        return result
 
-#     def __repr__(self):
-#         """Returns a string in the form <DiagonalLinOp(shape)[v1, v2, ...]>."""
-#         clsname = self.__class__.__name__
-#         diagstr = ", ".join(
-#             [str(x.item()) for x in self.diag[: self.MAX_PRINT_ENTRIES]]
-#         )
-#         if len(self.diag) > self.MAX_PRINT_ENTRIES:
-#             diagstr += "..."
-#         s = f"<{clsname}({self.shape[0]}x{self.shape[1]})[{diagstr}]>"
-#         return s
+    def to_matrix(self):
+        """Efficiently convert this linear operator into a matrix."""
+        result = torch.diag(self.diag)
+        return result
+
+    def __repr__(self):
+        """Returns a string in the form <DiagonalLinOp(shape)[v1, v2, ...]>."""
+        clsname = self.__class__.__name__
+        diagstr = ", ".join(
+            [str(x.item()) for x in self.diag[: self.MAX_PRINT_ENTRIES]]
+        )
+        if len(self.diag) > self.MAX_PRINT_ENTRIES:
+            diagstr += "..."
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]})[{diagstr}]>"
+        return s
 
 
-# class BandedLinOp(BaseLinOp):
-#     r"""Banded linear operator (composed of diagonals).
+class BandedLinOp(BaseLinOp):
+    r"""Banded linear operator (composed of diagonals).
 
-#     Given a collection of :math:`k` vectors, this class implements a banded
-#     linear operator, where each given vector is a (sub)-diagonal. It is
-#     composed by :math:`k` :class:`DiagonalLinOp` operators, thus its memory
-#     and runtime is equivalent to storing and running the individual diagonals.
+    Given a collection of :math:`k` vectors, this class implements a banded
+    linear operator, where each given vector is a (sub)-diagonal. It is
+    composed by :math:`k` :class:`DiagonalLinOp` operators, thus its memory
+    and runtime is equivalent to storing and running the individual diagonals.
 
-#     .. note::
-#       All given vectors must be of appropriate length with respect to their
-#       position. For example, a square tridiagonal matrix of shape ``(n, n)``
-#       has a main diagonal at index 0 with length ``n``, and two subdiagonals at
-#       indices 1, -1 with length ``n - 1``. Still, this linop can also be
-#       non-square (unless it is symmetric), as long as all given diagonals fit
-#       in the implicit shape.
+    .. note::
+      All given vectors must be of appropriate length with respect to their
+      position. For example, a square tridiagonal matrix of shape ``(n, n)``
+      has a main diagonal at index 0 with length ``n``, and two subdiagonals at
+      indices 1, -1 with length ``n - 1``. Still, this linop can also be
+      non-square (unless it is symmetric), as long as all given diagonals fit
+      in the implicit shape.
 
-#     Usage example::
+    Usage example::
 
-#       diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
-#       B = BandedLinOp(diags, symmetric=False)
-#       w = B @ v
-#     """
+      diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
+      B = BandedLinOp(diags, symmetric=False)
+      w = B @ v
+    """
 
-#     MAX_PRINT_ENTRIES = 20
+    MAX_PRINT_ENTRIES = 20
 
-#     @staticmethod
-#     def __initial_checks(indexed_diags, symmetric):
-#         """Performs input checks right at initialization."""
-#         # extract diagonal lengths and check they are vectors
-#         diag_lengths = {}
-#         for idx in sorted(indexed_diags):
-#             diag = indexed_diags[idx]
-#             if len(diag.shape) == 1:
-#                 diag_lengths[idx] = len(diag)
-#             else:
-#                 raise BadShapeError("All diagonals must be vectors!")
-#         if not diag_lengths:
-#             raise ValueError(f"Empty linop dict? {indexed_diags}")
-#         # symmetric mode does not accept negative indices
-#         if symmetric:
-#             if any(idx < 0 for idx in indexed_diags):
-#                 raise BadShapeError(
-#                     "Symmetric banded linop only admits nonnegative indices!"
-#                     + f" {diag_lengths}"
-#                 )
-#         #
-#         return diag_lengths
+    @staticmethod
+    def __initial_checks(indexed_diags, symmetric):
+        """Performs input checks right at initialization."""
+        # extract diagonal lengths and check they are vectors
+        diag_lengths = {}
+        for idx in sorted(indexed_diags):
+            diag = indexed_diags[idx]
+            if len(diag.shape) == 1:
+                diag_lengths[idx] = len(diag)
+            else:
+                raise BadShapeError("All diagonals must be vectors!")
+        if not diag_lengths:
+            raise ValueError(f"Empty linop dict? {indexed_diags}")
+        # symmetric mode does not accept negative indices
+        if symmetric:
+            if any(idx < 0 for idx in indexed_diags):
+                raise BadShapeError(
+                    "Symmetric banded linop only admits nonnegative indices!"
+                    + f" {diag_lengths}"
+                )
+        #
+        return diag_lengths
 
-#     def __init__(self, indexed_diags, symmetric=False):
-#         """Instantiates a banded linear operator.
+    def __init__(self, indexed_diags, symmetric=False):
+        """Instantiates a banded linear operator.
 
-#         :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
-#           ``diag`` is a torch vector containing a diagonal, and ``idx``
-#           indicates the location of the diagonal: 0 is the main diagonal, 1 the
-#           superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
-#         :param symmetric: If true, only diagonals with nonnegative indices are
-#           admitted. Each positive index will be replicated as a negative one.
+        :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
+          ``diag`` is a torch vector containing a diagonal, and ``idx``
+          indicates the location of the diagonal: 0 is the main diagonal, 1 the
+          superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
+        :param symmetric: If true, only diagonals with nonnegative indices are
+          admitted. Each positive index will be replicated as a negative one.
 
-#         .. note::
-#           The shape of this linear operator is implicitly given by the
-#           diagonal lengths and indices. Any inconsistent input will result in
-#           a ``BadShapeError``. In particular, symmetric banded matrices must
-#           also be square.
-#         """
-#         # extract diagonal lengths and check they are vectors
-#         # also check that symmetric mode does not accept negative indices
-#         diag_lengths = self.__initial_checks(indexed_diags, symmetric)
-#         # figure out the smallest matrix that fits all diagonals
-#         # note that in symmetric mode we need to add the negative indices
-#         end_coords = {}
-#         height, width = 0, 0
-#         for idx, length in diag_lengths.items():
-#             i0, j0 = (0, idx) if idx >= 0 else (abs(idx), 0)
-#             i1, j1 = i0 + length, j0 + length
-#             height, width = max(height, i1), max(width, j1)
-#             end_coords[idx] = (i1, j1)
-#         if symmetric:
-#             for idx, length in diag_lengths.items():
-#                 if idx > 0:
-#                     i0, j0, i1, j1 = idx, 0, idx + length, length
-#                     height, width = max(height, i1), max(width, j1)
-#                     end_coords[-idx] = (i1, j1)
-#         # check that all given diagonals fit the linop shape tightly
-#         inconsistent_idxs = set()
-#         for idx, (i1, j1) in end_coords.items():
-#             if (i1 != height) and (j1 != width):
-#                 inconsistent_idxs.add(idx)
-#         #
-#         if inconsistent_idxs:
-#             raise BadShapeError(
-#                 f"Inconsistent diagonal indices/lengths! {diag_lengths}, "
-#                 + f"triggered by indices {inconsistent_idxs} "
-#                 + f" for shape {(height, width)}"
-#             )
-#         # if symmetric, linop must be square
-#         if symmetric:
-#             if height != width:
-#                 raise BadShapeError(
-#                     f"Symmetric banded linop must be square! {diag_lengths}"
-#                 )
-#         # done checking, initialize object
-#         self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
-#         self.symmetric = symmetric
-#         super().__init__((height, width))
+        .. note::
+          The shape of this linear operator is implicitly given by the
+          diagonal lengths and indices. Any inconsistent input will result in
+          a ``BadShapeError``. In particular, symmetric banded matrices must
+          also be square.
+        """
+        # extract diagonal lengths and check they are vectors
+        # also check that symmetric mode does not accept negative indices
+        diag_lengths = self.__initial_checks(indexed_diags, symmetric)
+        # figure out the smallest matrix that fits all diagonals
+        # note that in symmetric mode we need to add the negative indices
+        end_coords = {}
+        height, width = 0, 0
+        for idx, length in diag_lengths.items():
+            i0, j0 = (0, idx) if idx >= 0 else (abs(idx), 0)
+            i1, j1 = i0 + length, j0 + length
+            height, width = max(height, i1), max(width, j1)
+            end_coords[idx] = (i1, j1)
+        if symmetric:
+            for idx, length in diag_lengths.items():
+                if idx > 0:
+                    i0, j0, i1, j1 = idx, 0, idx + length, length
+                    height, width = max(height, i1), max(width, j1)
+                    end_coords[-idx] = (i1, j1)
+        # check that all given diagonals fit the linop shape tightly
+        inconsistent_idxs = set()
+        for idx, (i1, j1) in end_coords.items():
+            if (i1 != height) and (j1 != width):
+                inconsistent_idxs.add(idx)
+        #
+        if inconsistent_idxs:
+            raise BadShapeError(
+                f"Inconsistent diagonal indices/lengths! {diag_lengths}, "
+                + f"triggered by indices {inconsistent_idxs} "
+                + f" for shape {(height, width)}"
+            )
+        # if symmetric, linop must be square
+        if symmetric:
+            if height != width:
+                raise BadShapeError(
+                    f"Symmetric banded linop must be square! {diag_lengths}"
+                )
+        # done checking, initialize object
+        self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
+        self.symmetric = symmetric
+        super().__init__((height, width))
 
-#     def __matmul_helper(self, x, adjoint=False):
-#         """Helper method to perform multiple diagonal matmuls."""
-#         self.check_input(x, self.shape, adjoint=adjoint)
-#         #
-#         diags = {}
-#         for idx, diag in self.diags.items():
-#             diags[idx] = diag
-#             if self.symmetric and idx > 0:
-#                 diags[-idx] = diag
-#         #
-#         outdim = self.shape[1] if adjoint else self.shape[0]
-#         result = torch.zeros(outdim, dtype=x.dtype, device=x.device)
-#         #
-#         for idx, d in diags.items():
-#             if adjoint:
-#                 in_beg = abs(min(idx, 0))
-#                 out_beg = max(idx, 0)
-#             else:
-#                 in_beg = max(idx, 0)
-#                 out_beg = abs(min(idx, 0))
-#             dlen = d.shape[0]
-#             result[out_beg : out_beg + dlen] += d @ x[in_beg : in_beg + dlen]
-#         #
-#         return result
+    def __matmul_helper(self, x, adjoint=False):
+        """Helper method to perform multiple diagonal matmuls."""
+        self.check_input(x, self.shape, adjoint=adjoint)
+        #
+        diags = {}
+        for idx, diag in self.diags.items():
+            diags[idx] = diag
+            if self.symmetric and idx > 0:
+                diags[-idx] = diag
+        #
+        outdim = self.shape[1] if adjoint else self.shape[0]
+        result = torch.zeros(outdim, dtype=x.dtype, device=x.device)
+        #
+        for idx, d in diags.items():
+            if adjoint:
+                in_beg = abs(min(idx, 0))
+                out_beg = max(idx, 0)
+            else:
+                in_beg = max(idx, 0)
+                out_beg = abs(min(idx, 0))
+            dlen = d.shape[0]
+            result[out_beg : out_beg + dlen] += d @ x[in_beg : in_beg + dlen]
+        #
+        return result
 
-#     def __matmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
 
-#         See parent class for more details.
-#         """
-#         return self.__matmul_helper(x, adjoint=False)
+        See parent class for more details.
+        """
+        return self.__matmul_helper(x, adjoint=False)
 
-#     def __rmatmul__(self, x):
-#         """Adjoint (left) matrix-vector multiplication ``x @ self``.
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
-#         See parent class for more details.
-#         """
-#         return self.__matmul_helper(x, adjoint=True)
+        See parent class for more details.
+        """
+        return self.__matmul_helper(x, adjoint=True)
 
-#     def __repr__(self):
-#         """Returns a string in the form <BandedLinOp(shape)[idx1,..., sym]>."""
-#         clsname = self.__class__.__name__
-#         idxs = ", ".join(str(idx) for idx in sorted(self.diags))
-#         s = (
-#             f"<{clsname}({self.shape[0]}x{self.shape[1]})[{idxs}, "
-#             + f"sym={self.symmetric}]>"
-#         )
-#         return s
+    def __repr__(self):
+        """Returns a string in the form <BandedLinOp(shape)[idx1,..., sym]>."""
+        clsname = self.__class__.__name__
+        idxs = ", ".join(str(idx) for idx in sorted(self.diags))
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]})[{idxs}, "
+            + f"sym={self.symmetric}]>"
+        )
+        return s
 
-#     def to_matrix(self):
-#         """Convert this linear operator into a matrix."""
-#         # check that all diagonals are of same dtype and device
-#         dtypes, devices = zip(
-#             *((d.diag.dtype, d.diag.device) for d in self.diags.values())
-#         )
-#         if len(set(dtypes)) > 1:
-#             raise RuntimeError(f"Inconsistent diagonal dtypes! {dtypes}")
-#         if len(set(devices)) > 1:
-#             raise RuntimeError(f"Inconsistent diagonal devices! {devices}")
-#         # create and populate resulting matrix
-#         result = torch.zeros(self.shape, dtype=dtypes[0], device=devices[0])
-#         for idx, diag in self.diags.items():
-#             dlen = len(diag.diag)
-#             if idx >= 0:
-#                 result[range(0, dlen), range(idx, dlen + idx)] = diag.diag
-#             else:
-#                 idx = abs(idx)
-#                 result[range(idx, dlen + idx), range(0, dlen)] = diag.diag
-#         #
-#         if self.symmetric:
-#             result = result + result.T
-#             result[range(len(result)), range(len(result))] /= 2
-#         #
-#         return result
+    def to_matrix(self):
+        """Efficiently convert this linear operator into a matrix."""
+        # check that all diagonals are of same dtype and device
+        dtypes, devices = zip(
+            *((d.diag.dtype, d.diag.device) for d in self.diags.values())
+        )
+        if len(set(dtypes)) > 1:
+            raise RuntimeError(f"Inconsistent diagonal dtypes! {dtypes}")
+        if len(set(devices)) > 1:
+            raise RuntimeError(f"Inconsistent diagonal devices! {devices}")
+        # create and populate resulting matrix
+        result = torch.zeros(self.shape, dtype=dtypes[0], device=devices[0])
+        for idx, diag in self.diags.items():
+            dlen = len(diag.diag)
+            if idx >= 0:
+                result[range(0, dlen), range(idx, dlen + idx)] = diag.diag
+            else:
+                idx = abs(idx)
+                result[range(idx, dlen + idx), range(0, dlen)] = diag.diag
+        #
+        if self.symmetric:
+            result = result + result.T
+            result[range(len(result)), range(len(result))] /= 2
+        #
+        return result
 
 
 # # ##############################################################################

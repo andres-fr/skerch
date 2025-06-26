@@ -158,10 +158,10 @@ def test_aggregate_formal_and_basic_correctness(sum_shapes):
     slop = SumLinOp((("M", 1, m), ("L1", 1, l1), ("L2", 1, l2)))
     clop = CompositeLinOp((("M", m), ("L1", l1), ("L2", l2)))
     assert (
-        linop_to_matrix(slop) == m + torch.eye(len(m)) * 3
+        linop_to_matrix(slop, m.dtype, m.device) == m + torch.eye(len(m)) * 3
     ).all(), "Incorrect sum linop to matrix?"
     assert (
-        linop_to_matrix(clop) == m * 2
+        linop_to_matrix(clop, m.dtype, m.device) == m * 2
     ).all(), "Incorrect composite linop to matrix?"
     # shape inconsistencies raise errors
     for shapes in sum_shapes:
@@ -186,8 +186,8 @@ def test_sum_correctness(
 
     Creates a set of random matrices. Then composes them explicitly, and
     creates a ``SumLinOp``. Tests that:
-    * Matmul and rmatmul with linop is same as with matrix
-    * Transposed linop is correct
+    * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
+    * Transposed linop is correct (fwd and adj)
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -209,13 +209,23 @@ def test_sum_correctness(
                     lop = SumLinOp(
                         (f"M_{i}", 1, m) for i, m in enumerate(submatrices, 1)
                     )
-                    lopmat = linop_to_matrix(lop, dtype, device)
-                    assert (mat == lopmat).all(), "Incorrect sum+ linop!"
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                    assert (mat == lopmat).all(), "Incorrect sum+ (fwd) linop!"
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=True)
+                    assert (mat == lopmat).all(), "Incorrect sum+ (adj) linop!"
                     lopT = TransposedLinOp(lop)
-                    lopmatT = linop_to_matrix(lopT, dtype, device)
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=False
+                    )
                     assert (
                         mat.H == lopmatT
-                    ).all(), "Incorrect sum+ transposition!"
+                    ).all(), "Incorrect sum+ transposition! (fwd)"
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=True
+                    )
+                    assert (
+                        mat.H == lopmatT
+                    ).all(), "Incorrect sum+ transposition! (adj)"
                     # alternating sum and diff: M1 - M2 + M3 ...
                     mat = submatrices[0].clone()
                     for i, m in enumerate(submatrices[1:]):
@@ -227,15 +237,27 @@ def test_sum_correctness(
                         (f"M_{i}", i % 2, m)
                         for i, m in enumerate(submatrices, 1)
                     )
-                    lopmat = linop_to_matrix(lop, dtype, device)
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=False)
                     assert (
                         mat == lopmat
-                    ).all(), "Incorrect alternating sum linop!"
+                    ).all(), "Incorrect alternating sum linop! (fwd)"
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=True)
+                    assert (
+                        mat == lopmat
+                    ).all(), "Incorrect alternating sum linop! (adj)"
                     lopT = TransposedLinOp(lop)
-                    lopmatT = linop_to_matrix(lopT, dtype, device)
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=False
+                    )
                     assert (
                         mat.H == lopmatT
-                    ).all(), "Incorrect alternating sum transposition!"
+                    ).all(), "Incorrect alternating sum transposition! (fwd)"
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=True
+                    )
+                    assert (
+                        mat.H == lopmatT
+                    ).all(), "Incorrect alternating sum transposition! (adj)"
 
 
 def test_composite_correctness(
@@ -248,8 +270,8 @@ def test_composite_correctness(
 
     Creates a set of random matrices. Then composes them explicitly, and
     creates a ``CompositeLinOp``. Tests that:
-    * Matmul and rmatmul with linop is same as with matrix
-    * Transposed linop is correct
+    * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
+    * Transposed linop is correct (fwd and adj)
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -272,16 +294,24 @@ def test_composite_correctness(
                     lop = CompositeLinOp(
                         (f"M_{i}", m) for i, m in enumerate(submatrices, 1)
                     )
-                    lopmat = linop_to_matrix(lop, dtype, device)
-                    try:
-                        assert torch.allclose(
-                            mat, lopmat, atol=tol
-                        ), "Incorrect composite linop!"
-                    except:
-                        # torch.allclose(mat, lopmat, atol=0.00001)
-                        breakpoint()
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                    assert torch.allclose(
+                        mat, lopmat, atol=tol
+                    ), "Incorrect composite linop! (fwd)"
+                    lopmat = linop_to_matrix(lop, dtype, device, adjoint=True)
+                    assert torch.allclose(
+                        mat, lopmat, atol=tol
+                    ), "Incorrect composite linop! (adj)"
                     lopT = TransposedLinOp(lop)
-                    lopmatT = linop_to_matrix(lopT, dtype, device)
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=False
+                    )
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
-                    ), "Incorrect composite transposition!"
+                    ), "Incorrect composite transposition! (fwd)"
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=True
+                    )
+                    assert torch.allclose(
+                        mat.H, lopmatT, atol=tol
+                    ), "Incorrect composite transposition! (adj)"
