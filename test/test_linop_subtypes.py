@@ -160,13 +160,13 @@ def test_diagonal_correctness(
                     )
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
-                    ), "Incorrect composite transposition! (fwd)"
+                    ), "Incorrect transposition! (fwd)"
                     lopmatT = linop_to_matrix(
                         lopT, dtype, device, adjoint=True
                     )
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
-                    ), "Incorrect composite transposition! (adj)"
+                    ), "Incorrect transposition! (adj)"
 
 
 # ##############################################################################
@@ -233,8 +233,42 @@ def test_banded_correctness(
 
     For all seeds, devices dtypes and sizes, creates a diagonal linop and
     tests that:
-    * the ``to_matrix`` method is correct
-    * operationally it equals the explicit matrix
+    * operationally it equals the explicit matrix via the ``to_matrix`` method
     * its transpose is correct
     """
-    breakpoint()
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for config in banded_configs:
+                    expected_shape, sym, *diag_config = config
+                    diags = {
+                        idx: gaussian_noise(
+                            dims, seed=seed + i, dtype=dtype, device=device
+                        )
+                        for i, (idx, dims) in enumerate(diag_config)
+                    }
+                    lop = BandedLinOp(diags, symmetric=sym)
+                    # fwd and adj matmul correctness
+                    lopmat = lop.to_matrix()
+                    mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                    assert torch.allclose(
+                        lopmat, mat, atol=tol
+                    ), "Incorrect (fwd) banded?"
+                    mat = linop_to_matrix(lop, dtype, device, adjoint=True)
+                    assert torch.allclose(
+                        lopmat, mat, atol=tol
+                    ), "Incorrect (adj) banded?"
+                    # transpose
+                    lopT = TransposedLinOp(lop)
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=False
+                    )
+                    assert torch.allclose(
+                        mat.H, lopmatT, atol=tol
+                    ), "Incorrect transposition! (fwd)"
+                    lopmatT = linop_to_matrix(
+                        lopT, dtype, device, adjoint=True
+                    )
+                    assert torch.allclose(
+                        mat.H, lopmatT, atol=tol
+                    ), "Incorrect transposition! (adj)"
