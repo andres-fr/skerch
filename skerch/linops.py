@@ -356,7 +356,7 @@ class SumLinOp(BaseLinOp):
     """
 
     def __init__(self, named_signed_operators):
-        """Instantiates a summation linear operator."""
+        """Instantiates a summation linear operator. See class docstring."""
         self.names, self.signs, self.operators = zip(*named_signed_operators)
         shapes = [o.shape for o in self.operators]
         if not shapes:
@@ -404,7 +404,7 @@ class SumLinOp(BaseLinOp):
 
 
 # ##############################################################################
-# # DIAGONAL LINEAR OPERATORS
+# # DIAGONAL/BANDED LINEAR OPERATORS
 # ##############################################################################
 class DiagonalLinOp(BaseLinOp):
     r"""Diagonal linear operator.
@@ -413,12 +413,14 @@ class DiagonalLinOp(BaseLinOp):
     linear operator of shape ``(d, d)`` via left- and right-matrix
     multiplication, as well as the ``shape`` attribute, only requiring linear
     (:math:`\mathcal{O}(d)`) memory and runtime.
+
+    :param diag: Vector to be casted as diagonal linop.
     """
 
     MAX_PRINT_ENTRIES = 20
 
     def __init__(self, diag):
-        """:param diag: Vector to be casted as diagonal linop."""
+        """Initializer. See class docstring."""
         if len(diag.shape) != 1 or diag.numel() <= 0:
             raise BadShapeError("Diag must be a nonempty vector!")
         self.diag = diag
@@ -472,8 +474,11 @@ class BandedLinOp(BaseLinOp):
     and runtime is equivalent to storing and running the individual diagonals.
 
     .. note::
-      All given vectors must be of appropriate length with respect to their
-      position. For example, a square tridiagonal matrix of shape ``(n, n)``
+      The shape of this linear operator is implicitly given by the
+      diagonal lengths and indices. Any inconsistent input will result in
+      a ``BadShapeError``. In particular, symmetric banded matrices must
+      also be square.
+      For example, a square tridiagonal matrix of shape ``(n, n)``
       has a main diagonal at index 0 with length ``n``, and two subdiagonals at
       indices 1, -1 with length ``n - 1``. Still, this linop can also be
       non-square (unless it is symmetric), as long as all given diagonals fit
@@ -484,6 +489,14 @@ class BandedLinOp(BaseLinOp):
       diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
       B = BandedLinOp(diags, symmetric=False)
       w = B @ v
+
+
+    :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
+      ``diag`` is a torch vector containing a diagonal, and ``idx``
+      indicates the location of the diagonal: 0 is the main diagonal, 1 the
+      superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
+    :param symmetric: If true, only diagonals with nonnegative indices are
+      admitted. Each positive index will be replicated as a negative one.
     """
 
     MAX_PRINT_ENTRIES = 20
@@ -512,21 +525,7 @@ class BandedLinOp(BaseLinOp):
         return diag_lengths
 
     def __init__(self, indexed_diags, symmetric=False):
-        """Instantiates a banded linear operator.
-
-        :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
-          ``diag`` is a torch vector containing a diagonal, and ``idx``
-          indicates the location of the diagonal: 0 is the main diagonal, 1 the
-          superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
-        :param symmetric: If true, only diagonals with nonnegative indices are
-          admitted. Each positive index will be replicated as a negative one.
-
-        .. note::
-          The shape of this linear operator is implicitly given by the
-          diagonal lengths and indices. Any inconsistent input will result in
-          a ``BadShapeError``. In particular, symmetric banded matrices must
-          also be square.
-        """
+        """Initializer. See class docstring."""
         # extract diagonal lengths and check they are vectors
         # also check that symmetric mode does not accept negative indices
         diag_lengths = self.__initial_checks(indexed_diags, symmetric)
@@ -644,154 +643,63 @@ class BandedLinOp(BaseLinOp):
         return result
 
 
-# # ##############################################################################
-# # # PROJECTION LINEAR OPERATORS
-# # ##############################################################################
-# class OrthProjLinOp(BaseLinOp):
-#     r"""Linear operator for an orthogonal projector.
+# ##############################################################################
+# # TORCH INTEROPERABILITY
+# ##############################################################################
+class TorchLinOpWrapper:
+    """Linear operator that always accepts and produces PyTorch tensors.
 
-#     Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-#     columns, this class implements the orthogonal projector onto its span,
-#     i.e. :math:`Q Q^T`.
-#     """
+    Since this library operates mainly with PyTorch tensors, but some useful
+    LinOps interface with e.g. NumPy arrays instead, this mixin class acts as a
+    wraper on the ``__matmul__`` and ``__rmatmul__`` operators,
+    so that the operator expects and returns torch tensors, even when the
+    wrapped operator interfaces with NumPy/HDF5. Usage example::
 
-#     def __init__(self, Q):
-#         """Object initialization.
+      # extend NumPy linear operator via multiple inheritance
+      class TorchWrappedLinOp(TorchLinOpWrapper, LinOp):
+          pass
+      lop = TorchWrappedLinOp(...)  # instantiate normally
+      w = lop @ v  # now v can be a PyTorch tensor
+    """
 
-#         :param Q: Linear operator of shape ``(h, w)`` with ``h >= w``, expected
-#           to be orthonormal (i.e. columns with unit Euclidean norm and all
-#           orthogonal to each other). It must implement the left and right
-#           matmul operations via the ``@`` operator.
+    @staticmethod
+    def _input_wrapper(x):
+        """Helper method to admit PyTorch tensors."""
+        if isinstance(x, torch.Tensor):
+            return x.cpu().numpy(), x.device
+        else:
+            return x, None
 
-#         .. warning::
+    @staticmethod
+    def _output_wrapper(x, torch_device=None):
+        """Helper method to produce PyTorch tensors."""
+        if torch_device is not None:
+            return torch.from_numpy(x).to(torch_device)
+        else:
+            return x
 
-#           This class assumes ``Q`` is orthonormal, but this is not checked.
-#         """
-#         self.Q = Q
-#         #
-#         h, w = Q.shape
-#         if w > h:
-#             raise BadShapeError("Projector matrix must be thin!")
-#         super().__init__((h, h))  # this sets self.shape also
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
 
-#     def __matmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
+        Casts given PyTorch tensor into NumPy before applying matmul.
+        Then casts produced result back into same PyTorch datatype and device.
+        """
+        x, device = self._input_wrapper(x)
+        result = self._output_wrapper(super().__matmul__(x), device)
+        return result
 
-#         See parent class for more details.
-#         """
-#         self.check_input(x, self.shape, adjoint=False)
-#         if len(x.shape) == 1:
-#             result = self.Q @ (x @ self.Q)
-#         elif len(x.shape) == 2:
-#             result = self.Q @ (x.T @ self.Q).T
-#         else:
-#             raise RuntimeError(f"Unsupported input shape: {x.shape}")
-#         return result
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
-#     def __rmatmul__(self, x):
-#         """Adjoint (left) matrix-vector multiplication ``x @ self``.
+        Casts given PyTorch tensor into NumPy before applying matmul.
+        Then casts produced result back into same PyTorch datatype and device.
+        """
+        x, device = self._input_wrapper(x)
+        result = self._output_wrapper(super().__rmatmul__(x), device)
+        return result
 
-#         See parent class for more details.
-#         """
-#         self.check_input(x, self.shape, adjoint=True)
-#         if len(x.shape) == 1:
-#             result = self.Q @ (x @ self.Q)
-#             return result
-#         elif len(x.shape) == 2:
-#             result = self.Q @ (x @ self.Q).T
-#             return result.T
-#         else:
-#             raise RuntimeError(f"Unsupported input shape: {x.shape}")
-
-#     def __repr__(self):
-#         """Returns a string in the form <OrthProjLinOp(Q_shape)>."""
-#         clsname = self.__class__.__name__
-#         s = f"<{clsname}({self.Q.shape})>"
-#         return s
-
-
-# class NegOrthProjLinOp(OrthProjLinOp):
-#     """Linear operator for a negative orthogonal projector.
-
-#     Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-#     columns, this class implements the orthogonal projector :math:`Q Q^T`.
-#     Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-#     columns, this class implements the orthogonal projector onto the space
-#     orthogonal to its span, i.e. :math:`(I - Q Q^T)`.
-#     """
-
-#     def __matmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
-
-#         See parent class for more details.
-#         """
-#         return x - super().__matmul__(x)
-
-#     def __rmatmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
-
-#         See parent class for more details.
-#         """
-#         return x - super().__rmatmul__(x)
-
-
-# # ##############################################################################
-# # # TORCH INTEROPERABILITY
-# # ##############################################################################
-# class TorchLinOpWrapper:
-#     """Linear operator that always accepts and produces PyTorch tensors.
-
-#     Since this library operates mainly with PyTorch tensors, but some useful
-#     LinOps interface with e.g. NumPy arrays instead, this mixin class acts as a
-#     wraper on the ``__matmul__`` and ``__rmatmul__`` operators,
-#     so that the operator expects and returns torch tensors, even when the
-#     wrapped operator interfaces with NumPy/HDF5. Usage example::
-
-#       # extend NumPy linear operator via multiple inheritance
-#       class TorchWrappedLinOp(TorchLinOpWrapper, LinOp):
-#           pass
-#       lop = TorchWrappedLinOp(...)  # instantiate normally
-#       w = lop @ v  # now v can be a PyTorch tensor
-#     """
-
-#     @staticmethod
-#     def _input_wrapper(x):
-#         """Helper method to admit PyTorch tensors."""
-#         if isinstance(x, torch.Tensor):
-#             return x.cpu().numpy(), x.device
-#         else:
-#             return x, None
-
-#     @staticmethod
-#     def _output_wrapper(x, torch_device=None):
-#         """Helper method to produce PyTorch tensors."""
-#         if torch_device is not None:
-#             return torch.from_numpy(x).to(torch_device)
-#         else:
-#             return x
-
-#     def __matmul__(self, x):
-#         """Forward (right) matrix-vector multiplication ``self @ x``.
-
-#         Casts given PyTorch tensor into NumPy before applying matmul.
-#         Then casts produced result back into same PyTorch datatype and device.
-#         """
-#         x, device = self._input_wrapper(x)
-#         result = self._output_wrapper(super().__matmul__(x), device)
-#         return result
-
-#     def __rmatmul__(self, x):
-#         """Adjoint (left) matrix-vector multiplication ``x @ self``.
-
-#         Casts given PyTorch tensor into NumPy before applying matmul.
-#         Then casts produced result back into same PyTorch datatype and device.
-#         """
-#         x, device = self._input_wrapper(x)
-#         result = self._output_wrapper(super().__rmatmul__(x), device)
-#         return result
-
-#     def __repr__(self):
-#         """Returns a string in the form TorchLinOpWrapper<LinOp ...>."""
-#         wrapper = self.__class__.__name__
-#         result = f"{wrapper}<{super().__repr__()}>"
-#         return result
+    def __repr__(self):
+        """Returns a string in the form TorchLinOpWrapper<LinOp ...>."""
+        wrapper = self.__class__.__name__
+        result = f"{wrapper}<{super().__repr__()}>"
+        return result

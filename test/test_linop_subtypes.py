@@ -2,28 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for sum and banded linops.
-
-
-TTODO:
-* test diag, banded, orthproj and negorthproj linops
-* for the orth, test if they can also combine matrices with lops and the transpose
-
-
-LATER TODO:
-* torch wrapper?
-* Rad, fourier, sketchlord, ssrft measurements (test for seed consistency, complex etc)
-  - ssrft should also be complex and work like gaussian and rademacher
-* generic lop supported, and our measurement lops supporting parallelism.
-
-
-def perform_measurement(lop, meas_lop, parallel_mode=None):
-    """ """
-    if parallel_mode is None:
-        print("WARNING: speedup can be gained. see docs")
-    pass
-
-"""
+"""Pytest for sum and banded linops."""
 
 
 import pytest
@@ -31,7 +10,6 @@ import torch
 
 from skerch.linops import (
     linop_to_matrix,
-    ByVectorLinOp,
     TransposedLinOp,
     DiagonalLinOp,
     BandedLinOp,
