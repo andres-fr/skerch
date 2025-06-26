@@ -60,6 +60,12 @@ class BadShapeError(Exception):
     pass
 
 
+class BadSeedError(Exception):
+    """Error to be thrown when a random seed is not as it should."""
+
+    pass
+
+
 # ##############################################################################
 # # REPRODUCIBLE NOISE
 # ##############################################################################
