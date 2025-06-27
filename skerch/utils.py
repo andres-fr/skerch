@@ -147,6 +147,22 @@ def randperm(n, seed=None, device="cpu", inverse=False):
     return perm
 
 
+def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
+    """Reproducible noise uniformly distributed on the complex unit circle.
+
+    :returns: A tensor of given shape, dtype and device, containing complex
+      i.i.d. noisy entries uniformly distributed around the unit circle.
+      Behaviour is reproducible for a given random seed.
+    """
+    if dtype not in {torch.complex32, torch.complex64, torch.complex128}:
+        raise ValueError(f"Dtype must be complex! was {dtype}")
+    real_dtype = complex_dtype_to_real(dtype)
+    #
+    noise = 2 * torch.pi * uniform_noise(shape, seed, real_dtype, device)
+    noise = noise.mul(1j).exp()
+    return noise
+
+
 def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
     """Reproducible random sign flip using Rademacher noise.
 
@@ -164,19 +180,3 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
         return x, mask
     else:
         return x * mask, mask
-
-
-def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
-    """Reproducible noise uniformly distributed on the complex unit circle.
-
-    :returns: A tensor of given shape, dtype and device, containing complex
-      i.i.d. noisy entries uniformly distributed around the unit circle.
-      Behaviour is reproducible for a given random seed.
-    """
-    if dtype not in {torch.complex32, torch.complex64, torch.complex128}:
-        raise ValueError(f"Dtype must be complex! was {dtype}")
-    real_dtype = complex_dtype_to_real(dtype)
-    #
-    noise = 2 * torch.pi * uniform_noise(shape, seed, real_dtype, device)
-    noise = noise.mul(1j).exp()
-    return noise

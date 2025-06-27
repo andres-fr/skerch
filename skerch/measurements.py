@@ -8,13 +8,16 @@
 from collections import defaultdict
 import warnings
 import torch
+import torch_dct as dct
 from .linops import ByVectorLinOp
 from .utils import (
     BadShapeError,
     BadSeedError,
     rademacher_noise,
+    rademacher_flip,
     gaussian_noise,
     phase_noise,
+    randperm,
 )
 
 
@@ -234,45 +237,46 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # ##############################################################################
 # # SSRFT
 # ##############################################################################
-def ssrft(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
-    r"""Right (forward) matrix multiplication of the SSRFT.
+class SSRFT:
+    @staticmethod
+    def ssrft(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
+        r"""Right (forward) matrix multiplication of the SSRFT.
 
-    This function implements a matrix-free, right-matmul operator of the
-    Scrambled Subsampled Randomized Fourier Transform (SSRFT) for real-valued
-    signals, from `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
+        This function implements a matrix-free, right-matmul operator of the
+        Scrambled Subsampled Randomized Fourier Transform (SSRFT) for real-valued
+        signals, from `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
 
-    .. math::
+        .. math::
 
-      \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
+          \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
 
-    Where :math:`R` is a random index-picker, \mathcal{F} is a Discrete Cosine
-    Transform, and :math:`\Pi, \Pi'` are random permutations.
+        Where :math:`R` is a random index-picker, \mathcal{F} is a Discrete Cosine
+        Transform, and :math:`\Pi, \Pi'` are random permutations.
 
-    :param x: Vector to be projected, such that ``y = SSRFT @ x``
-    :param out_dims: Dimensions of output ``y``, must be less than ``dim(x)``
-    :param seed: Random seed
-    """
-    # make sure all sources of randomness are CPU, to ensure cross-device
-    # consistency of the operator
-    if len(x.shape) != 1:
-        raise NoFlatError("Only flat tensors supported!")
-    x_len = len(x)
-    assert out_dims <= x_len, "Projection to larger dimensions not supported!"
-    seeds = [seed + i for i in range(5)]
-    # first scramble: permute, rademacher, and DCT
-    perm1 = randperm(x_len, seed=seeds[0], device="cpu")
-    x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
-    del perm1, rad1
-    x = dct.dct(x, norm=dct_norm)
-    # second scramble: permute, rademacher and DCT
-    perm2 = randperm(x_len, seed=seeds[2], device="cpu")
-    x, rad2 = rademacher_flip(x[perm2], seeds[3], inplace=False)
-    del perm2, rad2
-    x = dct.dct(x, norm=dct_norm)
-    # extract random indices and return
-    out_idxs = randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]
-    x = x[out_idxs]
-    return x
+        :param x: Vector to be projected, such that ``y = SSRFT @ x``
+        :param out_dims: Dimensions of output ``y``, must be less than ``dim(x)``
+        :param seed: Random seed
+        """
+        # make sure all sources of randomness are CPU, to ensure cross-device
+        # consistency of the operator
+        x_len = x.shape[-1]
+        if out_dims > x_len:
+            raise ValueError("out_dims can't be larger than last dimension!")
+        seeds = [seed + i for i in range(5)]
+        # first scramble: permute, rademacher, and DCT
+        perm1 = randperm(x_len, seed=seeds[0], device="cpu")
+        x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
+        del perm1, rad1
+        x = dct.dct(x, norm=dct_norm)
+        # second scramble: permute, rademacher and DCT
+        perm2 = randperm(x_len, seed=seeds[2], device="cpu")
+        x, rad2 = rademacher_flip(x[perm2], seeds[3], inplace=False)
+        del perm2, rad2
+        x = dct.dct(x, norm=dct_norm)
+        # extract random indices and return
+        out_idxs = randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]
+        x = x[out_idxs]
+        return x
 
 
 def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):

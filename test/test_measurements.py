@@ -27,6 +27,7 @@ TODO:
 
 LATER TODO:
 
+
 * Implement perform_measurement as per below.
   - test correctness and formal (valerr etc)
   - test that parallel versions are equal to inline
@@ -38,6 +39,7 @@ LATER TODO:
 
 TODO:
 
+* test dct2
 * add utest of phase_noise to utils
 * create test for phase noise, also conj, check it looks OK
 * same for SSRFT
@@ -265,26 +267,32 @@ def dct2(x, norm="ortho"):
     len_sig = x.shape[-1]
     len_dct = (len_sig - 1) // 2 + 1
     #
+    spiral = ((-0.5j * torch.pi / len_sig) * torch.arange(len_sig)).exp()
+    #
     v = torch.empty_like(x)
     v[:len_dct] = x[::2]
-    if len_sig % 2:  # odd length
-        v[len_dct:] = x.flip(-1)[1::2]
-    else:  # even length
-        v[len_dct:] = x.flip(-1)[::2]
+    v[len_dct:] = x.flip(-1)[1::2] if (len_sig % 2) else x.flip(-1)[::2]
     #
-    V = torch.fft.fft(v, norm=norm)
-    V *= 2 * torch.exp(-1j * torch.pi * torch.arange(len_sig) / (2 * len_sig))
-    return V.real / (2**0.5)
+    result = ((2**0.5) * torch.fft.fft(v, norm=norm) * spiral).real
+    return result
 
 
 def test_ssrft():
     """"""
     import torch_dct as dct
     import matplotlib.pyplot as plt
+    from skerch.measurements import SSRFT
 
-    aa = torch.zeros(1000)
-    aa[0] = 1
-    cc = dct2(aa, norm="backward")
+    aa = torch.zeros(3, 1000, dtype=torch.float64)
+    aa[5] = 1
+
+    bb = SSRFT.ssrft(aa, 1000, seed=12345, dct_norm="ortho")
+
+
+    TODO:
+    * adapt ssrft to also admit complex (phase noise instead of rademacher)
+    * integrate ssrft into a linop
+    * test it!
 
     breakpoint()
     # idx=5; aa = torch.zeros(1000); aa[idx] = 1; bb = dct.dct(aa, norm="ortho"); cc=dct2(aa)
