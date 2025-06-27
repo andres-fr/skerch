@@ -3,18 +3,17 @@
 
 
 """
-
-
-TEST STRAT:
-
-
-* seed consistency: loop over all linop types and check this
 """
 
 import warnings
 import torch
 from .linops import ByVectorLinOp
-from .utils import BadShapeError, BadSeedError, gaussian_noise
+from .utils import (
+    BadShapeError,
+    BadSeedError,
+    rademacher_noise,
+    gaussian_noise,
+)
 
 
 # ##############################################################################
@@ -63,7 +62,7 @@ class GaussianNoiseLinOp(ByVectorLinOp):
       behaviour is disabled.
     """
 
-    REGISTER = set()
+    REGISTER = []
 
     @classmethod
     def check_register(cls):
@@ -94,7 +93,7 @@ class GaussianNoiseLinOp(ByVectorLinOp):
             seed_end = seed_beg + (
                 self.shape[0] if self.by_row else self.shape[1]
             )
-            self.REGISTER.add((seed_beg, seed_end))
+            self.__class__.REGISTER.append((seed_beg, seed_end))
             self.check_register()
 
     def get_vector(self, idx, device):
@@ -119,6 +118,33 @@ class GaussianNoiseLinOp(ByVectorLinOp):
             + f"seed={self.seed}, dtype={self.dtype} by_row={self.by_row})>"
         )
         return s
+
+
+class RademacherNoiseLinOp(GaussianNoiseLinOp):
+    """Random linear operator with i.i.d. Gaussian entries.
+
+    See superclass docstring for more info.
+    """
+
+    REGISTER = []
+
+    def get_vector(self, idx, device):
+        """Samples a vector with Rademacher i.i.d. noise.
+
+        See base class definition for details.
+        """
+        h, w = self.shape
+        dims = w if self.by_row else h
+        if idx < 0 or idx >= (h if self.by_row else w):
+            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
+        result = (
+            rademacher_noise(  # device always CPU to ensure determinism
+                dims, seed=self.seed + idx, device="cpu"
+            )
+            .to(self.dtype)
+            .to(device)
+        )
+        return result
 
 
 # ##############################################################################

@@ -52,6 +52,7 @@ from skerch.linops import (
 
 from skerch.measurements import (
     perform_measurement,
+    RademacherNoiseLinOp,
     GaussianNoiseLinOp,
 )
 
@@ -78,12 +79,12 @@ def dtypes_tols():
 @pytest.fixture
 def noise_linop_types():
     """Class names for all noise linops to be tested"""
-    result = {GaussianNoiseLinOp}
+    result = {GaussianNoiseLinOp, RademacherNoiseLinOp}
     return result
 
 
 # ##############################################################################
-# # DIAGONAL TESTS
+# # TESTS
 # ##############################################################################
 def test_measurements_formal(
     rng_seeds, torch_devices, dtypes_tols, noise_linop_types
@@ -93,25 +94,29 @@ def test_measurements_formal(
     For every noise linop tests:
     * Repr creates correct strings
     * Register triggers error if overlapping seeds are used if active
-    * Invalid index to ``get_vector`` triggers error
-    * Deterministic behaviour (fwd and adjoint): running twice is same
     * Get_vector triggers error for invalid index, and returns right dtype and
       device otherwise
-
+    * Invalid index to ``get_vector`` triggers error
+    * Deterministic behaviour (fwd and adjoint): running twice is same
     * Seed consistency
-
     """
     # correct string conversion
     hw = (3, 3)
+    lop = RademacherNoiseLinOp(
+        hw, 0, torch.float32, by_row=False, register=False
+    )
+    s = "<RademacherNoiseLinOp(3x3, seed=0, dtype=torch.float32 by_row=False)>"
+    assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
     lop = GaussianNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
     s = "<GaussianNoiseLinOp(3x3, seed=0, dtype=torch.float32 by_row=False)>"
-    assert str(lop) == s, "Unexpected repr for gaussian noise linop!"
-    #
+    assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
     for lop_type in noise_linop_types:
         lop = lop_type((5, 5), seed=0, dtype=torch.float32, by_row=False)
         # register triggers for overlapping seeds regardless of other factors
+        with pytest.raises(BadSeedError):
+            _ = lop_type((5, 5), seed=0, dtype=torch.float32, by_row=False)
         with pytest.raises(BadSeedError):
             _ = lop_type((5, 5), seed=1, dtype=torch.float32, by_row=False)
         with pytest.raises(BadSeedError):
@@ -129,7 +134,7 @@ def test_measurements_formal(
         for seed in rng_seeds:
             for device in torch_devices:
                 for dtype, tol in dtypes_tols.items():
-                    hw = (20, 3)
+                    hw = (100, 2)
                     lop1 = lop_type(
                         hw, seed, dtype, by_row=False, register=False
                     )
@@ -139,7 +144,7 @@ def test_measurements_formal(
                     lop3 = lop_type(
                         hw, seed + 5, dtype, by_row=False, register=False
                     )
-                    # deterministic behaviour
+                    # deterministic behaviour and seed consistency
                     mat1a = linop_to_matrix(
                         lop1, lop1.dtype, device, adjoint=False
                     )
@@ -155,7 +160,6 @@ def test_measurements_formal(
                     mat3 = linop_to_matrix(
                         lop3, lop1.dtype, device, adjoint=False
                     )
-                    #
                     assert (
                         mat1a == mat1b
                     ).all(), f"Nondeterministic linop? {lop1}"
@@ -168,9 +172,6 @@ def test_measurements_formal(
                     #
                     for col in mat1a.H:
                         cosim = abs(col @ mat3) / (col.norm() ** 2)
-                        try:
-                            assert (
-                                cosim < 0.9
-                            ).all(), "Different seeds, similar vectors? {lop1}"
-                        except:
-                            breakpoint()
+                        assert (
+                            cosim < 0.5
+                        ).all(), "Different seeds, similar vectors? {lop1}"
