@@ -10,7 +10,7 @@ import torch
 
 from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
-from skerch.utils import randperm, rademacher_flip
+from skerch.utils import randperm, rademacher_flip, phase_noise
 
 from . import rng_seeds, torch_devices
 
@@ -207,3 +207,19 @@ def test_noise_sources(
                         assert not torch.allclose(
                             perm1a, perm3, atol=tol
                         ), "Different seed, same noise? (permutation)"
+                        # phase noise
+                        if dtype in {
+                            torch.complex32,
+                            torch.complex64,
+                            torch.complex128,
+                        }:
+                            noise1 = phase_noise(dims, sd, dtype, device)
+                            noise2 = phase_noise(dims, sd, dtype, device)
+                            noise3 = phase_noise(dims, sd + 1, dtype, device)
+                            autocorrelation_test_helper(noise1)
+                            assert torch.allclose(
+                                noise1, noise2, atol=tol
+                            ), "Same seed, different noise? (uniform)"
+                            assert not torch.allclose(
+                                noise1, noise3, atol=tol
+                            ), "Different seed, same noise? (uniform)"

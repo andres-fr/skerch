@@ -5,6 +5,7 @@
 """
 """
 
+from collections import defaultdict
 import warnings
 import torch
 from .linops import ByVectorLinOp
@@ -63,25 +64,29 @@ class RademacherNoiseLinOp(ByVectorLinOp):
       behaviour is disabled.
     """
 
-    REGISTER = []
+    REGISTER = defaultdict(list)
 
     @classmethod
     def check_register(cls):
         """Checks if two different-seeded linops have overlapping seeds."""
-        sorted_reg = sorted(cls.REGISTER, key=lambda x: x[0])
-        for (beg1, end1), (beg2, end2) in zip(sorted_reg[:-1], sorted_reg[1:]):
-            if end1 >= beg2:
-                clsname = cls.__name__
-                msg = (
-                    f"Overlapping seeds when creating {clsname}! "
-                    f"({sorted_reg}). This is not necessarily an issue, but "
-                    "may lead to different-seeded random linops generating the "
-                    "same rows or columns. To prevent this, ensure that the "
-                    "random seeds of different noise linops are separated "
-                    "by more than the number of rows/columns. To disable "
-                    "this behaviour, initialize with register=False."
-                )
-                raise BadSeedError(msg)
+        for reg_type, reg in cls.REGISTER.items():
+            sorted_reg = sorted(reg, key=lambda x: x[0])
+            for (beg1, end1), (beg2, end2) in zip(
+                sorted_reg[:-1], sorted_reg[1:]
+            ):
+                if end1 >= beg2:
+                    clsname = cls.__name__
+                    msg = (
+                        f"Overlapping seeds when creating {clsname}! "
+                        f"({reg_type}, {sorted_reg}). This is not necessarily "
+                        "an issue, but may lead to different-seeded random "
+                        "linops generating the same rows or columns. To "
+                        "prevent this, ensure that the random seeds of "
+                        "different noise linops are separated by more than the "
+                        "number of rows/columns. To disable this behaviour, "
+                        "initialize with register=False."
+                    )
+                    raise BadSeedError(msg)
 
     def __init__(self, shape, seed, dtype, by_row=False, register=True):
         """Initializer. See class docstring."""
@@ -94,7 +99,7 @@ class RademacherNoiseLinOp(ByVectorLinOp):
             seed_end = seed_beg + (
                 self.shape[0] if self.by_row else self.shape[1]
             )
-            self.__class__.REGISTER.append((seed_beg, seed_end))
+            self.__class__.REGISTER["default"].append((seed_beg, seed_end))
             self.check_register()
 
     def get_vector(self, idx, device):
@@ -120,7 +125,7 @@ class RademacherNoiseLinOp(ByVectorLinOp):
         clsname = self.__class__.__name__
         s = (
             f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"seed={self.seed}, dtype={self.dtype} by_row={self.by_row})>"
+            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
         )
         return s
 
@@ -131,7 +136,7 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
     See superclass docstring for more details.
     """
 
-    REGISTER = []
+    REGISTER = defaultdict(list)
 
     def __init__(
         self,
@@ -167,6 +172,16 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         ).to(device)
         return result
 
+    def __repr__(self):
+        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        clsname = self.__class__.__name__
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
+            + f"mean={self.mean}, std={self.std}, "
+            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
+        )
+        return s
+
 
 class PhaseNoiseLinOp(RademacherNoiseLinOp):
     """Random linear operator with i.i.d. complex entries in the unit circle.
@@ -178,6 +193,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
     """
 
     SUPPORTED_DTYPES = {torch.complex32, torch.complex64, torch.complex128}
+    REGISTER = defaultdict(list)
 
     def __init__(
         self, shape, seed, dtype, by_row=False, register=True, conj=False
@@ -186,6 +202,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         super().__init__(shape, seed, dtype, by_row, register)
         if dtype not in self.SUPPORTED_DTYPES:
             raise ValueError(f"Dtype must be complex! was {dtype}")
+        self.conj = conj
 
     def get_vector(self, idx, device):
         """Samples a vector with Rademacher i.i.d. noise.
@@ -199,7 +216,19 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         result = phase_noise(
             dims, self.seed + idx, self.dtype, device="cpu"
         ).to(device)
+        if self.conj:
+            result = result.conj()
         return result
+
+    def __repr__(self):
+        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        clsname = self.__class__.__name__
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
+            + f"conj={self.conj}, "
+            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
+        )
+        return s
 
 
 # ##############################################################################

@@ -36,7 +36,12 @@ LATER TODO:
 * Implement sketched algorithms, at least svd and lord
 
 
+TODO:
 
+* add utest of phase_noise to utils
+* create test for phase noise, also conj, check it looks OK
+* same for SSRFT
+* same for the measurement function, and we are done with meas
 
 
 """
@@ -89,8 +94,15 @@ def complex_dtypes_tols():
 
 @pytest.fixture
 def noise_linop_types():
-    """Class names for all noise linops to be tested"""
-    result = {GaussianNoiseLinOp, RademacherNoiseLinOp}
+    """Class names for all noise linops to be tested.
+
+    :returns: Collection of pairs ``(lop_type, is_complex_only)``
+    """
+    result = {
+        (GaussianNoiseLinOp, False),
+        (RademacherNoiseLinOp, False),
+        (PhaseNoiseLinOp, True),
+    }
     return result
 
 
@@ -111,32 +123,50 @@ def test_measurements_formal(
     * Deterministic behaviour (fwd and adjoint): running twice is same
     * Seed consistency
     * Output is in requested datatype and device
+
+    For complex_only linops, it also tests:
+    * Providing a noncomplex dtype raises a ``ValueError``
     """
     # correct string conversion
     hw = (3, 3)
     lop = RademacherNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
-    s = "<RademacherNoiseLinOp(3x3, seed=0, dtype=torch.float32 by_row=False)>"
+    s = "<RademacherNoiseLinOp(3x3, seed=0, dtype=torch.float32, by_row=False)>"
     assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
     lop = GaussianNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
-    s = "<GaussianNoiseLinOp(3x3, seed=0, dtype=torch.float32 by_row=False)>"
+    s = (
+        "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, "
+        + "dtype=torch.float32, by_row=False)>"
+    )
     assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
-    for lop_type in noise_linop_types:
-        lop = lop_type((5, 5), seed=0, dtype=torch.float32, by_row=False)
+    lop = PhaseNoiseLinOp(hw, 0, torch.complex64, by_row=False, register=False)
+    s = (
+        "<PhaseNoiseLinOp(3x3, conj=False, seed=0, "
+        + "dtype=torch.complex64, by_row=False)>"
+    )
+    assert str(lop) == s, "Unexpected repr for Phase noise linop!"
+    #
+    for lop_type, complex_only in noise_linop_types:
+        if complex_only:
+            dtype1, dtype2 = torch.complex64, torch.complex128
+        else:
+            dtype1, dtype2 = torch.float32, torch.float64
+        # dtype1 = torch.complex64 if lop_type is PhaseNoiseLinOp torch.float32
+        lop = lop_type((5, 5), seed=0, dtype=dtype1, by_row=False)
         # register triggers for overlapping seeds regardless of other factors
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=0, dtype=torch.float32, by_row=False)
+            _ = lop_type((5, 5), seed=0, dtype=dtype1, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=torch.float32, by_row=False)
+            _ = lop_type((5, 5), seed=1, dtype=dtype1, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((20, 5), seed=1, dtype=torch.float32, by_row=False)
+            _ = lop_type((20, 5), seed=1, dtype=dtype1, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=torch.float64, by_row=False)
+            _ = lop_type((5, 5), seed=1, dtype=dtype2, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=torch.float32, by_row=True)
+            _ = lop_type((5, 5), seed=1, dtype=dtype1, by_row=True)
         # invalid index triggers error
         with pytest.raises(ValueError):
             lop.get_vector(idx=-1, device="cpu")
@@ -146,6 +176,16 @@ def test_measurements_formal(
         for seed in rng_seeds:
             for device in torch_devices:
                 for dtype, tol in dtypes_tols.items():
+                    #
+                    if complex_only and dtype not in {
+                        torch.complex32,
+                        torch.complex64,
+                        torch.complex128,
+                    }:
+                        with pytest.raises(ValueError):
+                            _ = lop_type(hw, 0, dtype, register=False)
+                        continue
+                    #
                     hw = (100, 2)
                     lop1 = lop_type(
                         hw, seed, dtype, by_row=False, register=False
@@ -192,21 +232,23 @@ def test_measurements_formal(
                     assert mat1a.device.type == device, "Mismatching device!"
 
 
-def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
+def test_phasenoise_conj(rng_seeds, torch_devices, complex_dtypes_tols):
+    """Test case for conjugation of ``PhaseNoise`` linop.
+
+    For all seeds, devices and complex dtypes, tests that:
+    * Conj of linop produces elementwise conjugated entries
     """
-
-    * repr
-    * noncomplex dtype raises value err
-    * OOB idx raises value error
-    * dtype is actually dtype
-    * add utest of phase_noise to utils
-
-    TODO:
-
-    * create test for phase noise, also conj, check it looks OK
-    * same for SSRFT
-    * same for the measurement function, and we are done with meas
-    """
-    aa = PhaseNoiseLinOp((100, 2), 12345, torch.complex64, conj=False)
-    bb = aa.get_vector(0, "cpu")
-    breakpoint()
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in complex_dtypes_tols.items():
+                lop = PhaseNoiseLinOp(
+                    (5, 5), seed, dtype, conj=False, register=False
+                )
+                lop_conj = PhaseNoiseLinOp(
+                    (5, 5), seed, dtype, conj=True, register=False
+                )
+                mat = linop_to_matrix(lop, lop.dtype, device, adjoint=False)
+                mat_conj = linop_to_matrix(
+                    lop_conj, lop.dtype, device, adjoint=False
+                )
+                assert (mat.conj() == mat_conj).all(), "Wrong conj linop?"
