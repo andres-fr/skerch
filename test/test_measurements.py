@@ -252,3 +252,161 @@ def test_phasenoise_conj(rng_seeds, torch_devices, complex_dtypes_tols):
                     lop_conj, lop.dtype, device, adjoint=False
                 )
                 assert (mat.conj() == mat_conj).all(), "Wrong conj linop?"
+
+
+# ##############################################################################
+# # SSRFT
+# ##############################################################################
+def dct2(x, norm="ortho"):
+    """One-dimensional Discrete Cosine Transform - Type 2.
+
+    :param x: Tensor of shape ``(..., n)``, assumed to be real
+    """
+    len_sig = x.shape[-1]
+    len_dct = (len_sig - 1) // 2 + 1
+    #
+    v = torch.empty_like(x)
+    v[:len_dct] = x[::2]
+    if len_sig % 2:  # odd length
+        v[len_dct:] = x.flip(-1)[1::2]
+    else:  # even length
+        v[len_dct:] = x.flip(-1)[::2]
+    #
+    V = torch.fft.fft(v, norm=norm)
+    V *= 2 * torch.exp(-1j * torch.pi * torch.arange(len_sig) / (2 * len_sig))
+    return V.real / (2**0.5)
+
+
+def test_ssrft():
+    """"""
+    import torch_dct as dct
+    import matplotlib.pyplot as plt
+
+    aa = torch.zeros(1000)
+    aa[0] = 1
+    cc = dct2(aa, norm="backward")
+
+    breakpoint()
+    # idx=5; aa = torch.zeros(1000); aa[idx] = 1; bb = dct.dct(aa, norm="ortho"); cc=dct2(aa)
+    # plt.clf(); plt.plot(cc); plt.show()
+
+
+# def test_no_nans(torch_devices, f64_rtol, rng_seeds, square_shapes):
+#     """Tests that SSRFT yields no NaNs."""
+#     for seed in rng_seeds:
+#         for h, w in square_shapes:
+#             ssrft = SSRFT((h, w), seed=seed)
+#             for device in torch_devices:
+#                 for dtype, _rtol in f64_rtol.items():
+#                     x = torch.randn(w, dtype=dtype).to(device)
+#                     y = ssrft @ x
+#                     xx = y @ ssrft
+#                     #
+#                     assert not x.isnan().any(), f"{ssrft, device, dtype}"
+#                     assert not y.isnan().any(), f"{ssrft, device, dtype}"
+#                     assert not xx.isnan().any(), f"{ssrft, device, dtype}"
+
+
+# def test_invertible(torch_devices, f64_rtol, rng_seeds, square_shapes):
+#     """Invertibility/orthogonality of quare SSRFT.
+
+#     Tests that, when input and output dimensionality are the same, the SSRFT
+#     operator is orthogonal, i.e. we can recover the input exactly via an
+#     adjoint operation.
+
+#     Also tests that it works for mat-vec and mat-mat formats.
+#     """
+#     for seed in rng_seeds:
+#         for h, w in square_shapes:
+#             ssrft = SSRFT((h, w), seed=seed)
+#             for device in torch_devices:
+#                 for dtype, rtol in f64_rtol.items():
+#                     # matvec
+#                     x = torch.randn(w, dtype=dtype).to(device)
+#                     y = ssrft @ x
+#                     xx = y @ ssrft
+#                     #
+#                     assert torch.allclose(
+#                         x, xx, rtol=rtol
+#                     ), f"MATVEC: {ssrft, device, dtype}"
+#                     # matmat
+#                     x = torch.randn((w, 2), dtype=dtype).to(device)
+#                     y = ssrft @ x
+#                     xx = (y.T @ ssrft).T
+#                     #
+#                     assert torch.allclose(
+#                         x, xx, rtol=rtol
+#                     ), f"MATMAT: {ssrft, device, dtype}"
+#                     # matmat-shape tests
+#                     assert len(y.shape) == 2
+#                     assert len(xx.shape) == 2
+#                     assert y.shape[-1] == 2
+#                     assert xx.shape[-1] == 2
+
+
+# def test_seed_consistency(torch_devices, f64_rtol, rng_seeds, square_shapes):
+#     """Seed consistency of SSRFT.
+
+#     Test that same seed and shape lead to same operator with same results,
+#     and different otherwise.
+#     """
+#     for seed in rng_seeds:
+#         for h, w in square_shapes:
+#             ssrft = SSRFT((h, w), seed=seed)
+#             ssrft_same = SSRFT((h, w), seed=seed)
+#             ssrft_diff = SSRFT((h, w), seed=seed + 1)
+#             for device in torch_devices:
+#                 for dtype, _rtol in f64_rtol.items():
+#                     # matvec
+#                     x = torch.randn(w, dtype=dtype).to(device)
+#                     assert ((ssrft @ x) == (ssrft_same @ x)).all()
+#                     # here, dim=1 may indeed result in same output, since
+#                     # there are no permutations or index-pickings, so 50/50.
+#                     # therefore we ignore that case.
+#                     if x.numel() > 1:
+#                         assert ((ssrft @ x) != (ssrft_diff @ x)).any()
+
+
+# def test_device_consistency(torch_devices, f64_rtol, rng_seeds, square_shapes):
+#     """Seed consistency of SSRFT across different devices.
+
+#     Test that same seed and shape lead to same operator with same results,
+#     even when device is different.
+#     """
+#     for seed in rng_seeds:
+#         for h, w in square_shapes:
+#             ssrft = SSRFT((h, w), seed=seed)
+#             for dtype, rtol in f64_rtol.items():
+#                 # apply SSRFT on given devices and check results are equal
+#                 x = torch.randn(w, dtype=dtype)
+#                 y = [(ssrft @ x.to(device)).cpu() for device in torch_devices]
+#                 for yyy in y:
+#                     assert torch.allclose(
+#                         yyy, y[0], rtol=rtol
+#                     ), "SSRFT inconsistency among devices!"
+
+
+# def test_unsupported_tall_ssrft(rng_seeds, fat_shapes):
+#     """Tail SSRFT linops are not supported."""
+#     for seed in rng_seeds:
+#         for h, w in fat_shapes:
+#             with pytest.raises(BadShapeError):
+#                 # If this line throws a BadShapeError, the test passes
+#                 SSRFT((w, h), seed=seed)
+
+
+# def test_input_shape_mismatch(rng_seeds, fat_shapes, torch_devices, f64_rtol):
+#     """Test case for SSRFT shape consistency."""
+#     for seed in rng_seeds:
+#         for h, w in fat_shapes:
+#             ssrft = SSRFT((h, w), seed=seed)
+#             for device in torch_devices:
+#                 for dtype, _rtol in f64_rtol.items():
+#                     # forward matmul
+#                     x = torch.empty(w + 1, dtype=dtype).to(device)
+#                     with pytest.raises(BadShapeError):
+#                         ssrft @ x
+#                     # adjoint matmul
+#                     x = torch.empty(h + 1, dtype=dtype).to(device)
+#                     with pytest.raises(BadShapeError):
+#                         x @ ssrft
