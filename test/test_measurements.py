@@ -54,9 +54,10 @@ from skerch.measurements import (
     perform_measurement,
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
+    PhaseNoiseLinOp,
 )
 
-from skerch.utils import BadShapeError, BadSeedError, gaussian_noise
+from skerch.utils import BadShapeError, BadSeedError
 
 from . import rng_seeds, torch_devices
 
@@ -109,6 +110,7 @@ def test_measurements_formal(
     * Invalid index to ``get_vector`` triggers error
     * Deterministic behaviour (fwd and adjoint): running twice is same
     * Seed consistency
+    * Output is in requested datatype and device
     """
     # correct string conversion
     hw = (3, 3)
@@ -185,6 +187,9 @@ def test_measurements_formal(
                         assert (
                             cosim < 0.5
                         ).all(), "Different seeds, similar vectors? {lop1}"
+                    # dtype and device check
+                    assert mat1a.dtype == dtype, "Mismatching dtype!"
+                    assert mat1a.device.type == device, "Mismatching device!"
 
 
 def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
@@ -193,7 +198,7 @@ def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
     * repr
     * noncomplex dtype raises value err
     * OOB idx raises value error
-
+    * dtype is actually dtype
 
     TODO:
 
@@ -201,4 +206,6 @@ def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
     * same for SSRFT
     * same for the measurement function, and we are done with meas
     """
+    aa = PhaseNoiseLinOp((100, 2), 12345, torch.complex64, conj=False)
+    bb = aa.get_vector(0, "cpu")
     breakpoint()

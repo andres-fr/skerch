@@ -112,11 +112,8 @@ def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
         raise ValueError(f"Dtype must be complex! was {dtype}")
     real_dtype = complex_dtype_to_real(dtype)
     #
-    rng = torch.Generator(device=device)
-    if seed is not None:
-        rng.manual_seed(seed)
-    breakpoint()
-    noise = torch.rand(shape, generator=rng, dtype=dtype, device=device)
+    noise = 2 * torch.pi * uniform_noise(shape, seed, real_dtype, device)
+    noise = noise.mul(1j).exp()
     return noise
 
 

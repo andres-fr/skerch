@@ -199,7 +199,6 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         result = phase_noise(
             dims, self.seed + idx, self.dtype, device="cpu"
         ).to(device)
-
         return result
 
 
