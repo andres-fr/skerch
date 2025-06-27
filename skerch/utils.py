@@ -101,6 +101,25 @@ def gaussian_noise(
     return noise
 
 
+def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
+    """Reproducible noise uniformly distributed on the complex unit circle.
+
+    :returns: A tensor of given shape, dtype and device, containing uniform
+      random noise between 0 and 1 (analogous to ``torch.rand``), but with
+      reproducible behaviour fixed to given random seed.
+    """
+    if dtype not in {torch.complex32, torch.complex64, torch.complex128}:
+        raise ValueError(f"Dtype must be complex! was {dtype}")
+    real_dtype = complex_dtype_to_real(dtype)
+    #
+    rng = torch.Generator(device=device)
+    if seed is not None:
+        rng.manual_seed(seed)
+    breakpoint()
+    noise = torch.rand(shape, generator=rng, dtype=dtype, device=device)
+    return noise
+
+
 def rademacher_noise(shape, seed=None, device="cpu"):
     """Reproducible Rademacher noise.
 

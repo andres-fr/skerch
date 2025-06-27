@@ -13,6 +13,7 @@ from .utils import (
     BadSeedError,
     rademacher_noise,
     gaussian_noise,
+    phase_noise,
 )
 
 
@@ -46,8 +47,8 @@ def perform_measurement(lop, meas_lop, adjoint=False, parallel_mode=None):
 # ##############################################################################
 # # IID NOISE LINOPS
 # ##############################################################################
-class GaussianNoiseLinOp(ByVectorLinOp):
-    """Random linear operator with i.i.d. Gaussian entries.
+class RademacherNoiseLinOp(ByVectorLinOp):
+    """Random linear operator with i.i.d. Rademacher entries.
 
     :param shape: Shape of the linop as ``(h, w)``.
     :param seed: Random seed used in ``get_vector`` to deterministically sample
@@ -97,38 +98,6 @@ class GaussianNoiseLinOp(ByVectorLinOp):
             self.check_register()
 
     def get_vector(self, idx, device):
-        """Samples a vector with standard Gaussian i.i.d. noise.
-
-        See base class definition for details.
-        """
-        h, w = self.shape
-        dims = w if self.by_row else h
-        if idx < 0 or idx >= (h if self.by_row else w):
-            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
-        result = gaussian_noise(  # device always CPU to ensure determinism
-            dims, seed=self.seed + idx, dtype=self.dtype, device="cpu"
-        ).to(device)
-        return result
-
-    def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
-        clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"seed={self.seed}, dtype={self.dtype} by_row={self.by_row})>"
-        )
-        return s
-
-
-class RademacherNoiseLinOp(GaussianNoiseLinOp):
-    """Random linear operator with i.i.d. Gaussian entries.
-
-    See superclass docstring for more info.
-    """
-
-    REGISTER = []
-
-    def get_vector(self, idx, device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
@@ -144,6 +113,93 @@ class RademacherNoiseLinOp(GaussianNoiseLinOp):
             .to(self.dtype)
             .to(device)
         )
+        return result
+
+    def __repr__(self):
+        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        clsname = self.__class__.__name__
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
+            + f"seed={self.seed}, dtype={self.dtype} by_row={self.by_row})>"
+        )
+        return s
+
+
+class GaussianNoiseLinOp(RademacherNoiseLinOp):
+    """Random linear operator with i.i.d. Gaussian entries.
+
+    See superclass docstring for more details.
+    """
+
+    REGISTER = []
+
+    def __init__(
+        self,
+        shape,
+        seed,
+        dtype,
+        by_row=False,
+        register=True,
+        mean=0.0,
+        std=1.0,
+    ):
+        """Initializer. See class docstring."""
+        super().__init__(shape, seed, dtype, by_row, register)
+        self.mean = mean
+        self.std = std
+
+    def get_vector(self, idx, device):
+        """Samples a vector with standard Gaussian i.i.d. noise.
+
+        See base class definition for details.
+        """
+        h, w = self.shape
+        dims = w if self.by_row else h
+        if idx < 0 or idx >= (h if self.by_row else w):
+            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
+        result = gaussian_noise(  # device always CPU to ensure determinism
+            dims,
+            self.mean,
+            self.std,
+            seed=self.seed + idx,
+            dtype=self.dtype,
+            device="cpu",
+        ).to(device)
+        return result
+
+
+class PhaseNoiseLinOp(RademacherNoiseLinOp):
+    """Random linear operator with i.i.d. complex entries in the unit circle.
+
+    :param conj: For the same seed, the linear operators with true and false
+      ``conj`` values are complex conjugates of each other.
+
+    See superclass docstring for more details.
+    """
+
+    SUPPORTED_DTYPES = {torch.complex32, torch.complex64, torch.complex128}
+
+    def __init__(
+        self, shape, seed, dtype, by_row=False, register=True, conj=False
+    ):
+        """Initializer. See class docstring."""
+        super().__init__(shape, seed, dtype, by_row, register)
+        if dtype not in self.SUPPORTED_DTYPES:
+            raise ValueError(f"Dtype must be complex! was {dtype}")
+
+    def get_vector(self, idx, device):
+        """Samples a vector with Rademacher i.i.d. noise.
+
+        See base class definition for details.
+        """
+        h, w = self.shape
+        dims = w if self.by_row else h
+        if idx < 0 or idx >= (h if self.by_row else w):
+            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
+        result = phase_noise(
+            dims, self.seed + idx, self.dtype, device="cpu"
+        ).to(device)
+
         return result
 
 

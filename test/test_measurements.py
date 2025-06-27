@@ -77,6 +77,16 @@ def dtypes_tols():
 
 
 @pytest.fixture
+def complex_dtypes_tols():
+    """Error tolerances for each complex dtype."""
+    result = {
+        torch.complex64: 1e-5,
+        torch.complex128: 1e-10,
+    }
+    return result
+
+
+@pytest.fixture
 def noise_linop_types():
     """Class names for all noise linops to be tested"""
     result = {GaussianNoiseLinOp, RademacherNoiseLinOp}
@@ -175,3 +185,20 @@ def test_measurements_formal(
                         assert (
                             cosim < 0.5
                         ).all(), "Different seeds, similar vectors? {lop1}"
+
+
+def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
+    """
+
+    * repr
+    * noncomplex dtype raises value err
+    * OOB idx raises value error
+
+
+    TODO:
+
+    * create test for phase noise, also conj, check it looks OK
+    * same for SSRFT
+    * same for the measurement function, and we are done with meas
+    """
+    breakpoint()
