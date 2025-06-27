@@ -199,6 +199,7 @@ def test_phasenoise_formal(rng_seeds, torch_devices, complex_dtypes_tols):
     * noncomplex dtype raises value err
     * OOB idx raises value error
     * dtype is actually dtype
+    * add utest of phase_noise to utils
 
     TODO:
 
