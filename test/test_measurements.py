@@ -44,7 +44,7 @@ TODO:
 * create test for phase noise, also conj, check it looks OK
 * same for SSRFT
 * same for the measurement function, and we are done with meas
-
+* HDF5?
 
 """
 
@@ -62,6 +62,7 @@ from skerch.measurements import (
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
     PhaseNoiseLinOp,
+    SSRFT,
 )
 
 from skerch.utils import BadShapeError, BadSeedError
@@ -279,22 +280,29 @@ def dct2(x, norm="ortho"):
 
 def test_ssrft():
     """"""
-    import torch_dct as dct
-    import matplotlib.pyplot as plt
-    from skerch.measurements import SSRFT
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft(torch.tensor(0), 0)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft(torch.zeros(0), 0)
+    with pytest.raises(ValueError):
+        _ = SSRFT.ssrft(torch.zeros(5), 6)
+    # import torch_dct as dct
+    # import matplotlib.pyplot as plt
+    # from skerch.measurements import SSRFT
 
-    aa = torch.zeros(3, 1000, dtype=torch.float64)
-    aa[5] = 1
+    aa = torch.zeros(1000, dtype=torch.float64)
+    aa[0] = 1
 
     bb = SSRFT.ssrft(aa, 1000, seed=12345, dct_norm="ortho")
 
+    # TODO:
+    # * adapt ssrft to also admit complex (phase noise instead of rademacher)
+    # * integrate ssrft into a linop
+    # * test it!
 
-    TODO:
-    * adapt ssrft to also admit complex (phase noise instead of rademacher)
-    * integrate ssrft into a linop
-    * test it!
-
-    breakpoint()
+    # breakpoint()
     # idx=5; aa = torch.zeros(1000); aa[idx] = 1; bb = dct.dct(aa, norm="ortho"); cc=dct2(aa)
     # plt.clf(); plt.plot(cc); plt.show()
 

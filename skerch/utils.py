@@ -11,6 +11,27 @@ import torch
 # ##############################################################################
 # # DTYPES
 # ##############################################################################
+REAL_DTYPES = {
+    torch.float16,
+    torch.float32,
+    torch.float64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+}
+
+COMPLEX_DTYPES = {
+    torch.complex32,
+    torch.complex64,
+    torch.complex128,
+}
+
+
 def torch_dtype_as_str(dtype):
     """Torch dtype to string.
 
@@ -26,19 +47,7 @@ def torch_dtype_as_str(dtype):
 def complex_dtype_to_real(dtype):
     """"""
     out_dtype = None
-    if dtype in {
-        torch.float16,
-        torch.float32,
-        torch.float64,
-        torch.int8,
-        torch.int16,
-        torch.int32,
-        torch.int64,
-        torch.uint8,
-        torch.uint16,
-        torch.uint32,
-        torch.uint64,
-    }:
+    if dtype in REAL_DTYPES:
         out_dtype = dtype
     elif dtype == torch.complex128:
         out_dtype = torch.float64
@@ -150,6 +159,11 @@ def randperm(n, seed=None, device="cpu", inverse=False):
 def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
     """Reproducible noise uniformly distributed on the complex unit circle.
 
+    .. note::
+      This function makes use of :func:`uniform_noise` to sample the phase
+      noise. If ``x`` itself has been generated using ``uniform_noise``, make
+      sure to use a different seed to mitigate correlations.
+
     :returns: A tensor of given shape, dtype and device, containing complex
       i.i.d. noisy entries uniformly distributed around the unit circle.
       Behaviour is reproducible for a given random seed.
@@ -180,3 +194,22 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
         return x, mask
     else:
         return x * mask, mask
+
+
+def phase_shift(x, seed=None, inplace=True, rng_device="cpu"):
+    """Reproducible phase shift using phase noise.
+
+    .. note::
+      This function makes use of :func:`uniform_noise` to sample the Rademacher
+      noise. If ``x`` itself has been generated using ``uniform_noise``, make
+      sure to use a different seed to mitigate correlations.
+
+    .. warning::
+      See :func:`rademacher_noise` for notes on reproducibility and more info.
+    """
+    shift = phase_noise(x.shape, seed, x.dtype, device=rng_device).to(x.device)
+    if inplace:
+        x *= shift
+        return x, shift
+    else:
+        return x * shift, shift

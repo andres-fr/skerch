@@ -11,9 +11,11 @@ import torch
 import torch_dct as dct
 from .linops import ByVectorLinOp
 from .utils import (
+    COMPLEX_DTYPES,
     BadShapeError,
     BadSeedError,
     rademacher_noise,
+    phase_noise,
     rademacher_flip,
     gaussian_noise,
     phase_noise,
@@ -195,7 +197,6 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
     See superclass docstring for more details.
     """
 
-    SUPPORTED_DTYPES = {torch.complex32, torch.complex64, torch.complex128}
     REGISTER = defaultdict(list)
 
     def __init__(
@@ -203,7 +204,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
     ):
         """Initializer. See class docstring."""
         super().__init__(shape, seed, dtype, by_row, register)
-        if dtype not in self.SUPPORTED_DTYPES:
+        if dtype not in COMPLEX_DTYPES:
             raise ValueError(f"Dtype must be complex! was {dtype}")
         self.conj = conj
 
@@ -257,15 +258,21 @@ class SSRFT:
         :param out_dims: Dimensions of output ``y``, must be less than ``dim(x)``
         :param seed: Random seed
         """
-        # make sure all sources of randomness are CPU, to ensure cross-device
-        # consistency of the operator
-        x_len = x.shape[-1]
+        if len(x.shape) != 1 or x.numel() <= 0:
+            raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
+        x_len = len(x)
         if out_dims > x_len:
             raise ValueError("out_dims can't be larger than last dimension!")
+        # make sure all sources of randomness are CPU, to ensure cross-device
+        # consistency of the operator
         seeds = [seed + i for i in range(5)]
         # first scramble: permute, rademacher, and DCT
-        perm1 = randperm(x_len, seed=seeds[0], device="cpu")
-        x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
+        if x in COMPLEX_DTYPES:
+            raise NotImplementedError
+        else:
+            perm1 = randperm(x_len, seed=seeds[0], device="cpu")
+            x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
+            breakpoint()
         del perm1, rad1
         x = dct.dct(x, norm=dct_norm)
         # second scramble: permute, rademacher and DCT
