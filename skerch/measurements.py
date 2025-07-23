@@ -283,6 +283,22 @@ class SSRFT:
             )
             x = torch.fft.fft(x, norm=norm)
 
+            # """
+            # INVERSE
+            # """
+
+            # # create output and embed random indices
+            # y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
+            # y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
+            # # invert second scramble: iFFT, rademacher, and inverse permutation
+            # y = torch.fft.ifft(y, norm=norm)
+            # phase_shift(y, seed=seeds[3], inplace=True, conj=True)
+            # y = y[randperm(x_len, seed=seeds[2], device="cpu", inverse=True)]
+            # # invert first scramble: iFFT, rademacher, and inverse permutation
+            # y = torch.fft.ifft(y, norm=norm)
+            # phase_shift(y, seed=seeds[1], inplace=True, conj=True)
+            # y = y[randperm(x_len, seed=seeds[0], device="cpu", inverse=True)]
+
         else:
             # first scramble: permute, rademacher, and DCT
             x = x[randperm(x_len, seed=seeds[0], device="cpu")]
@@ -310,28 +326,7 @@ class SSRFT:
 
         # extract random indices and return
         x = x[randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]]
-
-        """
-        INVERSE
-        """
-
-        # create output and embed random indices
-        y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
-        y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
-        # invert second scramble: iFFT, rademacher, and inverse permutation
-        y = torch.fft.ifft(y, norm=norm)
-        phase_shift(y, seed=seeds[3], inplace=True, conj=True)
-
-        import matplotlib.pyplot as plt
-
-        breakpoint()
-        # plt.clf(); plt.plot(x); plt.show()
-
         return x
-
-        # plt.clf(); plt.plot(x); plt.show()
-
-        # extract random indices and return
 
 
 def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
