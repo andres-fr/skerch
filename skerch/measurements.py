@@ -270,8 +270,10 @@ class SSRFT:
         if len(x.shape) != 1 or x.numel() <= 0:
             raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
         x_len = len(x)
-        if out_dims > x_len:
-            raise ValueError("out_dims can't be larger than input dimension!")
+        if out_dims > x_len or out_dims <= 0:
+            raise ValueError(
+                "out_dims can't be larger than input dimension or <=0!"
+            )
         # make sure all sources of randomness are CPU, to ensure cross-device
         # consistency of the operator
         seeds = [seed + i for i in range(5)]
@@ -371,7 +373,9 @@ class SsrftNoiseLinOp(RademacherNoiseLinOp):
     This operator also extends :class:`RademacherNoiseLinop`,
     """
 
-    def __init__(self, shape, seed, register=True):
+    REGISTER = defaultdict(list)
+
+    def __init__(self, shape, seed, register=True, norm="ortho"):
         """Initializer. See class docstring."""
         super().__init__(
             shape, seed, dtype=None, by_row=None, register=register
@@ -381,13 +385,14 @@ class SsrftNoiseLinOp(RademacherNoiseLinOp):
             raise BadShapeError(
                 "Height > width not supported in SSRFT! use transposition"
             )
+        self.norm = norm
 
     def vecmul(self, x):
         """Forward (right) matrix-vector multiplication ``self @ x``.
 
         See class docstring and parent class for more details.
         """
-        return SSRFT.ssrft(x, self.shape[0], seed=self.seed, norm="ortho")
+        return SSRFT.ssrft(x, self.shape[0], seed=self.seed, norm=self.norm)
 
     def rvecmul(self, x):
         """Adjoint (left) matrix-vector multiplication ``x @ self``.
@@ -395,7 +400,7 @@ class SsrftNoiseLinOp(RademacherNoiseLinOp):
         See class docstring and parent class for more details.
         """
         return SSRFT.ssrft_adjoint(
-            x, self.shape[1], seed=self.seed, norm="ortho"
+            x, self.shape[1], seed=self.seed, norm=self.norm
         )
 
     def get_vector(self, idx, dtype, device, by_row=False):

@@ -68,7 +68,7 @@ from skerch.measurements import (
 
 from skerch.utils import BadShapeError, BadSeedError
 
-from . import rng_seeds, torch_devices
+from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
 
 # ##############################################################################
@@ -97,7 +97,7 @@ def complex_dtypes_tols():
 
 
 @pytest.fixture
-def noise_linop_types():
+def iid_noise_linop_types():
     """Class names for all noise linops to be tested.
 
     :returns: Collection of pairs ``(lop_type, is_complex_only)``
@@ -113,17 +113,16 @@ def noise_linop_types():
 # ##############################################################################
 # # TESTS
 # ##############################################################################
-def test_measurements_formal(
-    rng_seeds, torch_devices, dtypes_tols, noise_linop_types
+def test_iid_measurements_formal(
+    rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
 ):
-    """Formal test case for measurement linops.
+    """Formal test case for iid measurement linops.
 
-    For every noise linop tests:
+    For every iid noise linop tests:
     * Repr creates correct strings
     * Register triggers error if overlapping seeds are used if active
     * Get_vector triggers error for invalid index, and returns right dtype and
       device otherwise
-    * Invalid index to ``get_vector`` triggers error
     * Deterministic behaviour (fwd and adjoint): running twice is same
     * Seed consistency
     * Output is in requested datatype and device
@@ -153,12 +152,11 @@ def test_measurements_formal(
     )
     assert str(lop) == s, "Unexpected repr for Phase noise linop!"
     #
-    for lop_type, complex_only in noise_linop_types:
+    for lop_type, complex_only in iid_noise_linop_types:
         if complex_only:
             dtype1, dtype2 = torch.complex64, torch.complex128
         else:
             dtype1, dtype2 = torch.float32, torch.float64
-        # dtype1 = torch.complex64 if lop_type is PhaseNoiseLinOp torch.float32
         lop = lop_type((5, 5), seed=0, dtype=dtype1, by_row=False)
         # register triggers for overlapping seeds regardless of other factors
         with pytest.raises(BadSeedError):
@@ -268,16 +266,99 @@ def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
 # ##############################################################################
 # # SSRFT
 # ##############################################################################
-def test_ssrft():
-    """"""
-    # with pytest.raises(BadShapeError):
-    #     _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
+def test_ssrft_formal():
+    """Formal test case for SSRFT functionality.
+
+    For the SSRFT transform and/or linop (wherever applicable), tests:
+    * Repr creates correct strings
+    * Non-orthogonal normalization raises NotImplementederror
+    * Non-vector or empty imput to ssrft raises BadShapeError
+    * Too large or too small out_dims for ssrft
+    * Invalid shape to SSRFT linop triggers error (must be square or fat)
+    * Register triggers error if overlapping seeds are used if active
+    * Get_vector triggers error for invalid index, and returns right dtype and
+      device otherwise
+    * Deterministic behaviour (fwd and adjoint): running twice is same
+    * Seed consistency
+    * Output is of same dtype and device as input
+    """
+    # correct string conversion (linop)
+    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+    assert (
+        str(lop) == "<SsrftNoiseLinOp(3x3, seed=0)>"
+    ), "Unexpected repr for SSRFT noise linop!"
+    # non-orthogonal norm raises error (transform)
+    with pytest.raises(NotImplementedError):
+        SSRFT.ssrft(torch.ones(3), out_dims=3, seed=0, norm="XXXX")
+    with pytest.raises(NotImplementedError):
+        SSRFT.ssrft_adjoint(torch.ones(3), out_dims=3, seed=0, norm="XXXX")
+    # non-orthogonal norm raises error (linop)
+    with pytest.raises(NotImplementedError):
+        lop = SsrftNoiseLinOp((3, 3), 0, register=False, norm="XXXX")
+        lop @ torch.ones(3)
+    with pytest.raises(NotImplementedError):
+        lop = SsrftNoiseLinOp((3, 3), 0, register=False, norm="XXXX")
+        torch.ones(3) @ lop
+    # non-vector or empty input raises BadShapeError (transform)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft(torch.tensor(0), 0)
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft(torch.zeros(0), 0)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft_adjoint(torch.zeros(5, 5), 5)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft_adjoint(torch.tensor(0), 0)
+    with pytest.raises(BadShapeError):
+        _ = SSRFT.ssrft_adjoint(torch.zeros(0), 0)
+    # empty input raises BadShapeError (linop)
+    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+    with pytest.raises(BadShapeError):
+        lop @ torch.tensor(0)
+    with pytest.raises(BadShapeError):
+        torch.tensor(0) @ lop
+    with pytest.raises(BadShapeError):
+        lop @ torch.zeros(0)
+    with pytest.raises(BadShapeError):
+        torch.zeros(0) @ lop
+    # too large or too small out_dims raises error (transform)
     with pytest.raises(ValueError):
-        _ = SSRFT.ssrft(torch.zeros(5), 6)
+        SSRFT.ssrft(torch.ones(3), out_dims=-1)
+    with pytest.raises(ValueError):
+        SSRFT.ssrft(torch.ones(3), out_dims=0)
+    with pytest.raises(ValueError):
+        SSRFT.ssrft(torch.ones(3), out_dims=4)
+    with pytest.raises(ValueError):
+        SSRFT.ssrft_adjoint(torch.ones(3), out_dims=2)
+    # invalid shapes raise error (linop)
+    with pytest.raises(BadShapeError):
+        _ = SsrftNoiseLinOp((0, 0), 0, register=False)
+    with pytest.raises(BadShapeError):
+        _ = SsrftNoiseLinOp((10, 5), 0, register=False)
+    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+    with pytest.raises(BadShapeError):
+        lop @ torch.ones(4)
+    with pytest.raises(BadShapeError):
+        torch.ones(4) @ lop
+    # register triggers for overlapping seeds regardless of other factors (lop)
+    lop = SsrftNoiseLinOp((3, 3), seed=0)
+    with pytest.raises(BadSeedError):
+        _ = SsrftNoiseLinOp((3, 3), seed=0)  # identical
+    with pytest.raises(BadSeedError):
+        _ = SsrftNoiseLinOp((3, 5), seed=0)  # more vectors
+    with pytest.raises(BadSeedError):
+        _ = SsrftNoiseLinOp((???, 5), seed=0)  # different start
+
+    """
+    TODO HERE:
+
+    WHAT DOES SEED OVERLAP MEAN FOR SSRFT? CHECK CAREFULLY AND TEST
+    EXHAUSTIVELY
+    """
+
+
+    breakpoint()
     # import torch_dct as dct
     # import matplotlib.pyplot as plt
     # from skerch.measurements import SSRFT
@@ -299,6 +380,24 @@ def test_ssrft():
     a2 = b2 @ ssrft
     col = ssrft.get_vector(0, aa.dtype, aa.device, by_row=False)
     breakpoint()
+
+
+def test_ssrft_correctness():
+    """
+    Test case for correctness of SSRFT functionality.
+
+    For the SSRFT transform and/or linop (wherever applicable), tests:
+    * SSRFT rows/columns autocorrelations are quasi-deltas
+    * Forward and adjoint linop vecmul is equivalent to the transform
+    * Get vector by row and by col yields same matrix, and this matrix is
+      identical to applying the linop from either side
+    * The matrix is unitary if square
+
+
+    TEST TRANSPOSITIONS SOMEHOW, ALSO FORMAL! TODO
+    """
+    # autocorrelation_test_helper(noise1)
+    pass
 
     # TODO:
     # * adapt ssrft to also admit complex (phase noise instead of rademacher)

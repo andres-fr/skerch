@@ -86,11 +86,29 @@ def test_linop_formal():
     """Test case for input shape consistency and value errors
 
     For forward and adjoint matmul with ``BaseLinOp``, test:
+    * Providing empty or malformed shapes raises error
     * Providing vectors of mismatching shape raises ``BadShapeError``
     * Providing tensors that aren't vectors/matrices raises ``BadShapeError``
-    * Trying to transpose a transposedlinop raises ``valueError``
+    * Trying to transpose a transposedlinop raises ``ValueError``
 
     """
+    with pytest.raises(ValueError):
+        _ = BaseLinOp("NOT A SHAPE")
+    with pytest.raises(ValueError):
+        _ = BaseLinOp(123)
+    with pytest.raises(ValueError):
+        _ = BaseLinOp([123])
+    with pytest.raises(ValueError):
+        _ = BaseLinOp(None)
+    with pytest.raises(ValueError):
+        _ = BaseLinOp((3, 3, 3))
+    with pytest.raises(BadShapeError):
+        _ = BaseLinOp((0, 0))
+    with pytest.raises(BadShapeError):
+        _ = BaseLinOp((0, 3))
+    with pytest.raises(BadShapeError):
+        _ = BaseLinOp((3, 0))
+    #
     lop = BaseLinOp((10, 20))
     #
     v1, v2 = torch.empty(lop.shape[0] + 1), torch.empty(lop.shape[1] + 1)

@@ -14,7 +14,7 @@ from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
 
 
-from . import rng_seeds, torch_devices
+from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
 
 # ##############################################################################
@@ -102,25 +102,13 @@ def test_dtype_utils():
 # ##############################################################################
 # # NOISE SOURCES
 # ##############################################################################
-def autocorrelation_test_helper(vec):
-    """If vec is iid noise, its autocorrelation resembles a delta."""
-    # normalize and compute unit-norm autocorrelation
-    vec_mean = vec.mean()
-    vec_norm = (vec - vec_mean).norm()
-    vec = (vec - vec_mean) / vec_norm
-    autocorr = torch.fft.fft(vec, norm="ortho")
-    autocorr = (autocorr * autocorr.conj()) ** 0.5
-    autocorr = abs(torch.fft.ifft(autocorr, norm="ortho"))
-    # check that autocorrelation is close to standard unit delta
-    assert abs(autocorr.norm() - 1) < 1e-5, "Autocorr should have unit norm"
-    assert autocorr[0] > 0.8, "Noise autocorr does not have a strong delta"
-    assert (autocorr[1:] < 0.1).all(), "Noise autocorr has strong non-delta!"
-
-
 def test_noise_sources(
     rng_seeds, dtypes_tols, torch_devices, rand_dims_samples
 ):
     """Test case for noise sources in ``utils``.
+
+    Note that SSRFT noise is implemented and tested in ``measurements`` and
+    not here.
 
     For all devices and datatypes, and a variety of shapes:
     * Same-seed consistency

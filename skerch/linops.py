@@ -53,8 +53,14 @@ class BaseLinOp:
 
     def __init__(self, shape):
         """Initializer. See class docstring."""
+        try:
+            h, w = shape
+        except Exception as e:
+            raise ValueError(f"Malformed shape? {shape}")
         if len(shape) != 2:
             raise BadShapeError("Shape must be a (height, width) pair!")
+        if h <= 0 or w <= 0:
+            raise BadShapeError(f"Empty linop with shape {shape}?")
         self.shape = shape
 
     def __repr__(self):
