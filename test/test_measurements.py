@@ -13,37 +13,15 @@ gaussian
 
 
 TODO:
-* design a measurement linop that supports shape and @, but can also be
-  parallelized if needed (e.g. via get_row or sth). Ideally this is all
-  done through byvectorlinop, including ssrft
-
-* once we have the measurement linops in place, test
-  - seed consistency
-  - (quasi-) orthogonality of randmats
-  - formal corner cases
-
-
-
+* finish SSRFT test, then test the perform_measurement function:
+  - with all meas linops
+  - with mocked parallelization (byvector?), and test it is like inline
 
 LATER TODO:
 
-
-* Implement perform_measurement as per below.
-  - test correctness and formal (valerr etc)
-  - test that parallel versions are equal to inline
 * Implement 3 recovery methods
   - test correctness and formal
-
-* Implement sketched algorithms, at least svd and lord
-
-
-TODO:
-
-* test dct2
-* add utest of phase_noise to utils
-* create test for phase noise, also conj, check it looks OK
-* same for SSRFT
-* same for the measurement function, and we are done with meas
+* Implement all sketched algorithms as meas-recovery
 * HDF5?
 
 """
@@ -266,7 +244,7 @@ def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
 # ##############################################################################
 # # SSRFT
 # ##############################################################################
-def test_ssrft_formal():
+def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     """Formal test case for SSRFT functionality.
 
     For the SSRFT transform and/or linop (wherever applicable), tests:
@@ -275,7 +253,6 @@ def test_ssrft_formal():
     * Non-vector or empty imput to ssrft raises BadShapeError
     * Too large or too small out_dims for ssrft
     * Invalid shape to SSRFT linop triggers error (must be square or fat)
-    * Register triggers error if overlapping seeds are used if active
     * Get_vector triggers error for invalid index, and returns right dtype and
       device otherwise
     * Deterministic behaviour (fwd and adjoint): running twice is same
@@ -283,7 +260,7 @@ def test_ssrft_formal():
     * Output is of same dtype and device as input
     """
     # correct string conversion (linop)
-    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+    lop = SsrftNoiseLinOp((3, 3), 0, norm="ortho")
     assert (
         str(lop) == "<SsrftNoiseLinOp(3x3, seed=0)>"
     ), "Unexpected repr for SSRFT noise linop!"
@@ -293,11 +270,12 @@ def test_ssrft_formal():
     with pytest.raises(NotImplementedError):
         SSRFT.ssrft_adjoint(torch.ones(3), out_dims=3, seed=0, norm="XXXX")
     # non-orthogonal norm raises error (linop)
+
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp((3, 3), 0, register=False, norm="XXXX")
+        lop = SsrftNoiseLinOp((3, 3), 0, norm="XXXX")
         lop @ torch.ones(3)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp((3, 3), 0, register=False, norm="XXXX")
+        lop = SsrftNoiseLinOp((3, 3), 0, norm="XXXX")
         torch.ones(3) @ lop
     # non-vector or empty input raises BadShapeError (transform)
     with pytest.raises(BadShapeError):
@@ -313,7 +291,7 @@ def test_ssrft_formal():
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft_adjoint(torch.zeros(0), 0)
     # empty input raises BadShapeError (linop)
-    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+    lop = SsrftNoiseLinOp((3, 3), 0)
     with pytest.raises(BadShapeError):
         lop @ torch.tensor(0)
     with pytest.raises(BadShapeError):
@@ -333,53 +311,74 @@ def test_ssrft_formal():
         SSRFT.ssrft_adjoint(torch.ones(3), out_dims=2)
     # invalid shapes raise error (linop)
     with pytest.raises(BadShapeError):
-        _ = SsrftNoiseLinOp((0, 0), 0, register=False)
+        _ = SsrftNoiseLinOp((0, 0), 0)
     with pytest.raises(BadShapeError):
-        _ = SsrftNoiseLinOp((10, 5), 0, register=False)
-    lop = SsrftNoiseLinOp((3, 3), 0, register=False)
+        _ = SsrftNoiseLinOp((10, 5), 0)
+    lop = SsrftNoiseLinOp((3, 3), 0)
     with pytest.raises(BadShapeError):
         lop @ torch.ones(4)
     with pytest.raises(BadShapeError):
         torch.ones(4) @ lop
-    # register triggers for overlapping seeds regardless of other factors (lop)
-    lop = SsrftNoiseLinOp((3, 3), seed=0)
-    with pytest.raises(BadSeedError):
-        _ = SsrftNoiseLinOp((3, 3), seed=0)  # identical
-    with pytest.raises(BadSeedError):
-        _ = SsrftNoiseLinOp((3, 5), seed=0)  # more vectors
-    with pytest.raises(BadSeedError):
-        _ = SsrftNoiseLinOp((???, 5), seed=0)  # different start
-
-    """
-    TODO HERE:
-
-    WHAT DOES SEED OVERLAP MEAN FOR SSRFT? CHECK CAREFULLY AND TEST
-    EXHAUSTIVELY
-    """
-
-
-    breakpoint()
-    # import torch_dct as dct
-    # import matplotlib.pyplot as plt
-    # from skerch.measurements import SSRFT
-
-    aa = torch.zeros(1000, dtype=torch.float64)
-    aa[0] = 1  # + 1j
-
-    bb = SSRFT.ssrft(aa, 1000, seed=12350, norm="ortho")
-
-    aaa = SSRFT.ssrft_adjoint(bb, 1000, seed=12350, norm="ortho")
-
-    import matplotlib.pyplot as plt
-
-    print("!!!", torch.allclose(aa, aaa))
-    # plt.clf(); plt.plot(bb); plt.show()
-
-    ssrft = SsrftNoiseLinOp((100, 1000), 12350, register=True)
-    b2 = ssrft @ aa
-    a2 = b2 @ ssrft
-    col = ssrft.get_vector(0, aa.dtype, aa.device, by_row=False)
-    breakpoint()
+    # get_vector errors for invalid index
+    lop = SsrftNoiseLinOp((3, 5), 0)
+    with pytest.raises(ValueError):
+        lop.get_vector(-1, torch.float32, "cpu", by_row=False)
+    with pytest.raises(ValueError):
+        lop.get_vector(5, torch.float32, "cpu", by_row=False)
+    with pytest.raises(ValueError):
+        lop.get_vector(-1, torch.float32, "cpu", by_row=True)
+    with pytest.raises(ValueError):
+        lop.get_vector(3, torch.float32, "cpu", by_row=True)
+    #
+    lop = SsrftNoiseLinOp((3, 5), 0)
+    for device in torch_devices:
+        for dtype in dtypes_tols.keys():
+            # get_vector provides right dtype and device otherwise
+            v = lop.get_vector(0, dtype, device, by_row=True)
+            assert v.dtype == dtype, "Invalid get_vector dtype by_row!"
+            assert v.device.type == device, "Invalid get_vector device by_row!"
+            v = lop.get_vector(0, dtype, device, by_row=False)
+            assert v.dtype == dtype, "Invalid get_vector dtype by_col!"
+            assert v.device.type == device, "Invalid get_vector device by_col!"
+            # output is of same dtype and device as input
+            w = lop @ torch.ones(5, dtype=dtype, device=device)
+            assert w.dtype == dtype, "Mismatching output dtype!"
+            assert w.device.type == device, "Mismatching output device!"
+            w = torch.ones(3, dtype=dtype, device=device) @ lop
+            assert w.dtype == dtype, "Mismatching output dtype (adj)!"
+            assert w.device.type == device, "Mismatching output device (adj)!"
+    # deterministic behaviour and seed consistency
+    for seed in rng_seeds:
+        for dtype, tol in dtypes_tols.items():
+            hw = (5, 50)
+            lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho")
+            lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho")
+            lop3 = SsrftNoiseLinOp(hw, seed + 1, norm="ortho")
+            #
+            mat1_cpu = linop_to_matrix(lop1, dtype, "cpu", adjoint=False)
+            mat1_cuda = linop_to_matrix(lop1, dtype, "cuda", adjoint=False)
+            mat1_adj = linop_to_matrix(lop1, dtype, "cpu", adjoint=True)
+            mat2 = linop_to_matrix(lop2, dtype, "cpu", adjoint=False)
+            mat3 = linop_to_matrix(lop3, dtype, "cpu", adjoint=False)
+            assert torch.allclose(
+                mat1_cpu, mat1_cuda.cpu(), atol=tol
+            ), f"CPU and CUDA linops differ? {lop1}"
+            try:
+                assert torch.allclose(
+                    mat1_cpu, mat1_adj, atol=tol
+                ), f"Forward and adjoint linops differ? {lop1}"
+            except:
+                print("!!! WHY IS LINOP_TO_MATRIX ADJOINT CONJUGATED??")
+                breakpoint()
+            assert torch.allclose(
+                mat1_cpu, mat2, atol=tol
+            ), f"Same seed, different linops? {lop1}"
+            for row in mat1_cpu:
+                # cosim = abs(row @ mat3) / (row.norm() ** 2)
+                # assert (
+                #     cosim < 0.5
+                # ).all(), "Different seeds, similar vectors? {lop1}"
+                pass
 
 
 def test_ssrft_correctness():
@@ -393,6 +392,9 @@ def test_ssrft_correctness():
       identical to applying the linop from either side
     * The matrix is unitary if square
 
+
+    ALSO TODO: IN THE IID FORMAL TESTS, TEST THAT SAME-SEED DIFFERENT DEVICE
+    IS STILL THE SAME LINOP!!!
 
     TEST TRANSPOSITIONS SOMEHOW, ALSO FORMAL! TODO
     """
@@ -460,71 +462,3 @@ def test_ssrft_correctness():
 #                     assert len(xx.shape) == 2
 #                     assert y.shape[-1] == 2
 #                     assert xx.shape[-1] == 2
-
-
-# def test_seed_consistency(torch_devices, f64_rtol, rng_seeds, square_shapes):
-#     """Seed consistency of SSRFT.
-
-#     Test that same seed and shape lead to same operator with same results,
-#     and different otherwise.
-#     """
-#     for seed in rng_seeds:
-#         for h, w in square_shapes:
-#             ssrft = SSRFT((h, w), seed=seed)
-#             ssrft_same = SSRFT((h, w), seed=seed)
-#             ssrft_diff = SSRFT((h, w), seed=seed + 1)
-#             for device in torch_devices:
-#                 for dtype, _rtol in f64_rtol.items():
-#                     # matvec
-#                     x = torch.randn(w, dtype=dtype).to(device)
-#                     assert ((ssrft @ x) == (ssrft_same @ x)).all()
-#                     # here, dim=1 may indeed result in same output, since
-#                     # there are no permutations or index-pickings, so 50/50.
-#                     # therefore we ignore that case.
-#                     if x.numel() > 1:
-#                         assert ((ssrft @ x) != (ssrft_diff @ x)).any()
-
-
-# def test_device_consistency(torch_devices, f64_rtol, rng_seeds, square_shapes):
-#     """Seed consistency of SSRFT across different devices.
-
-#     Test that same seed and shape lead to same operator with same results,
-#     even when device is different.
-#     """
-#     for seed in rng_seeds:
-#         for h, w in square_shapes:
-#             ssrft = SSRFT((h, w), seed=seed)
-#             for dtype, rtol in f64_rtol.items():
-#                 # apply SSRFT on given devices and check results are equal
-#                 x = torch.randn(w, dtype=dtype)
-#                 y = [(ssrft @ x.to(device)).cpu() for device in torch_devices]
-#                 for yyy in y:
-#                     assert torch.allclose(
-#                         yyy, y[0], rtol=rtol
-#                     ), "SSRFT inconsistency among devices!"
-
-
-# def test_unsupported_tall_ssrft(rng_seeds, fat_shapes):
-#     """Tail SSRFT linops are not supported."""
-#     for seed in rng_seeds:
-#         for h, w in fat_shapes:
-#             with pytest.raises(BadShapeError):
-#                 # If this line throws a BadShapeError, the test passes
-#                 SSRFT((w, h), seed=seed)
-
-
-# def test_input_shape_mismatch(rng_seeds, fat_shapes, torch_devices, f64_rtol):
-#     """Test case for SSRFT shape consistency."""
-#     for seed in rng_seeds:
-#         for h, w in fat_shapes:
-#             ssrft = SSRFT((h, w), seed=seed)
-#             for device in torch_devices:
-#                 for dtype, _rtol in f64_rtol.items():
-#                     # forward matmul
-#                     x = torch.empty(w + 1, dtype=dtype).to(device)
-#                     with pytest.raises(BadShapeError):
-#                         ssrft @ x
-#                     # adjoint matmul
-#                     x = torch.empty(h + 1, dtype=dtype).to(device)
-#                     with pytest.raises(BadShapeError):
-#                         x @ ssrft

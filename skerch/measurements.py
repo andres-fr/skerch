@@ -9,7 +9,7 @@ from collections import defaultdict
 import warnings
 import torch
 import torch_dct as dct
-from .linops import ByVectorLinOp
+from .linops import BaseLinOp, ByVectorLinOp
 from .utils import (
     COMPLEX_DTYPES,
     BadShapeError,
@@ -360,7 +360,7 @@ class SSRFT:
         return out
 
 
-class SsrftNoiseLinOp(RademacherNoiseLinOp):
+class SsrftNoiseLinOp(BaseLinOp):
     """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
     This class encapsulates the forward and adjoint SSRFT transforms into a
@@ -369,22 +369,19 @@ class SsrftNoiseLinOp(RademacherNoiseLinOp):
 
     Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
     efficient to apply this operator by row/column. Instead, this
-    implementation applies the SSRFT directly to the input, by vector.
-    This operator also extends :class:`RademacherNoiseLinop`,
+    implementation applies the SSRFT directly to the input, by vector,
+    but it also provides ``get_vector`` functionality via one-hot vecmul.
     """
 
-    REGISTER = defaultdict(list)
-
-    def __init__(self, shape, seed, register=True, norm="ortho"):
+    def __init__(self, shape, seed, norm="ortho"):
         """Initializer. See class docstring."""
-        super().__init__(
-            shape, seed, dtype=None, by_row=None, register=register
-        )
+        super().__init__(shape)
         h, w = shape
         if h > w:
             raise BadShapeError(
                 "Height > width not supported in SSRFT! use transposition"
             )
+        self.seed = seed
         self.norm = norm
 
     def vecmul(self, x):
