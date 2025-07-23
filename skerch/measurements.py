@@ -240,36 +240,42 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # # SSRFT
 # ##############################################################################
 class SSRFT:
+    """ """
+
     @staticmethod
     def ssrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
         r"""Right (forward) matrix multiplication of the SSRFT.
 
         This function implements a matrix-free, right-matmul operator of the
-        Scrambled Subsampled Randomized Fourier Transform (SSRFT) for real-valued
-        signals, from `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
+        Scrambled Subsampled Randomized Fourier Transform (SSRFT), see e.g.
+        `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
 
         .. math::
 
           \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
 
-        Where :math:`R` is a random index-picker, \mathcal{F} is a Discrete Cosine
-        Transform, and :math:`\Pi, \Pi'` are random permutations.
+        Where :math:`R` is a random index-picker, \mathcal{F} is either a
+        DCT or a FFT (if ``x`` is complex), and :math:`\Pi, \Pi'` are
+        random permutations which also multiply entries by Rademacher or
+        phase noise (if ``x`` is complex).
 
         :param x: Vector to be projected, such that ``y = SSRFT @ x``
-        :param out_dims: Dimensions of output ``y``, must be less than ``dim(x)``
+        :param out_dims: Dimensions of output ``y`` with ``out_dims <= dim(x)``
         :param seed: Random seed
+        :param norm: Norm for the FFT and DCT. Currently only ``ortho`` is
+          supported to ensure orthogonality.
         """
-
+        if norm != "ortho":
+            raise NotImplementedError("Unsupported norm! use ortho")
         if len(x.shape) != 1 or x.numel() <= 0:
             raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
         x_len = len(x)
         if out_dims > x_len:
-            raise ValueError("out_dims can't be larger than last dimension!")
+            raise ValueError("out_dims can't be larger than input dimension!")
         # make sure all sources of randomness are CPU, to ensure cross-device
         # consistency of the operator
         seeds = [seed + i for i in range(5)]
         if x.dtype in COMPLEX_DTYPES:
-            xx = x.clone()  #################################################
             # first scramble: permute, phase noise, and FFT
             x = x[randperm(x_len, seed=seeds[0], device="cpu")]
             phase_shift(
@@ -282,23 +288,6 @@ class SSRFT:
                 x, seed=seeds[3], inplace=True, rng_device="cpu", conj=False
             )
             x = torch.fft.fft(x, norm=norm)
-
-            # """
-            # INVERSE
-            # """
-
-            # # create output and embed random indices
-            # y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
-            # y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
-            # # invert second scramble: iFFT, rademacher, and inverse permutation
-            # y = torch.fft.ifft(y, norm=norm)
-            # phase_shift(y, seed=seeds[3], inplace=True, conj=True)
-            # y = y[randperm(x_len, seed=seeds[2], device="cpu", inverse=True)]
-            # # invert first scramble: iFFT, rademacher, and inverse permutation
-            # y = torch.fft.ifft(y, norm=norm)
-            # phase_shift(y, seed=seeds[1], inplace=True, conj=True)
-            # y = y[randperm(x_len, seed=seeds[0], device="cpu", inverse=True)]
-
         else:
             # first scramble: permute, rademacher, and DCT
             x = x[randperm(x_len, seed=seeds[0], device="cpu")]
@@ -308,119 +297,130 @@ class SSRFT:
             x = x[randperm(x_len, seed=seeds[2], device="cpu")]
             rademacher_flip(x, seed=seeds[3], inplace=True, rng_device="cpu")
             x = dct.dct(x, norm=norm)
-
-            # """
-            # INVERSE
-            # """
-            # # create output and embed random indices
-            # y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
-            # y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
-            # # invert second scramble: iDCT, rademacher, and inverse permutation
-            # y = dct.idct(y, norm=norm)
-            # rademacher_flip(y, seed=seeds[3], inplace=True)
-            # y = y[randperm(x_len, seed=seeds[2], device="cpu", inverse=True)]
-            # # invert first scramble: iDCT, rademacher, and inverse permutation
-            # y = dct.idct(y, norm=norm)
-            # rademacher_flip(y, seed=seeds[1], inplace=True)
-            # y = y[randperm(x_len, seed=seeds[0], device="cpu", inverse=True)]
-
         # extract random indices and return
         x = x[randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]]
         return x
 
+    @staticmethod
+    def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
+        r"""Left (adjoint) matrix multiplication of the SSRFT.
 
-def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
-    r"""Left (adjoint) matrix multiplication of the SSRFT.
+        Adjoint operator of SSRFT, such that ``x @ SSRFT = y``.
+        See :meth:`.ssrft` for more details.
 
-    Adjoint operator of SSRFT, such that ``x @ SSRFT = y``. See :func:`.ssrft`
-    for more details. Note the following implementation detail:
+        :param out_dims: In this case, instead of random index-picker, which
+          reduces dimension, we have an index embedding, which increases
+          dimension by placing the ``x`` entries in the corresponding indices
+          (and leaving the rest to zeros). For this reason,
+          ``out_dims >= len(x)`` is required.
+        """
+        if norm != "ortho":
+            raise NotImplementedError("Unsupported norm! use ortho")
+        if len(x.shape) != 1 or x.numel() <= 0:
+            raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
+        x_len = len(x)
+        if out_dims < x_len:
+            raise ValueError("out_dims can't be smaller than input dimension!")
+        # make sure all sources of randomness are CPU, to ensure cross-device
+        # consistency of the operator
+        seeds = [seed + i for i in range(5)]
+        # create output and embed random indices
+        out = torch.zeros(out_dims, dtype=x.dtype, device=x.device)
+        out[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
+        #
+        if x.dtype in COMPLEX_DTYPES:
+            # invert second scramble: iFFT, rademacher, and inverse permutation
+            out = torch.fft.ifft(out, norm=norm)
+            phase_shift(out, seed=seeds[3], inplace=True, conj=True)
+            out = out[
+                randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
+            ]
+            # invert first scramble: iFFT, rademacher, and inverse permutation
+            out = torch.fft.ifft(out, norm=norm)
+            phase_shift(out, seed=seeds[1], inplace=True, conj=True)
+            out = out[
+                randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
+            ]
+        else:
+            # invert second scramble: iDCT, rademacher, and inverse permutation
+            out = dct.idct(out, norm=norm)
+            rademacher_flip(out, seed=seeds[3], inplace=True)
+            out = out[
+                randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
+            ]
+            # invert first scramble: iDCT, rademacher, and inverse permutation
+            out = dct.idct(out, norm=norm)
+            rademacher_flip(out, seed=seeds[1], inplace=True)
+            out = out[
+                randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
+            ]
+        #
+        return out
 
-    * Permutations are orthogonal transforms
-    * Rademacher transforms are also orthogonal (also diagonal and self-inverse)
-    * DCT/DFT are also orthogonal transforms
-    * The index-picker :math:`R` is a subset of rows of I.
 
-    With orthogonal operators, transform and inverse are the same. Therefore,
-    this adjoint operator takes the following form:
+class SsrftNoiseLinOp(RademacherNoiseLinOp):
+    """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
-    .. math::
+    This class encapsulates the forward and adjoint SSRFT transforms into a
+    single linear operator, which is deterministic for the same shape and seed
+    (particularly, also across different torch devices).
 
-       \text{SSRFT}^T =& (R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi')^T \\
-       =& \Pi'^T \, \mathcal{F}^T \, \Pi^T \, \mathcal{F}^T \, R^T \\
-       =& \Pi'^{-1} \, \mathcal{F}^{-1} \, \Pi^{-1} \, \mathcal{F}^{-1} \, R^T
-
-    So we can make use of the inverses, except for :math:`R^T`, which is a
-    column-truncated identity, so we embed the entries picked by :math:`R` into
-    the corresponding indices, and leave the rest as zeros.
+    Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
+    efficient to apply this operator by row/column. Instead, this
+    implementation applies the SSRFT directly to the input, by vector.
+    This operator also extends :class:`RademacherNoiseLinop`,
     """
-    # make sure all sources of randomness are CPU, to ensure cross-device
-    # consistency of the operator
-    if len(x.shape) != 1:
-        raise NoFlatError("Only flat tensors supported!")
-    x_len = len(x)
-    assert (
-        out_dims >= x_len
-    ), "Backprojection into smaller dimensions not supported!"
-    #
-    seeds = [seed + i for i in range(5)]
-    result = torch.zeros(
-        out_dims,
-        dtype=x.dtype,
-    ).to(x.device)
-    # first embed signal into original indices
-    out_idxs = randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]
-    result[out_idxs] = x
-    del x
-    # then do the idct, followed by rademacher and inverse permutation
-    result = dct.idct(result, norm=dct_norm)
-    rademacher_flip(result, seeds[3], inplace=True)
-    perm2_inv = randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
-    result = result[perm2_inv]
-    del perm2_inv
-    # second inverse pass
-    result = dct.idct(result, norm=dct_norm)
-    rademacher_flip(result, seeds[1], inplace=True)
-    perm1_inv = randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
-    result = result[perm1_inv]
-    #
-    return result
 
+    def __init__(self, shape, seed, register=True):
+        """Initializer. See class docstring."""
+        super().__init__(
+            shape, seed, dtype=None, by_row=None, register=register
+        )
+        h, w = shape
+        if h > w:
+            raise BadShapeError(
+                "Height > width not supported in SSRFT! use transposition"
+            )
 
-# class SSRFT(BaseRandomLinOp):
-#     """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
+    def vecmul(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
 
-#     This class encapsulates the left- and right-SSRFT transforms into a single
-#     linear operator, which is deterministic for the same shape and seed
-#     (particularly, also across different torch devices).
-#     """
+        See class docstring and parent class for more details.
+        """
+        return SSRFT.ssrft(x, self.shape[0], seed=self.seed, norm="ortho")
 
-#     def __init__(self, shape, seed=0b1110101001010101011):
-#         """:param shape: ``(height, width)`` of this linear operator."""
-#         super().__init__(shape, seed)
-#         h, w = shape
-#         if h > w:
-#             raise BadShapeError("Height > width not supported!")
-#         # :param scale: Ideally, ``1/l``, where ``l`` is the average diagonal
-#         #   value of the covmat ``A.T @ A``, where ``A`` is a FastJLT operator,
-#         #   so that ``l2norm(x)`` approximates ``l2norm(Ax)``.
-#         self.scale = NotImplemented
+    def rvecmul(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
 
-#     def matmul(self, x):
-#         """Forward (right) matrix-vector multiplication ``SSRFT @ x``.
+        See class docstring and parent class for more details.
+        """
+        return SSRFT.ssrft_adjoint(
+            x, self.shape[1], seed=self.seed, norm="ortho"
+        )
 
-#         See parent class for more details.
-#         """
-#         return ssrft(x, self.shape[0], seed=self.seed, dct_norm="ortho")
+    def get_vector(self, idx, dtype, device, by_row=False):
+        """Samples a SSRFT row or column.
 
-#     def rmatmul(self, x):
-#         """Adjoint (left) matrix-vector multiplication ``x @ SSRFT``.
+        :param idx: Number between 0 and below number of columns (resp. rows),
+          indicating the corresponding vector to be sampled.
+        :param by_row: If false, the ``idx`` column (zero-indexed) will be
+          sampled. Otherwise the column.
+        """
+        h, w = self.shape
+        in_dims = h if by_row else w
+        out_dims = w if by_row else h
+        if idx < 0 or idx >= (h if by_row else w):
+            raise ValueError(
+                f"Invalid index {idx} for shape {self.shape} "
+                f"and by_row={by_row}!"
+            )
+        oh = torch.zeros(in_dims, dtype=dtype, device=device)
+        oh[idx] = 1
+        result = oh @ self if by_row else self @ oh
+        return result
 
-#         See parent class for more details.
-#         """
-#         return ssrft_adjoint(x, self.shape[1], seed=self.seed, dct_norm="ortho")
-
-#     def get_row(self, idx, dtype, device):
-#         """Returns SSRFT[idx, :] via left-matmul with a one-hot vector."""
-#         in_buff = torch.zeros(self.shape[0], dtype=dtype, device=device)
-#         in_buff[idx] = 1
-#         return in_buff @ self
+    def __repr__(self):
+        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        clsname = self.__class__.__name__
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed})>"
+        return s

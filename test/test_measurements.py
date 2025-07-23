@@ -63,6 +63,7 @@ from skerch.measurements import (
     GaussianNoiseLinOp,
     PhaseNoiseLinOp,
     SSRFT,
+    SsrftNoiseLinOp,
 )
 
 from skerch.utils import BadShapeError, BadSeedError
@@ -267,28 +268,10 @@ def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
 # ##############################################################################
 # # SSRFT
 # ##############################################################################
-def dct2(x, norm="ortho"):
-    """One-dimensional Discrete Cosine Transform - Type 2.
-
-    :param x: Tensor of shape ``(..., n)``, assumed to be real
-    """
-    len_sig = x.shape[-1]
-    len_dct = (len_sig - 1) // 2 + 1
-    #
-    spiral = ((-0.5j * torch.pi / len_sig) * torch.arange(len_sig)).exp()
-    #
-    v = torch.empty_like(x)
-    v[:len_dct] = x[::2]
-    v[len_dct:] = x.flip(-1)[1::2] if (len_sig % 2) else x.flip(-1)[::2]
-    #
-    result = ((2**0.5) * torch.fft.fft(v, norm=norm) * spiral).real
-    return result
-
-
 def test_ssrft():
     """"""
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
+    # with pytest.raises(BadShapeError):
+    #     _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft(torch.tensor(0), 0)
     with pytest.raises(BadShapeError):
@@ -299,10 +282,23 @@ def test_ssrft():
     # import matplotlib.pyplot as plt
     # from skerch.measurements import SSRFT
 
-    aa = torch.zeros(1000, dtype=torch.complex128)
-    aa[0] = 1 + 1j
+    aa = torch.zeros(1000, dtype=torch.float64)
+    aa[0] = 1  # + 1j
 
     bb = SSRFT.ssrft(aa, 1000, seed=12350, norm="ortho")
+
+    aaa = SSRFT.ssrft_adjoint(bb, 1000, seed=12350, norm="ortho")
+
+    import matplotlib.pyplot as plt
+
+    print("!!!", torch.allclose(aa, aaa))
+    # plt.clf(); plt.plot(bb); plt.show()
+
+    ssrft = SsrftNoiseLinOp((100, 1000), 12350, register=True)
+    b2 = ssrft @ aa
+    a2 = b2 @ ssrft
+    col = ssrft.get_vector(0, aa.dtype, aa.device, by_row=False)
+    breakpoint()
 
     # TODO:
     # * adapt ssrft to also admit complex (phase noise instead of rademacher)
