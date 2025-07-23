@@ -235,11 +235,12 @@ def test_measurements_formal(
                     assert mat1a.device.type == device, "Mismatching device!"
 
 
-def test_phasenoise_conj(rng_seeds, torch_devices, complex_dtypes_tols):
+def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
     """Test case for conjugation of ``PhaseNoise`` linop.
 
     For all seeds, devices and complex dtypes, tests that:
     * Conj of linop produces elementwise conjugated entries
+    * linop entries have unit norm
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -255,6 +256,12 @@ def test_phasenoise_conj(rng_seeds, torch_devices, complex_dtypes_tols):
                     lop_conj, lop.dtype, device, adjoint=False
                 )
                 assert (mat.conj() == mat_conj).all(), "Wrong conj linop?"
+                #
+                prod = mat * mat_conj
+                assert prod.imag.norm() <= tol, "wrong conjugations?"
+                assert torch.allclose(
+                    prod.real, torch.ones_like(prod.real), atol=tol
+                ), "Phasenoise not unit norm?"
 
 
 # ##############################################################################
@@ -292,10 +299,10 @@ def test_ssrft():
     # import matplotlib.pyplot as plt
     # from skerch.measurements import SSRFT
 
-    aa = torch.zeros(1000, dtype=torch.float64)
-    aa[0] = 1
+    aa = torch.zeros(1000, dtype=torch.complex128)
+    aa[0] = 1 + 1j
 
-    bb = SSRFT.ssrft(aa, 1000, seed=12345, dct_norm="ortho")
+    bb = SSRFT.ssrft(aa, 1000, seed=12350, norm="ortho")
 
     # TODO:
     # * adapt ssrft to also admit complex (phase noise instead of rademacher)

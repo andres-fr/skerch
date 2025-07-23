@@ -156,7 +156,9 @@ def randperm(n, seed=None, device="cpu", inverse=False):
     return perm
 
 
-def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
+def phase_noise(
+    shape, seed=None, dtype=torch.complex128, device="cpu", conj=False
+):
     """Reproducible noise uniformly distributed on the complex unit circle.
 
     .. note::
@@ -164,6 +166,9 @@ def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
       noise. If ``x`` itself has been generated using ``uniform_noise``, make
       sure to use a different seed to mitigate correlations.
 
+    :param conj: If true, the generated noise is the complex conjugate of the
+      noise if all other parameters were equal.
+      i.e. the complex noise is complex conjugated.
     :returns: A tensor of given shape, dtype and device, containing complex
       i.i.d. noisy entries uniformly distributed around the unit circle.
       Behaviour is reproducible for a given random seed.
@@ -172,8 +177,10 @@ def phase_noise(shape, seed=None, dtype=torch.complex128, device="cpu"):
         raise ValueError(f"Dtype must be complex! was {dtype}")
     real_dtype = complex_dtype_to_real(dtype)
     #
-    noise = 2 * torch.pi * uniform_noise(shape, seed, real_dtype, device)
-    noise = noise.mul(1j).exp()
+    noise = uniform_noise(shape, seed, real_dtype, device)
+    if conj:
+        noise = 1 - noise
+    noise = noise.mul(2 * torch.pi * 1j).exp()
     return noise
 
 
@@ -196,7 +203,7 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
         return x * mask, mask
 
 
-def phase_shift(x, seed=None, inplace=True, rng_device="cpu"):
+def phase_shift(x, seed=None, inplace=True, rng_device="cpu", conj=False):
     """Reproducible phase shift using phase noise.
 
     .. note::
@@ -207,7 +214,9 @@ def phase_shift(x, seed=None, inplace=True, rng_device="cpu"):
     .. warning::
       See :func:`rademacher_noise` for notes on reproducibility and more info.
     """
-    shift = phase_noise(x.shape, seed, x.dtype, device=rng_device).to(x.device)
+    shift = phase_noise(
+        x.shape, seed, x.dtype, device=rng_device, conj=conj
+    ).to(x.device)
     if inplace:
         x *= shift
         return x, shift

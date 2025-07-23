@@ -125,6 +125,9 @@ def test_noise_sources(
     For all devices and datatypes, and a variety of shapes:
     * Same-seed consistency
     * Quasi-delta autocorelation
+
+    For phase_noise, and phase_shift also test that:
+    * conj generates same-seed conjugate
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -212,9 +215,15 @@ def test_noise_sources(
                         # complex noise
                         if dtype in COMPLEX_DTYPES:
                             # phase noise
-                            noise1 = phase_noise(dims, sd, dtype, device)
-                            noise2 = phase_noise(dims, sd, dtype, device)
-                            noise3 = phase_noise(dims, sd + 1, dtype, device)
+                            noise1 = phase_noise(
+                                dims, sd, dtype, device, conj=False
+                            )
+                            noise2 = phase_noise(
+                                dims, sd, dtype, device, conj=False
+                            )
+                            noise3 = phase_noise(
+                                dims, sd + 1, dtype, device, conj=False
+                            )
                             autocorrelation_test_helper(noise1)
                             assert torch.allclose(
                                 noise1, noise2, atol=tol
@@ -222,16 +231,35 @@ def test_noise_sources(
                             assert not torch.allclose(
                                 noise1, noise3, atol=tol
                             ), "Different seed, same noise? (uniform)"
+                            assert torch.allclose(
+                                noise1.conj(),
+                                phase_noise(
+                                    dims, sd, dtype, device, conj=True
+                                ),
+                                atol=tol,
+                            ), "phase_noise not conjugating correctly?"
                             # phase shift
                             ones = torch.ones(dims, dtype=dtype, device=device)
                             noise1, m1 = phase_shift(
-                                ones, sd, inplace=False, rng_device=device
+                                ones,
+                                sd,
+                                inplace=False,
+                                rng_device=device,
+                                conj=False,
                             )
                             noise2, _ = phase_shift(
-                                ones, sd, inplace=False, rng_device=device
+                                ones,
+                                sd,
+                                inplace=False,
+                                rng_device=device,
+                                conj=False,
                             )
                             noise3, _ = phase_shift(
-                                ones, sd + 1, inplace=False, rng_device=device
+                                ones,
+                                sd + 1,
+                                inplace=False,
+                                rng_device=device,
+                                conj=False,
                             )
                             autocorrelation_test_helper(noise1)
                             assert torch.allclose(
@@ -243,3 +271,21 @@ def test_noise_sources(
                             assert (
                                 noise1 == m1
                             ).all(), "Inconsistent output and phase shift?"
+                            #
+                            noise1_conj, m1_conj = phase_shift(
+                                ones,
+                                sd,
+                                inplace=False,
+                                rng_device=device,
+                                conj=True,
+                            )
+                            assert torch.allclose(
+                                noise1.conj(),
+                                noise1_conj,
+                                atol=tol,
+                            ), "incorrect phase_shift conjutage output?"
+                            assert torch.allclose(
+                                m1.conj(),
+                                m1_conj,
+                                atol=tol,
+                            ), "phase_shift not conjugating mask correctly?"

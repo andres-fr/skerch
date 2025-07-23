@@ -17,6 +17,7 @@ from .utils import (
     rademacher_noise,
     phase_noise,
     rademacher_flip,
+    phase_shift,
     gaussian_noise,
     phase_noise,
     randperm,
@@ -240,7 +241,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # ##############################################################################
 class SSRFT:
     @staticmethod
-    def ssrft(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
+    def ssrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
         r"""Right (forward) matrix multiplication of the SSRFT.
 
         This function implements a matrix-free, right-matmul operator of the
@@ -258,6 +259,7 @@ class SSRFT:
         :param out_dims: Dimensions of output ``y``, must be less than ``dim(x)``
         :param seed: Random seed
         """
+
         if len(x.shape) != 1 or x.numel() <= 0:
             raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
         x_len = len(x)
@@ -266,24 +268,70 @@ class SSRFT:
         # make sure all sources of randomness are CPU, to ensure cross-device
         # consistency of the operator
         seeds = [seed + i for i in range(5)]
-        # first scramble: permute, rademacher, and DCT
-        if x in COMPLEX_DTYPES:
-            raise NotImplementedError
+        if x.dtype in COMPLEX_DTYPES:
+            xx = x.clone()  #################################################
+            # first scramble: permute, phase noise, and FFT
+            x = x[randperm(x_len, seed=seeds[0], device="cpu")]
+            phase_shift(
+                x, seed=seeds[1], inplace=True, rng_device="cpu", conj=False
+            )
+            x = torch.fft.fft(x, norm=norm)
+            # second scramble: permute, phase noise, and FFT
+            x = x[randperm(x_len, seed=seeds[2], device="cpu")]
+            phase_shift(
+                x, seed=seeds[3], inplace=True, rng_device="cpu", conj=False
+            )
+            x = torch.fft.fft(x, norm=norm)
+
         else:
-            perm1 = randperm(x_len, seed=seeds[0], device="cpu")
-            x, rad1 = rademacher_flip(x[perm1], seed=seeds[1], inplace=False)
-            breakpoint()
-        del perm1, rad1
-        x = dct.dct(x, norm=dct_norm)
-        # second scramble: permute, rademacher and DCT
-        perm2 = randperm(x_len, seed=seeds[2], device="cpu")
-        x, rad2 = rademacher_flip(x[perm2], seeds[3], inplace=False)
-        del perm2, rad2
-        x = dct.dct(x, norm=dct_norm)
+            # first scramble: permute, rademacher, and DCT
+            x = x[randperm(x_len, seed=seeds[0], device="cpu")]
+            rademacher_flip(x, seed=seeds[1], inplace=True, rng_device="cpu")
+            x = dct.dct(x, norm=norm)
+            # second scramble: permute, rademacher and DCT
+            x = x[randperm(x_len, seed=seeds[2], device="cpu")]
+            rademacher_flip(x, seed=seeds[3], inplace=True, rng_device="cpu")
+            x = dct.dct(x, norm=norm)
+
+            # """
+            # INVERSE
+            # """
+            # # create output and embed random indices
+            # y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
+            # y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
+            # # invert second scramble: iDCT, rademacher, and inverse permutation
+            # y = dct.idct(y, norm=norm)
+            # rademacher_flip(y, seed=seeds[3], inplace=True)
+            # y = y[randperm(x_len, seed=seeds[2], device="cpu", inverse=True)]
+            # # invert first scramble: iDCT, rademacher, and inverse permutation
+            # y = dct.idct(y, norm=norm)
+            # rademacher_flip(y, seed=seeds[1], inplace=True)
+            # y = y[randperm(x_len, seed=seeds[0], device="cpu", inverse=True)]
+
         # extract random indices and return
-        out_idxs = randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]
-        x = x[out_idxs]
+        x = x[randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]]
+
+        """
+        INVERSE
+        """
+
+        # create output and embed random indices
+        y = torch.zeros(x_len, dtype=x.dtype, device=x.device)
+        y[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
+        # invert second scramble: iFFT, rademacher, and inverse permutation
+        y = torch.fft.ifft(y, norm=norm)
+        phase_shift(y, seed=seeds[3], inplace=True, conj=True)
+
+        import matplotlib.pyplot as plt
+
+        breakpoint()
+        # plt.clf(); plt.plot(x); plt.show()
+
         return x
+
+        # plt.clf(); plt.plot(x); plt.show()
+
+        # extract random indices and return
 
 
 def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, dct_norm="ortho"):
