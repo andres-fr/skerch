@@ -27,6 +27,7 @@ LATER TODO:
 """
 
 
+import warnings
 import pytest
 import torch
 
@@ -102,30 +103,33 @@ def test_iid_measurements_formal(
     * Get_vector triggers error for invalid index, and returns right dtype and
       device otherwise
     * Deterministic behaviour (fwd and adjoint): running twice is same
-    * Seed consistency
+    * Seed consistency (including same linop in different device)
     * Output is in requested datatype and device
 
     For complex_only linops, it also tests:
     * Providing a noncomplex dtype raises a ``ValueError``
     """
     # correct string conversion
-    hw = (3, 3)
+    hw = (10, 10)
     lop = RademacherNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
-    s = "<RademacherNoiseLinOp(3x3, seed=0, dtype=torch.float32, by_row=False)>"
+    s = (
+        "<RademacherNoiseLinOp(10x10, seed=0, "
+        "dtype=torch.float32, by_row=False)>"
+    )
     assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
     lop = GaussianNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
     s = (
-        "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, "
+        "<GaussianNoiseLinOp(10x10, mean=0.0, std=1.0, seed=0, "
         + "dtype=torch.float32, by_row=False)>"
     )
     assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
     lop = PhaseNoiseLinOp(hw, 0, torch.complex64, by_row=False, register=False)
     s = (
-        "<PhaseNoiseLinOp(3x3, conj=False, seed=0, "
+        "<PhaseNoiseLinOp(10x10, conj=False, seed=0, "
         + "dtype=torch.complex64, by_row=False)>"
     )
     assert str(lop) == s, "Unexpected repr for Phase noise linop!"
@@ -153,20 +157,43 @@ def test_iid_measurements_formal(
         with pytest.raises(ValueError):
             lop.get_vector(idx=5, device="cpu")
         #
+        hw = (100, 2)
         for seed in rng_seeds:
-            for device in torch_devices:
-                for dtype, tol in dtypes_tols.items():
-                    #
-                    if complex_only and dtype not in {
-                        torch.complex32,
-                        torch.complex64,
-                        torch.complex128,
-                    }:
-                        with pytest.raises(ValueError):
-                            _ = lop_type(hw, 0, dtype, register=False)
-                        continue
-                    #
-                    hw = (100, 2)
+            for dtype, tol in dtypes_tols.items():
+                # complex-only linops raise value error for noncomplex dtype
+                if complex_only and dtype not in {
+                    torch.complex32,
+                    torch.complex64,
+                    torch.complex128,
+                }:
+                    with pytest.raises(ValueError):
+                        _ = lop_type(hw, 0, dtype, register=False)
+                    continue
+                # seed consistency across devices (if CUDA is available)
+                if torch.cuda.is_available():
+                    lop = lop_type(
+                        hw, seed, dtype, by_row=False, register=False
+                    )
+                    mat1 = linop_to_matrix(lop, dtype, "cpu", adjoint=False)
+                    mat2 = linop_to_matrix(lop, dtype, "cuda", adjoint=False)
+                    mat3 = linop_to_matrix(lop, dtype, "cpu", adjoint=True)
+                    mat4 = linop_to_matrix(lop, dtype, "cuda", adjoint=True)
+                    assert torch.allclose(
+                        mat1, mat2.cpu(), atol=tol
+                    ), "Mismatching linop across devices!"
+                    assert torch.allclose(
+                        mat1, mat3.cpu(), atol=tol
+                    ), "Mismatching linop across devices!"
+                    assert torch.allclose(
+                        mat1, mat4.cpu(), atol=tol
+                    ), "Mismatching linop across devices!"
+                else:
+                    warnings.warn(
+                        "Warning! cross-device tests didn't run "
+                        "because CUDA is not available in this device"
+                    )
+                # deterministic behaviour and seed consistency
+                for device in torch_devices:
                     lop1 = lop_type(
                         hw, seed, dtype, by_row=False, register=False
                     )
@@ -176,7 +203,6 @@ def test_iid_measurements_formal(
                     lop3 = lop_type(
                         hw, seed + 5, dtype, by_row=False, register=False
                     )
-                    # deterministic behaviour and seed consistency
                     mat1a = linop_to_matrix(
                         lop1, lop1.dtype, device, adjoint=False
                     )
@@ -210,6 +236,16 @@ def test_iid_measurements_formal(
                     # dtype and device check
                     assert mat1a.dtype == dtype, "Mismatching dtype!"
                     assert mat1a.device.type == device, "Mismatching device!"
+
+
+def test_iid_measurements_correctness():
+    """
+    EMPTY TEST:
+    Sources of iid noise used in the IID measurement linops are already tested
+    in utils, and here we assume formal tests are sufficient.
+    Add tests here if that is not the case.
+    """
+    NotImplemented
 
 
 def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
@@ -255,28 +291,29 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     * Invalid shape to SSRFT linop triggers error (must be square or fat)
     * Get_vector triggers error for invalid index, and returns right dtype and
       device otherwise
+    * @ output is of same dtype and device as input
     * Deterministic behaviour (fwd and adjoint): running twice is same
     * Seed consistency
-    * Output is of same dtype and device as input
     """
+    hw = (10, 10)
     # correct string conversion (linop)
-    lop = SsrftNoiseLinOp((3, 3), 0, norm="ortho")
+    lop = SsrftNoiseLinOp(hw, 0, norm="ortho")
     assert (
-        str(lop) == "<SsrftNoiseLinOp(3x3, seed=0)>"
+        str(lop) == "<SsrftNoiseLinOp(10x10, seed=0)>"
     ), "Unexpected repr for SSRFT noise linop!"
     # non-orthogonal norm raises error (transform)
     with pytest.raises(NotImplementedError):
-        SSRFT.ssrft(torch.ones(3), out_dims=3, seed=0, norm="XXXX")
+        SSRFT.ssrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
     with pytest.raises(NotImplementedError):
-        SSRFT.ssrft_adjoint(torch.ones(3), out_dims=3, seed=0, norm="XXXX")
+        SSRFT.issrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
     # non-orthogonal norm raises error (linop)
 
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp((3, 3), 0, norm="XXXX")
-        lop @ torch.ones(3)
+        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX")
+        lop @ torch.ones(10)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp((3, 3), 0, norm="XXXX")
-        torch.ones(3) @ lop
+        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX")
+        torch.ones(10) @ lop
     # non-vector or empty input raises BadShapeError (transform)
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
@@ -285,13 +322,13 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     with pytest.raises(BadShapeError):
         _ = SSRFT.ssrft(torch.zeros(0), 0)
     with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft_adjoint(torch.zeros(5, 5), 5)
+        _ = SSRFT.issrft(torch.zeros(5, 5), 5)
     with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft_adjoint(torch.tensor(0), 0)
+        _ = SSRFT.issrft(torch.tensor(0), 0)
     with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft_adjoint(torch.zeros(0), 0)
+        _ = SSRFT.issrft(torch.zeros(0), 0)
     # empty input raises BadShapeError (linop)
-    lop = SsrftNoiseLinOp((3, 3), 0)
+    lop = SsrftNoiseLinOp(hw, 0)
     with pytest.raises(BadShapeError):
         lop @ torch.tensor(0)
     with pytest.raises(BadShapeError):
@@ -302,19 +339,19 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
         torch.zeros(0) @ lop
     # too large or too small out_dims raises error (transform)
     with pytest.raises(ValueError):
-        SSRFT.ssrft(torch.ones(3), out_dims=-1)
+        SSRFT.ssrft(torch.ones(10), out_dims=-1)
     with pytest.raises(ValueError):
-        SSRFT.ssrft(torch.ones(3), out_dims=0)
+        SSRFT.ssrft(torch.ones(10), out_dims=0)
     with pytest.raises(ValueError):
-        SSRFT.ssrft(torch.ones(3), out_dims=4)
+        SSRFT.ssrft(torch.ones(10), out_dims=11)
     with pytest.raises(ValueError):
-        SSRFT.ssrft_adjoint(torch.ones(3), out_dims=2)
+        SSRFT.issrft(torch.ones(10), out_dims=9)
     # invalid shapes raise error (linop)
     with pytest.raises(BadShapeError):
         _ = SsrftNoiseLinOp((0, 0), 0)
     with pytest.raises(BadShapeError):
         _ = SsrftNoiseLinOp((10, 5), 0)
-    lop = SsrftNoiseLinOp((3, 3), 0)
+    lop = SsrftNoiseLinOp(hw, 0)
     with pytest.raises(BadShapeError):
         lop @ torch.ones(4)
     with pytest.raises(BadShapeError):
@@ -329,11 +366,10 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
         lop.get_vector(-1, torch.float32, "cpu", by_row=True)
     with pytest.raises(ValueError):
         lop.get_vector(3, torch.float32, "cpu", by_row=True)
-    #
+    # get_vector and matmul provide right dtype and device
     lop = SsrftNoiseLinOp((3, 5), 0)
     for device in torch_devices:
         for dtype in dtypes_tols.keys():
-            # get_vector provides right dtype and device otherwise
             v = lop.get_vector(0, dtype, device, by_row=True)
             assert v.dtype == dtype, "Invalid get_vector dtype by_row!"
             assert v.device.type == device, "Invalid get_vector device by_row!"
@@ -348,37 +384,55 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
             assert w.dtype == dtype, "Mismatching output dtype (adj)!"
             assert w.device.type == device, "Mismatching output device (adj)!"
     # deterministic behaviour and seed consistency
+    hw = (20, 20)
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
-            hw = (5, 50)
-            lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho")
-            lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho")
-            lop3 = SsrftNoiseLinOp(hw, seed + 1, norm="ortho")
-            #
-            mat1_cpu = linop_to_matrix(lop1, dtype, "cpu", adjoint=False)
-            mat1_cuda = linop_to_matrix(lop1, dtype, "cuda", adjoint=False)
-            mat1_adj = linop_to_matrix(lop1, dtype, "cpu", adjoint=True)
-            mat2 = linop_to_matrix(lop2, dtype, "cpu", adjoint=False)
-            mat3 = linop_to_matrix(lop3, dtype, "cpu", adjoint=False)
-            assert torch.allclose(
-                mat1_cpu, mat1_cuda.cpu(), atol=tol
-            ), f"CPU and CUDA linops differ? {lop1}"
-            try:
+            for device in torch_devices:
+                lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                lop3 = SsrftNoiseLinOp(hw, seed + 1, norm="ortho")
+                mat1a = linop_to_matrix(lop1, dtype, device, adjoint=False)
+                mat1b = linop_to_matrix(lop1, dtype, device, adjoint=False)
+                mat1c = linop_to_matrix(lop1, dtype, device, adjoint=True)
+                mat2 = linop_to_matrix(lop2, dtype, device, adjoint=False)
+                mat3 = linop_to_matrix(lop3, dtype, device, adjoint=False)
+
                 assert torch.allclose(
-                    mat1_cpu, mat1_adj, atol=tol
-                ), f"Forward and adjoint linops differ? {lop1}"
-            except:
-                print("!!! WHY IS LINOP_TO_MATRIX ADJOINT CONJUGATED??")
-                breakpoint()
-            assert torch.allclose(
-                mat1_cpu, mat2, atol=tol
-            ), f"Same seed, different linops? {lop1}"
-            for row in mat1_cpu:
-                # cosim = abs(row @ mat3) / (row.norm() ** 2)
-                # assert (
-                #     cosim < 0.5
-                # ).all(), "Different seeds, similar vectors? {lop1}"
-                pass
+                    mat1a, mat1b, atol=tol
+                ), f"Nondeterministic linop? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1c, atol=tol
+                ), f"Different fwd and adjoint? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat2, atol=tol
+                ), f"Same seed, differentl linop? {lop1}"
+                #
+                for col in mat1a.H:
+                    cosim = abs(col @ mat3) / (col.norm() ** 2)
+                    assert (
+                        cosim < 0.75
+                    ).all(), "Different seeds, similar vectors? {lop1}"
+            # seed consistency across devices (if CUDA is available)
+            if torch.cuda.is_available():
+                lop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                mat1 = linop_to_matrix(lop, dtype, "cpu", adjoint=False)
+                mat2 = linop_to_matrix(lop, dtype, "cuda", adjoint=False)
+                mat3 = linop_to_matrix(lop, dtype, "cpu", adjoint=True)
+                mat4 = linop_to_matrix(lop, dtype, "cuda", adjoint=True)
+                assert torch.allclose(
+                    mat1, mat2.cpu(), atol=tol
+                ), "Mismatching linop across devices!"
+                assert torch.allclose(
+                    mat1, mat3.cpu(), atol=tol
+                ), "Mismatching linop across devices!"
+                assert torch.allclose(
+                    mat1, mat4.cpu(), atol=tol
+                ), "Mismatching linop across devices!"
+            else:
+                warnings.warn(
+                    "Warning! cross-device tests didn't run "
+                    "because CUDA is not available in this device"
+                )
 
 
 def test_ssrft_correctness():
@@ -392,11 +446,7 @@ def test_ssrft_correctness():
       identical to applying the linop from either side
     * The matrix is unitary if square
 
-
-    ALSO TODO: IN THE IID FORMAL TESTS, TEST THAT SAME-SEED DIFFERENT DEVICE
-    IS STILL THE SAME LINOP!!!
-
-    TEST TRANSPOSITIONS SOMEHOW, ALSO FORMAL! TODO
+    TEST TRANSPOSITIONS ALSO IN FORMAL FOR ALL LINOPS!
     """
     # autocorrelation_test_helper(noise1)
     pass

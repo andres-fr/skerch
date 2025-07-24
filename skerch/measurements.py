@@ -244,7 +244,7 @@ class SSRFT:
 
     @staticmethod
     def ssrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
-        r"""Right (forward) matrix multiplication of the SSRFT.
+        r"""Forward SSRFT.
 
         This function implements a matrix-free, right-matmul operator of the
         Scrambled Subsampled Randomized Fourier Transform (SSRFT), see e.g.
@@ -304,10 +304,13 @@ class SSRFT:
         return x
 
     @staticmethod
-    def ssrft_adjoint(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
-        r"""Left (adjoint) matrix multiplication of the SSRFT.
+    def issrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
+        r"""Inverse SSRFT.
 
-        Adjoint operator of SSRFT, such that ``x @ SSRFT = y``.
+        Inversion of the SSRFT, such that for a square ssrft,
+        ``x == issrft(ssrft(x))`` holds.
+        Note that this means that, for complex ``x``, the adjoint operation
+        involves complex conjugation as well.
         See :meth:`.ssrft` for more details.
 
         :param out_dims: In this case, instead of random index-picker, which
@@ -392,13 +395,13 @@ class SsrftNoiseLinOp(BaseLinOp):
         return SSRFT.ssrft(x, self.shape[0], seed=self.seed, norm=self.norm)
 
     def rvecmul(self, x):
-        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+        """Left matrix-vector multiplication ``x @ self``.
 
         See class docstring and parent class for more details.
         """
-        return SSRFT.ssrft_adjoint(
+        return SSRFT.issrft(
             x, self.shape[1], seed=self.seed, norm=self.norm
-        )
+        ).conj()
 
     def get_vector(self, idx, dtype, device, by_row=False):
         """Samples a SSRFT row or column.
