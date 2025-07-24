@@ -27,24 +27,23 @@ from .utils import (
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-def perform_measurement(lop, meas_lop, adjoint=False, parallel_mode=None):
+def perform_measurements(lop, meas_lop, adjoint=False, parallel_mode=None):
     """
     :param lop: must satisfy shape and @
     :param meas_lop: must satisfy shape, get_vector and also dtype
     """
     h1, w1 = lop.shape
     h2, w2 = meas_lop.shape
-    dtype = meas_lop.dtype
     if (adjoint and w2 != h1) or ((not adjoint) and w1 != h2):
-        raise ValueError(
+        raise BadShapeError(
             f"Incompatible shapes! {lop.shape}, {meas_lop.shape}, "
             + f"adjoint={adjoint}"
         )
     #
     if parallel_mode is None:
         warnings.warn("measurements can be parallelized", RuntimeWarning)
-        breakpoint()
-    #
+        #
+        dtype = meas_lop.dtype
     elif parallel_mode == "mp":
         raise NotImplementedError
     else:
@@ -373,16 +372,28 @@ class SsrftNoiseLinOp(BaseLinOp):
     Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
     efficient to apply this operator by row/column. Instead, this
     implementation applies the SSRFT directly to the input, by vector,
-    but it also provides ``get_vector`` functionality via one-hot vecmul.
+    but it also provides ``get_vector`` functionality via one-hot vecmul to
+    facilitate parallel measurements via :func:`perform_measurements`.
+
+    .. note::
+
+      This linop can either be square or tall, but never fat (i.e. width must
+      be less or equal than height). Since the SSRFT cannot increase the
+      dimensionality of its input, the forward matmul of this linop is actually
+      the inverse SSRFT, and the adjoint matmul is
+      This is a slight change in format that doesn't affect the semantics of
+      this linop, and makes it more compatible with other noise linops, which
+      are typically also tall instead of fat.
     """
 
     def __init__(self, shape, seed, norm="ortho"):
         """Initializer. See class docstring."""
         super().__init__(shape)
         h, w = shape
-        if h > w:
+        if w > h:
             raise BadShapeError(
-                "Height > width not supported in SSRFT! use transposition"
+                "Width > height not supported in SSRFT! use transposition or "
+                "adjoint matmul."
             )
         self.seed = seed
         self.norm = norm
@@ -392,21 +403,21 @@ class SsrftNoiseLinOp(BaseLinOp):
 
         See class docstring and parent class for more details.
         """
-        return SSRFT.ssrft(x, self.shape[0], seed=self.seed, norm=self.norm)
+        # note that the issrft acts like the Hermitian transpose of A, but here
+        # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
+        # which equals (x @ A).H.H = x@A.
+        return SSRFT.issrft(
+            x.conj(), self.shape[0], seed=self.seed, norm=self.norm
+        ).conj()
 
     def rvecmul(self, x):
         """Left matrix-vector multiplication ``x @ self``.
 
         See class docstring and parent class for more details.
         """
-        # note that the issrft acts like the Hermitian transpose of A, but here
-        # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
-        # which equals (x @ A).H.H = x@A.
-        return SSRFT.issrft(
-            x.conj(), self.shape[1], seed=self.seed, norm=self.norm
-        ).conj()
+        return SSRFT.ssrft(x, self.shape[1], seed=self.seed, norm=self.norm)
 
-    def get_vector(self, idx, dtype, device, by_row=False):
+    def get_vector(self, idx, device, dtype, by_row=False):
         """Samples a SSRFT row or column.
 
         :param idx: Number between 0 and below number of columns (resp. rows),

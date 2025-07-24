@@ -36,7 +36,7 @@ from skerch.linops import (
 )
 
 from skerch.measurements import (
-    perform_measurement,
+    perform_measurements,
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
     PhaseNoiseLinOp,
@@ -107,7 +107,75 @@ def ssrft_hw_and_autocorr_tolerances():
 
 
 # ##############################################################################
-# # TESTS
+# # PERFORM MEASUREMENTS
+# ##############################################################################
+def test_perform_measurements_formal():
+    """ """
+    m1, m2 = torch.ones((5, 5)), torch.ones((5, 4))
+    # linops must have same inner dimension, otherwise error
+    with pytest.raises(BadShapeError):
+        perform_measurements(m1, m2.T, adjoint=False, parallel_mode=None)
+    with pytest.raises(BadShapeError):
+        perform_measurements(m1, m2, adjoint=True, parallel_mode=None)
+    with pytest.raises(BadShapeError):
+        perform_measurements(m2, m1, adjoint=False, parallel_mode=None)
+    with pytest.raises(BadShapeError):
+        perform_measurements(m2.T, m1, adjoint=True, parallel_mode=None)
+    # no parallel raises warning
+    with pytest.warns(RuntimeWarning):
+        perform_measurements(m1, m2, adjoint=False, parallel_mode=None)
+    # unknown parallel raises error
+    with pytest.raises(ValueError):
+        perform_measurements(m1, m2, adjoint=False, parallel_mode="...")
+
+
+# def test_perform_measurements_correctness(
+#     rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
+# ):
+#     """
+#     PLAN:
+
+#     given a linop (also its matrix), run perform_meas in all configurations
+#     and for all linops
+
+#     then also run the mat@mat versions and compare correctness.
+
+
+#     probably we need to extend the formals once implemented
+#     """
+#     lop_shape = (10, 10)
+#     measlop_shape = ()
+#     #
+#     for seed in rng_seeds:
+#         for device in torch_devices:
+#             for dtype, tol in dtypes_tols.items():
+#                 for lop_type, complex_only in iid_noise_linop_types:
+#                     if complex_only and dtype not in {
+#                         torch.complex32,
+#                         torch.complex64,
+#                         torch.complex128,
+#                     }:
+#                         continue
+#                     #
+#                     lop1 = lop_type(
+#                         hw, seed, dtype, by_row=False, register=False
+#                     )
+
+#     #
+#     #
+#     breakpoint()
+#     hw = (5, 5)
+#     dtype = torch.float32
+#     lop = GaussianNoiseLinOp(
+#         hw, seed=123, dtype=dtype, by_row=False, register=False
+#     )
+#     meas_lop = GaussianNoiseLinOp(
+#         hw, seed=124, dtype=dtype, by_row=False, register=False
+#     )
+
+
+# ##############################################################################
+# # IID
 # ##############################################################################
 def test_iid_measurements_formal(
     rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
@@ -434,37 +502,37 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     with pytest.raises(BadShapeError):
         _ = SsrftNoiseLinOp((0, 0), 0)
     with pytest.raises(BadShapeError):
-        _ = SsrftNoiseLinOp((10, 5), 0)
+        _ = SsrftNoiseLinOp((5, 10), 0)  # fat
     lop = SsrftNoiseLinOp(hw, 0)
     with pytest.raises(BadShapeError):
         lop @ torch.ones(4)
     with pytest.raises(BadShapeError):
         torch.ones(4) @ lop
     # get_vector errors for invalid index
-    lop = SsrftNoiseLinOp((3, 5), 0)
+    lop = SsrftNoiseLinOp((5, 3), 0)
     with pytest.raises(ValueError):
-        lop.get_vector(-1, torch.float32, "cpu", by_row=False)
+        lop.get_vector(-1, "cpu", torch.float32, by_row=False)
     with pytest.raises(ValueError):
-        lop.get_vector(5, torch.float32, "cpu", by_row=False)
+        lop.get_vector(3, "cpu", torch.float32, by_row=False)
     with pytest.raises(ValueError):
-        lop.get_vector(-1, torch.float32, "cpu", by_row=True)
+        lop.get_vector(-1, "cpu", torch.float32, by_row=True)
     with pytest.raises(ValueError):
-        lop.get_vector(3, torch.float32, "cpu", by_row=True)
+        lop.get_vector(5, "cpu", torch.float32, by_row=True)
     # get_vector and matmul provide right dtype and device
-    lop = SsrftNoiseLinOp((3, 5), 0)
+    lop = SsrftNoiseLinOp((5, 3), 0)
     for device in torch_devices:
         for dtype in dtypes_tols.keys():
-            v = lop.get_vector(0, dtype, device, by_row=True)
+            v = lop.get_vector(0, device, dtype, by_row=True)
             assert v.dtype == dtype, "Invalid get_vector dtype by_row!"
             assert v.device.type == device, "Invalid get_vector device by_row!"
-            v = lop.get_vector(0, dtype, device, by_row=False)
+            v = lop.get_vector(0, device, dtype, by_row=False)
             assert v.dtype == dtype, "Invalid get_vector dtype by_col!"
             assert v.device.type == device, "Invalid get_vector device by_col!"
             # output is of same dtype and device as input
-            w = lop @ torch.ones(5, dtype=dtype, device=device)
+            w = lop @ torch.ones(3, dtype=dtype, device=device)
             assert w.dtype == dtype, "Mismatching output dtype!"
             assert w.device.type == device, "Mismatching output device!"
-            w = torch.ones(3, dtype=dtype, device=device) @ lop
+            w = torch.ones(5, dtype=dtype, device=device) @ lop
             assert w.dtype == dtype, "Mismatching output dtype (adj)!"
             assert w.device.type == device, "Mismatching output device (adj)!"
     # deterministic behaviour and seed consistency
