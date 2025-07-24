@@ -42,6 +42,7 @@ from skerch.measurements import (
     PhaseNoiseLinOp,
     SSRFT,
     SsrftNoiseLinOp,
+    TypedSsrftNoiseLinOp,
 )
 
 from skerch.utils import BadShapeError, BadSeedError
@@ -129,49 +130,60 @@ def test_perform_measurements_formal():
         perform_measurements(m1, m2, adjoint=False, parallel_mode="...")
 
 
-# def test_perform_measurements_correctness(
-#     rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
-# ):
-#     """
-#     PLAN:
+def test_perform_measurements_correctness(
+    rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
+):
+    """
+    PLAN:
 
-#     given a linop (also its matrix), run perform_meas in all configurations
-#     and for all linops
+    given a linop (also its matrix), run perform_meas in all configurations
+    and for all linops
 
-#     then also run the mat@mat versions and compare correctness.
+    then also run the mat@mat versions and compare correctness.
 
 
-#     probably we need to extend the formals once implemented
-#     """
-#     lop_shape = (10, 10)
-#     measlop_shape = ()
-#     #
-#     for seed in rng_seeds:
-#         for device in torch_devices:
-#             for dtype, tol in dtypes_tols.items():
-#                 for lop_type, complex_only in iid_noise_linop_types:
-#                     if complex_only and dtype not in {
-#                         torch.complex32,
-#                         torch.complex64,
-#                         torch.complex128,
-#                     }:
-#                         continue
-#                     #
-#                     lop1 = lop_type(
-#                         hw, seed, dtype, by_row=False, register=False
-#                     )
+    probably we need to extend the formals once implemented
+    """
+    hw = (10, 10)
+    meas_hw = (10, 5)
+    # #
+    # for seed in rng_seeds:
+    #     for device in torch_devices:
+    #         for dtype, tol in dtypes_tols.items():
+    #             lop = GaussianNoiseLinOp(
+    #                 hw, seed=123, dtype=dtype, by_row=False, register=False
+    #             )
+    #             mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+    #             #
+    #             for lop_type, complex_only in iid_noise_linop_types:
+    #                 if complex_only and dtype not in {
+    #                     torch.complex32,
+    #                     torch.complex64,
+    #                     torch.complex128,
+    #                 }:
+    #                     continue
+    #                 # create meas linop and perform direct measurements
+    #                 mop = lop_type(
+    #                     meas_hw, seed, dtype, by_row=False, register=False
+    #                 )
+    #                 mopmat = linop_to_matrix(mop, dtype, device, adjoint=False)
+    #                 meas = mat @ mopmat
+    #                 measT = mopmat.H @ mat
+    #                 # now perform implicit measurements
+    #                 """
+    #                 use meas fn, with None and mp parallel.
+    #                 Resulting measurements should be
+    #                 """
+    #                 breakpoint()
 
-#     #
-#     #
-#     breakpoint()
-#     hw = (5, 5)
-#     dtype = torch.float32
-#     lop = GaussianNoiseLinOp(
-#         hw, seed=123, dtype=dtype, by_row=False, register=False
-#     )
-#     meas_lop = GaussianNoiseLinOp(
-#         hw, seed=124, dtype=dtype, by_row=False, register=False
-#     )
+    #                 lop @ mopmat
+    #                 mat @ mopmat
+
+    # #
+    # #
+    # breakpoint()
+    # hw = (5, 5)
+    # dtype = torch.float32
 
 
 # ##############################################################################
@@ -658,3 +670,42 @@ def test_ssrft_correctness(
                 )
                 assert torch.allclose(v1, w1, atol=tol), "issrft(ssrft) != I?"
                 assert torch.allclose(v2, w2, atol=tol), "ssrft(issrft) != I?"
+
+
+def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
+    """
+    So the plan here is to create a typed ssrft for various dtypes,
+    and check that get_vector indeed respects this.
+
+    """
+    hw = (5, 5)
+    for seed in rng_seeds:
+        for dtype, tol in dtypes_tols.items():
+            lop1 = TypedSsrftNoiseLinOp(
+                hw, seed, dtype, by_row=True, norm="ortho"
+            )
+            lop2 = TypedSsrftNoiseLinOp(
+                hw, seed, dtype, by_row=False, norm="ortho"
+            )
+            for device in torch_devices:
+                mat1 = torch.zeros(hw, dtype=dtype, device=device)
+                mat2 = torch.zeros_like(mat1)
+                for idx in range(hw[0]):
+                    mat1[idx, :] = lop1.get_vector(idx, device)
+                for idx in range(hw[1]):
+                    mat2[:, idx] = lop2.get_vector(idx, device)
+                assert torch.allclose(
+                    mat1, mat2, atol=tol
+                ), "Inconsistent get_vector by row/col?"
+                assert (
+                    lop1.get_vector(idx, device).dtype == dtype
+                ), "Incorrect row dtype?"
+                assert (
+                    lop2.get_vector(idx, device).dtype == dtype
+                ), "Incorrect col dtype?"
+                assert (
+                    lop1.get_vector(idx, device).device.type == device
+                ), "Incorrect row device?"
+                assert (
+                    lop2.get_vector(idx, device).device.type == device
+                ), "Incorrect col device?"
