@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for all noisy measurements
+"""Pytest for noisy measurements.
 
-SSRFT
 
-rademacher
+* IID (Gaussian, Rademacher, Phase)
+* SSRFT
+* perform_measurements
 
-gaussian
-
+SSRFT (transform and linop)
 
 
 TODO:
@@ -23,7 +23,6 @@ LATER TODO:
   - test correctness and formal
 * Implement all sketched algorithms as meas-recovery
 * HDF5?
-
 """
 
 
@@ -89,6 +88,24 @@ def iid_noise_linop_types():
     return result
 
 
+@pytest.fixture
+def iid_hw_and_autocorr_tolerances():
+    """Error tolerances for each complex dtype."""
+    hw = (20, 20)
+    delta_at_least = 0.7
+    nondelta_at_most = 0.5
+    return hw, delta_at_least, nondelta_at_most
+
+
+@pytest.fixture
+def ssrft_hw_and_autocorr_tolerances():
+    """Error tolerances for each complex dtype."""
+    hw = (20, 20)
+    delta_at_least = 0.7
+    nondelta_at_most = 0.5
+    return hw, delta_at_least, nondelta_at_most
+
+
 # ##############################################################################
 # # TESTS
 # ##############################################################################
@@ -110,12 +127,12 @@ def test_iid_measurements_formal(
     * Providing a noncomplex dtype raises a ``ValueError``
     """
     # correct string conversion
-    hw = (10, 10)
+    hw = (3, 3)  # only matters for strings
     lop = RademacherNoiseLinOp(
         hw, 0, torch.float32, by_row=False, register=False
     )
     s = (
-        "<RademacherNoiseLinOp(10x10, seed=0, "
+        "<RademacherNoiseLinOp(3x3, seed=0, "
         "dtype=torch.float32, by_row=False)>"
     )
     assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
@@ -123,13 +140,13 @@ def test_iid_measurements_formal(
         hw, 0, torch.float32, by_row=False, register=False
     )
     s = (
-        "<GaussianNoiseLinOp(10x10, mean=0.0, std=1.0, seed=0, "
+        "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, "
         + "dtype=torch.float32, by_row=False)>"
     )
     assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
     lop = PhaseNoiseLinOp(hw, 0, torch.complex64, by_row=False, register=False)
     s = (
-        "<PhaseNoiseLinOp(10x10, conj=False, seed=0, "
+        "<PhaseNoiseLinOp(3x3, conj=False, seed=0, "
         + "dtype=torch.complex64, by_row=False)>"
     )
     assert str(lop) == s, "Unexpected repr for Phase noise linop!"
@@ -243,6 +260,7 @@ def test_iid_measurements_correctness(
     torch_devices,
     dtypes_tols,
     iid_noise_linop_types,
+    iid_hw_and_autocorr_tolerances,
 ):
     """Test case for correctness of iid measurement linops.
 
@@ -251,7 +269,7 @@ def test_iid_measurements_correctness(
     * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
     * Transposed linop is correct (fwd and adj)
     """
-    hw = (20, 20)
+    hw, delta_at_least, nondelta_at_most = iid_hw_and_autocorr_tolerances
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
@@ -284,11 +302,11 @@ def test_iid_measurements_correctness(
                     # Columns/rows behave like iid noise (delta autocorr)
                     for x in mat1a:  # x is a row
                         autocorrelation_test_helper(
-                            x, delta_at_least=0.7, nondelta_at_most=0.4
+                            x, delta_at_least, nondelta_at_most
                         )
                     for x in mat1a.H:  # x is a column
                         autocorrelation_test_helper(
-                            x, delta_at_least=0.7, nondelta_at_most=0.4
+                            x, delta_at_least, nondelta_at_most
                         )
                     # matmul and rmatmul with linop is same as with matrix
                     v1 = torch.randn(hw[0], dtype=dtype, device=device)
@@ -501,87 +519,74 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
                 )
 
 
-def test_ssrft_correctness():
-    """
-    Test case for correctness of SSRFT functionality.
+def test_ssrft_correctness(
+    rng_seeds, torch_devices, dtypes_tols, ssrft_hw_and_autocorr_tolerances
+):
+    """Test case for correctness of SSRFT functionality.
 
     For the SSRFT transform and/or linop (wherever applicable), tests:
-    * SSRFT rows/columns autocorrelations are quasi-deltas
-    * Forward and adjoint linop vecmul is equivalent to the transform
-    * Get vector by row and by col yields same matrix, and this matrix is
-      identical to applying the linop from either side
-    * The matrix is unitary if square
+    * Columns/rows behave like iid noise (delta autocorrelation)
+    * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
+    * Transposed linop is correct (fwd and adj)
 
-    TEST TRANSPOSITIONS ALSO IN FORMAL FOR ALL LINOPS!
+    And also:
+
+    * SSRFT linop is unitary when square
+    * ``issrft(ssrft(x))==x`` and ``ssrft(issrft(x)) == x`` for full dimension
     """
-    # autocorrelation_test_helper(noise1)
-
-    # lopT = TransposedLinOp(lop)
-    # lopmatT = linop_to_matrix(
-    #     lopT, dtype, device, adjoint=False
-    # )
-    # assert (
-    #     mat.H == lopmatT
-    # ).all(), "Incorrect sum+ transposition! (fwd)"
-
-    # TODO:
-    # * adapt ssrft to also admit complex (phase noise instead of rademacher)
-    # * integrate ssrft into a linop
-    # * test it!
-
-    # breakpoint()
-    # idx=5; aa = torch.zeros(1000); aa[idx] = 1; bb = dct.dct(aa, norm="ortho"); cc=dct2(aa)
-    # plt.clf(); plt.plot(cc); plt.show()
-
-
-# def test_no_nans(torch_devices, f64_rtol, rng_seeds, square_shapes):
-#     """Tests that SSRFT yields no NaNs."""
-#     for seed in rng_seeds:
-#         for h, w in square_shapes:
-#             ssrft = SSRFT((h, w), seed=seed)
-#             for device in torch_devices:
-#                 for dtype, _rtol in f64_rtol.items():
-#                     x = torch.randn(w, dtype=dtype).to(device)
-#                     y = ssrft @ x
-#                     xx = y @ ssrft
-#                     #
-#                     assert not x.isnan().any(), f"{ssrft, device, dtype}"
-#                     assert not y.isnan().any(), f"{ssrft, device, dtype}"
-#                     assert not xx.isnan().any(), f"{ssrft, device, dtype}"
-
-
-# def test_invertible(torch_devices, f64_rtol, rng_seeds, square_shapes):
-#     """Invertibility/orthogonality of quare SSRFT.
-
-#     Tests that, when input and output dimensionality are the same, the SSRFT
-#     operator is orthogonal, i.e. we can recover the input exactly via an
-#     adjoint operation.
-
-#     Also tests that it works for mat-vec and mat-mat formats.
-#     """
-#     for seed in rng_seeds:
-#         for h, w in square_shapes:
-#             ssrft = SSRFT((h, w), seed=seed)
-#             for device in torch_devices:
-#                 for dtype, rtol in f64_rtol.items():
-#                     # matvec
-#                     x = torch.randn(w, dtype=dtype).to(device)
-#                     y = ssrft @ x
-#                     xx = y @ ssrft
-#                     #
-#                     assert torch.allclose(
-#                         x, xx, rtol=rtol
-#                     ), f"MATVEC: {ssrft, device, dtype}"
-#                     # matmat
-#                     x = torch.randn((w, 2), dtype=dtype).to(device)
-#                     y = ssrft @ x
-#                     xx = (y.T @ ssrft).T
-#                     #
-#                     assert torch.allclose(
-#                         x, xx, rtol=rtol
-#                     ), f"MATMAT: {ssrft, device, dtype}"
-#                     # matmat-shape tests
-#                     assert len(y.shape) == 2
-#                     assert len(xx.shape) == 2
-#                     assert y.shape[-1] == 2
-#                     assert xx.shape[-1] == 2
+    hw, delta_at_least, nondelta_at_most = ssrft_hw_and_autocorr_tolerances
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                lop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                # Columns/rows behave like iid noise (delta autocorr)
+                for x in mat:  # x is a row
+                    autocorrelation_test_helper(
+                        x, delta_at_least, nondelta_at_most
+                    )
+                for x in mat.H:  # x is a column
+                    autocorrelation_test_helper(
+                        x, delta_at_least, nondelta_at_most
+                    )
+                # matmul and rmatmul with linop is same as with matrix
+                v1 = torch.randn(hw[0], dtype=dtype, device=device)
+                v2 = torch.randn(hw[1], dtype=dtype, device=device)
+                assert torch.allclose(
+                    v1 @ lop, v1 @ mat, atol=tol
+                ), "Mismatching adjoint vecmul between lop and mat?"
+                assert torch.allclose(
+                    lop @ v2, mat @ v2, atol=tol
+                ), "Wrong vecmul between lop and mat?"
+                # transposed linop is correct
+                lopT = TransposedLinOp(lop)
+                matTa = linop_to_matrix(lopT, dtype, device, adjoint=False)
+                matTb = linop_to_matrix(lopT, dtype, device, adjoint=True)
+                assert torch.allclose(
+                    mat.H, matTa, atol=tol
+                ), "Wrong iid transposition?"
+                assert torch.allclose(
+                    mat.H, matTb, atol=tol
+                ), "Wrong iid transposition? (adjoint)"
+                # Unitary when square
+                assert hw[0] == hw[1], "Square linop required!"
+                assert torch.allclose(
+                    mat.H @ mat,
+                    torch.eye(hw[0], dtype=mat.dtype, device=mat.device),
+                    atol=tol,
+                ), "SSRFT square matrix not unitary?"
+                # issrft and ssrft invert each other
+                w1 = SSRFT.issrft(
+                    SSRFT.ssrft(v1, hw[0], seed=seed, norm="ortho"),
+                    hw[0],
+                    seed=seed,
+                    norm="ortho",
+                )
+                w2 = SSRFT.ssrft(
+                    SSRFT.issrft(v2, hw[0], seed=seed, norm="ortho"),
+                    hw[0],
+                    seed=seed,
+                    norm="ortho",
+                )
+                assert torch.allclose(v1, w1, atol=tol), "issrft(ssrft) != I?"
+                assert torch.allclose(v2, w2, atol=tol), "ssrft(issrft) != I?"

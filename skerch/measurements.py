@@ -399,8 +399,11 @@ class SsrftNoiseLinOp(BaseLinOp):
 
         See class docstring and parent class for more details.
         """
+        # note that the issrft acts like the Hermitian transpose of A, but here
+        # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
+        # which equals (x @ A).H.H = x@A.
         return SSRFT.issrft(
-            x, self.shape[1], seed=self.seed, norm=self.norm
+            x.conj(), self.shape[1], seed=self.seed, norm=self.norm
         ).conj()
 
     def get_vector(self, idx, dtype, device, by_row=False):

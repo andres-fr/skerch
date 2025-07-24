@@ -49,7 +49,6 @@ def autocorrelation_test_helper(vec, delta_at_least=0.8, nondelta_at_most=0.1):
     autocorr = torch.fft.fft(vec, norm="ortho")
     autocorr = (autocorr * autocorr.conj()) ** 0.5
     autocorr = abs(torch.fft.ifft(autocorr, norm="ortho"))
-    print("!!!!!!!!", autocorr)
     # check that autocorrelation is close to standard unit delta
     assert abs(autocorr.norm() - 1) < 1e-5, "Autocorr should have unit norm"
     assert (

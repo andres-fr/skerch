@@ -127,7 +127,7 @@ class RandomLordMatrix:
         diag = gaussian_noise(
             diag_dim,
             mean=0,
-            seed=seed + 1,
+            seed=seed - 1234,
             dtype=diag_dtype,
             device=device,
         )
@@ -265,7 +265,7 @@ class RandomLordMatrix:
         diag = gaussian_noise(
             diag_dim,
             mean=0,
-            seed=seed + i + 1,
+            seed=seed - 1234,
             dtype=dtype,
             device=device,
         )
@@ -317,7 +317,7 @@ class RandomLordMatrix:
         diag = gaussian_noise(
             diag_dim,
             mean=0,
-            seed=seed + i + 1,
+            seed=seed - 1234,
             dtype=dtype,
             device=device,
         )
