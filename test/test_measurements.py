@@ -4,21 +4,18 @@
 
 """Pytest for noisy measurements.
 
-
-* IID (Gaussian, Rademacher, Phase)
-* SSRFT
 * perform_measurements
+* IID (Gaussian, Rademacher, Phase)
+* SSRFT (transform and linop)
 
-SSRFT (transform and linop)
+
 
 
 TODO:
-* finish SSRFT test, then test the perform_measurement function:
-  - with all meas linops
-  - with mocked parallelization (byvector?), and test it is like inline
+* Implement and benchmark MP measurements, pass all utests
+
 
 LATER TODO:
-
 * Implement 3 recovery methods
   - test correctness and formal
 * Implement all sketched algorithms as meas-recovery
@@ -42,10 +39,9 @@ from skerch.measurements import (
     PhaseNoiseLinOp,
     SSRFT,
     SsrftNoiseLinOp,
-    TypedSsrftNoiseLinOp,
 )
 
-from skerch.utils import BadShapeError, BadSeedError
+from skerch.utils import gaussian_noise, BadShapeError, BadSeedError
 
 from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
@@ -114,29 +110,91 @@ def ssrft_hw_and_autocorr_tolerances():
 
 
 # ##############################################################################
+# # HELPERS
+# ##############################################################################
+class BasicMatrixLinOp:
+    """Intentionally simple linop, only supporting ``shape`` and @."""
+
+    def __init__(self, matrix):
+        """ """
+        self.matrix = matrix
+        self.shape = matrix.shape
+
+    def __matmul__(self, x):
+        """ """
+        return self.matrix @ x
+
+    def __rmatmul__(self, x):
+        """ """
+        return x @ self.matrix
+
+
+# ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
 def test_perform_measurements_formal():
     """ """
     m1, m2 = torch.ones((5, 5)), torch.ones((5, 4))
-    # linops must have same inner dimension, otherwise error
-    with pytest.raises(BadShapeError):
-        perform_measurements(m1, m2.T, adjoint=False, parallel_mode=None)
-    with pytest.raises(BadShapeError):
-        perform_measurements(m1, m2, adjoint=True, parallel_mode=None)
-    with pytest.raises(BadShapeError):
-        perform_measurements(m2, m1, adjoint=False, parallel_mode=None)
-    with pytest.raises(BadShapeError):
-        perform_measurements(m2.T, m1, adjoint=True, parallel_mode=None)
+    idxs = list(range(4))
+
+    def meas_fn(idx):
+        return m2[:, idx]
+
     # no parallel raises warning
     with pytest.warns(RuntimeWarning):
-        perform_measurements(m1, m2, adjoint=False, parallel_mode=None)
+        perform_measurements(
+            m1,
+            meas_fn,
+            idxs,
+            adjoint=False,
+            parallel_mode=None,
+            as_compact_matrix=False,
+        )
     # unknown parallel raises error
     with pytest.raises(ValueError):
-        perform_measurements(m1, m2, adjoint=False, parallel_mode="...")
-    # if meas_linop has no dtype attribute raises error
-    with pytest.raises(AttributeError):
-        perform_measurements(m1, SsrftNoiseLinOp((5, 4), 0))
+        perform_measurements(
+            m1,
+            meas_fn,
+            idxs,
+            adjoint=False,
+            parallel_mode="...",
+            as_compact_matrix=False,
+        )
+    # correct behavior of as_compact_matrix
+    meas_dict = perform_measurements(
+        m1,
+        meas_fn,
+        idxs,
+        adjoint=False,
+        parallel_mode=None,
+        as_compact_matrix=False,
+    )
+    meas_mat = perform_measurements(
+        m1,
+        meas_fn,
+        idxs,
+        adjoint=False,
+        parallel_mode=None,
+        as_compact_matrix=True,
+    )
+    #
+    assert isinstance(meas_mat, torch.Tensor), "meas_mat not a tensor?"
+    assert meas_mat.shape == (
+        m1.shape[0],
+        m2.shape[1],
+    ), "Mismatching shape in compact matrix?"
+    assert meas_mat.dtype == m1.dtype, "Mismatching dtype: measmat/m1"
+    assert meas_mat.dtype == m2.dtype, "Mismatching dtype: measmat/m2"
+    assert meas_mat.device == m1.device, "Mismatching device: measmat/m1"
+    assert meas_mat.device == m2.device, "Mismatching device: measmat/m2"
+    #
+    assert isinstance(meas_dict, dict), "meas_dict not a dict?"
+    assert sorted(meas_dict) == sorted(idxs), "Wrong idxs in meas_dict?"
+    for v in meas_dict.values():
+        assert v.dtype == m1.dtype, "Mismatching dtype: measdict/m1"
+        assert v.dtype == m2.dtype, "Mismatching dtype: measdict/m2"
+        assert v.device == m1.device, "Mismatching device: measdict/m1"
+        assert v.device == m2.device, "Mismatching device: measdict/m2"
 
 
 def test_perform_measurements_correctness(
@@ -149,6 +207,9 @@ def test_perform_measurements_correctness(
     """
     PLAN:
 
+    For a matrix-free lop
+    * perform measurements works for all measurement
+
     given a linop (also its matrix), run perform_meas in all configurations
     and for all linops
 
@@ -156,6 +217,8 @@ def test_perform_measurements_correctness(
 
 
     probably we need to extend the formals once implemented
+
+    Test as_compact_matrix=False
     """
     hw = (10, 10)
     meas_hw = (10, 5)
@@ -163,11 +226,10 @@ def test_perform_measurements_correctness(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                # create lop, measurement lops and corresponding matrices
-                lop = GaussianNoiseLinOp(
-                    hw, seed=123, dtype=dtype, by_row=False, register=False
-                )
-                mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                # create matrix to measure from, and make basic lop
+                mat = gaussian_noise(hw, seed=seed, dtype=dtype, device=device)
+                lop = BasicMatrixLinOp(mat)
+                # create measlops and convert them to matrices for testing
                 meas_lops = [
                     RademacherNoiseLinOp(
                         meas_hw, seed, dtype, by_row=False, register=False
@@ -175,9 +237,7 @@ def test_perform_measurements_correctness(
                     GaussianNoiseLinOp(
                         meas_hw, seed, dtype, by_row=False, register=False
                     ),
-                    TypedSsrftNoiseLinOp(
-                        meas_hw, seed, dtype, by_row=False, norm="ortho"
-                    ),
+                    SsrftNoiseLinOp(meas_hw, seed, norm="ortho"),
                 ]
                 if dtype in {
                     torch.complex32,
@@ -199,17 +259,54 @@ def test_perform_measurements_correctness(
                     for l in meas_lops
                 ]
                 for mop, mm in zip(meas_lops, meas_mats):
-                    mopT = TransposedLinOp(mop)
+                    # direct computation of measurements
                     y1 = mat @ mm
                     y2 = mm.H @ mat
                     for parall in parallel_modes:
-                        y1b = perform_measurements(
-                            lop, mop, adjoint=False, parallel_mode=parall
+                        # indirect computation of measurements
+                        def meas_fn(idx):
+                            if isinstance(mop, SsrftNoiseLinOp):
+                                x = mop.get_vector(
+                                    idx, device, dtype, by_row=False
+                                )
+                            else:
+                                x = mop.get_vector(idx, device)
+                            return x
+
+                        z1 = perform_measurements(
+                            lop,
+                            meas_fn,
+                            range(mop.shape[1]),
+                            adjoint=False,
+                            parallel_mode=parall,
+                            as_compact_matrix=True,
                         )
-                        y2b = perform_measurements(
-                            lop, mopT, adjoint=True, parallel_mode=parall
+
+                        def meas_fn(idx):
+                            if isinstance(mop, SsrftNoiseLinOp):
+                                x = mop.get_vector(
+                                    idx, device, dtype, by_row=False
+                                )
+                            else:
+                                x = mop.get_vector(idx, device)
+                            return x.conj()
+
+                        z2 = perform_measurements(
+                            lop,
+                            meas_fn,
+                            range(mop.shape[1]),
+                            adjoint=True,
+                            parallel_mode=parall,
+                            as_compact_matrix=True,
                         )
-                        breakpoint()
+
+                        # test that perform_measurements yields correct output
+                        assert torch.allclose(
+                            y1, z1, atol=tol
+                        ), "Wrong perform_measurements (fwd)?"
+                        assert torch.allclose(
+                            y2, z2, atol=tol
+                        ), "Wrong perform_measurements (adj)?"
 
 
 # ##############################################################################
@@ -698,55 +795,55 @@ def test_ssrft_correctness(
                 assert torch.allclose(v2, w2, atol=tol), "ssrft(issrft) != I?"
 
 
-def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for extra functionality provided by Typed SSRFT.
+# def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
+#     """Test case for extra functionality provided by Typed SSRFT.
 
-    Specifically:
-    * Repr creates correct strings
-    * By row/column results in the same matrix
-    * Produced matrix is in the requested device and dtype
-    """
-    # correct repr string
-    lop = TypedSsrftNoiseLinOp(
-        (3, 3), 0, torch.float32, by_row=False, norm="ortho"
-    )
-    assert (
-        str(lop)
-        == "<TypedSsrftNoiseLinOp(3x3, seed=0, dtype=torch.float32, "
-        + "by_row=False)>"
-    ), "Unexpected repr for Typed SSRFT noise linop!"
-    #
-    hw = (5, 5)
-    for seed in rng_seeds:
-        for dtype, tol in dtypes_tols.items():
-            lop1 = TypedSsrftNoiseLinOp(
-                hw, seed, dtype, by_row=True, norm="ortho"
-            )
-            lop2 = TypedSsrftNoiseLinOp(
-                hw, seed, dtype, by_row=False, norm="ortho"
-            )
-            for device in torch_devices:
-                # convert to matrix using by row or by column
-                mat1 = torch.zeros(hw, dtype=dtype, device=device)
-                mat2 = torch.zeros_like(mat1)
-                for idx in range(hw[0]):
-                    mat1[idx, :] = lop1.get_vector(idx, device)
-                for idx in range(hw[1]):
-                    mat2[:, idx] = lop2.get_vector(idx, device)
-                # check that row/col matrices are same
-                assert torch.allclose(
-                    mat1, mat2, atol=tol
-                ), "Inconsistent get_vector by row/col?"
-                # check correct dtype and device
-                assert (
-                    lop1.get_vector(idx, device).dtype == dtype
-                ), "Incorrect row dtype?"
-                assert (
-                    lop2.get_vector(idx, device).dtype == dtype
-                ), "Incorrect col dtype?"
-                assert (
-                    lop1.get_vector(idx, device).device.type == device
-                ), "Incorrect row device?"
-                assert (
-                    lop2.get_vector(idx, device).device.type == device
-                ), "Incorrect col device?"
+#     Specifically:
+#     * Repr creates correct strings
+#     * By row/column results in the same matrix
+#     * Produced matrix is in the requested device and dtype
+#     """
+#     # correct repr string
+#     lop = TypedSsrftNoiseLinOp(
+#         (3, 3), 0, torch.float32, by_row=False, norm="ortho"
+#     )
+#     assert (
+#         str(lop)
+#         == "<TypedSsrftNoiseLinOp(3x3, seed=0, dtype=torch.float32, "
+#         + "by_row=False)>"
+#     ), "Unexpected repr for Typed SSRFT noise linop!"
+#     #
+#     hw = (5, 5)
+#     for seed in rng_seeds:
+#         for dtype, tol in dtypes_tols.items():
+#             lop1 = TypedSsrftNoiseLinOp(
+#                 hw, seed, dtype, by_row=True, norm="ortho"
+#             )
+#             lop2 = TypedSsrftNoiseLinOp(
+#                 hw, seed, dtype, by_row=False, norm="ortho"
+#             )
+#             for device in torch_devices:
+#                 # convert to matrix using by row or by column
+#                 mat1 = torch.zeros(hw, dtype=dtype, device=device)
+#                 mat2 = torch.zeros_like(mat1)
+#                 for idx in range(hw[0]):
+#                     mat1[idx, :] = lop1.get_vector(idx, device)
+#                 for idx in range(hw[1]):
+#                     mat2[:, idx] = lop2.get_vector(idx, device)
+#                 # check that row/col matrices are same
+#                 assert torch.allclose(
+#                     mat1, mat2, atol=tol
+#                 ), "Inconsistent get_vector by row/col?"
+#                 # check correct dtype and device
+#                 assert (
+#                     lop1.get_vector(idx, device).dtype == dtype
+#                 ), "Incorrect row dtype?"
+#                 assert (
+#                     lop2.get_vector(idx, device).dtype == dtype
+#                 ), "Incorrect col dtype?"
+#                 assert (
+#                     lop1.get_vector(idx, device).device.type == device
+#                 ), "Incorrect row device?"
+#                 assert (
+#                     lop2.get_vector(idx, device).device.type == device
+#                 ), "Incorrect col device?"

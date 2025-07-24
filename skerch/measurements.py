@@ -27,49 +27,43 @@ from .utils import (
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-def perform_measurements(lop, meas_lop, adjoint=False, parallel_mode=None):
+def perform_measurements(
+    lop,
+    get_meas_vec,
+    meas_idxs,
+    adjoint=False,
+    parallel_mode=None,
+    as_compact_matrix=False,
+):
     """
-    :param lop: must satisfy shape and @
-    :param meas_lop: must satisfy shape, get_vector and also dtype
-    :param adjoint: If false, output measurement is ``lop @ meas_lop``.
-      Otherwise, ``meas_lop.H @ lop`` (although ``meas_lop`` is given without
-      )
+    :param lop: must satisfy shape and @ from the respective side
+    :param get_meas_vec: A function such that ``get_meas_vec(i)`` returns
+      either the i-th row or column of a measurement vector.
+    :param meas_idxs: Iterable of integers to call ``get_meas_vec`` with.
+    :param adjoint: If true, measurements are in the form ``measvec @ lop``,
+      otherwise ``lop @ measvec``.
+    :returns: A dictionary in the form ``{meas_idx: meas, ...}``.
 
     """
-    h1, w1 = lop.shape
-    h2, w2 = meas_lop.shape
-    dtype = meas_lop.dtype
-    if (adjoint and w2 != h1) or ((not adjoint) and w1 != h2):
-        raise BadShapeError(
-            f"Incompatible shapes! {lop.shape}, {meas_lop.shape}, "
-            + f"adjoint={adjoint}"
-        )
-    #
+    result = {}
     if parallel_mode is None:
         warnings.warn("measurements can be parallelized", RuntimeWarning)
-        #
-        """ actually perform measurements!
-
-        HEADACHES:
-        1. typed ssrft is just ugly
-        2. transpose does not have dtype, this is a requirement of this fn
-
-
-        SOLUTION:
-
-        instead of providing the linop, provide here the function that just
-        gets called for a set of idxs to get measlop vectors, and this fn
-        just calls it.
-
-        This way we wont need dtype, and transposition can happen in the
-        fn.
-        """
-        dtype = meas_lop.dtype
-        # breakpoint()
+        for idx in meas_idxs:
+            meas = get_meas_vec(idx)
+            result[idx] = meas @ lop if adjoint else lop @ meas
     elif parallel_mode == "mp":
-        raise NotImplementedError
+        for idx in meas_idxs:
+            meas = get_meas_vec(idx)
+            result[idx] = meas @ lop if adjoint else lop @ meas
     else:
         raise ValueError(f"Unknown parallel_mode! {parallel_mode}")
+    #
+    if as_compact_matrix:
+        sorted_idxs = sorted(result)
+        result = torch.stack([result[idx] for idx in sorted_idxs])
+        if not adjoint:
+            result = result.T
+    return result
 
 
 # ##############################################################################
@@ -471,38 +465,38 @@ class SsrftNoiseLinOp(BaseLinOp):
         return s
 
 
-class TypedSsrftNoiseLinOp(SsrftNoiseLinOp):
-    """SSRFT linop with a hardcoded dtype for ``get_vector``.
+# class TypedSsrftNoiseLinOp(SsrftNoiseLinOp):
+#     """SSRFT linop with a hardcoded dtype for ``get_vector``.
 
-    The original SSRFT linop is dtype-agnostic, it performs the transform on
-    whichever input it becomes. This is different to some IID linops, which
-    contain random entries with specific datatypes.
+#     The original SSRFT linop is dtype-agnostic, it performs the transform on
+#     whichever input it becomes. This is different to some IID linops, which
+#     contain random entries with specific datatypes.
 
-    To facilitate a common interface with those other linops, this typed SSRFT
-    class allows users to provide a fixed datatype and ``by_row`` configuration
-    at initialization. This way, calling ``get_vector`` will always produce
-    columns (resp. rows) of the given datatype.
+#     To facilitate a common interface with those other linops, this typed SSRFT
+#     class allows users to provide a fixed datatype and ``by_row`` configuration
+#     at initialization. This way, calling ``get_vector`` will always produce
+#     columns (resp. rows) of the given datatype.
 
-    Note that, like its parent class, this class still has a datatype-agnostic
-    behaviour for forward and adjoint matmul (i.e. the output will have the
-    same dtype as input), so the main difference is ``get_vector``.
-    """
+#     Note that, like its parent class, this class still has a datatype-agnostic
+#     behaviour for forward and adjoint matmul (i.e. the output will have the
+#     same dtype as input), so the main difference is ``get_vector``.
+#     """
 
-    def __init__(self, shape, seed, dtype, by_row=False, norm="ortho"):
-        """ """
-        super().__init__(shape, seed, norm)
-        self.dtype = dtype
-        self.by_row = by_row
+#     def __init__(self, shape, seed, dtype, by_row=False, norm="ortho"):
+#         """ """
+#         super().__init__(shape, seed, norm)
+#         self.dtype = dtype
+#         self.by_row = by_row
 
-    def get_vector(self, idx, device):
-        """ """
-        return super().get_vector(idx, device, self.dtype, self.by_row)
+#     def get_vector(self, idx, device):
+#         """ """
+#         return super().get_vector(idx, device, self.dtype, self.by_row)
 
-    def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
-        clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed}, "
-            f"dtype={self.dtype}, by_row={self.by_row})>"
-        )
-        return s
+#     def __repr__(self):
+#         """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+#         clsname = self.__class__.__name__
+#         s = (
+#             f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed}, "
+#             f"dtype={self.dtype}, by_row={self.by_row})>"
+#         )
+#         return s
