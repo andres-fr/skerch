@@ -238,14 +238,81 @@ def test_iid_measurements_formal(
                     assert mat1a.device.type == device, "Mismatching device!"
 
 
-def test_iid_measurements_correctness():
+def test_iid_measurements_correctness(
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    iid_noise_linop_types,
+):
+    """Test case for correctness of iid measurement linops.
+
+    For each iid linop on all dtypes and devices tests that:
+    * Columns/rows behave like iid noise (delta autocorrelation)
+    * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
+    * Transposed linop is correct (fwd and adj)
     """
-    EMPTY TEST:
-    Sources of iid noise used in the IID measurement linops are already tested
-    in utils, and here we assume formal tests are sufficient.
-    Add tests here if that is not the case.
-    """
-    NotImplemented
+    hw = (20, 20)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for lop_type, complex_only in iid_noise_linop_types:
+                    if complex_only and dtype not in {
+                        torch.complex32,
+                        torch.complex64,
+                        torch.complex128,
+                    }:
+                        continue
+                    #
+                    lop1 = lop_type(
+                        hw, seed, dtype, by_row=False, register=False
+                    )
+                    lop2 = lop_type(
+                        hw, seed, dtype, by_row=True, register=False
+                    )
+                    mat1a = linop_to_matrix(
+                        lop1, lop1.dtype, device, adjoint=False
+                    )
+                    mat1b = linop_to_matrix(
+                        lop1, lop1.dtype, device, adjoint=False
+                    )
+                    mat2a = linop_to_matrix(
+                        lop1, lop1.dtype, device, adjoint=False
+                    )
+                    mat2b = linop_to_matrix(
+                        lop1, lop1.dtype, device, adjoint=False
+                    )
+                    # Columns/rows behave like iid noise (delta autocorr)
+                    for x in mat1a:  # x is a row
+                        autocorrelation_test_helper(
+                            x, delta_at_least=0.7, nondelta_at_most=0.4
+                        )
+                    for x in mat1a.H:  # x is a column
+                        autocorrelation_test_helper(
+                            x, delta_at_least=0.7, nondelta_at_most=0.4
+                        )
+                    # matmul and rmatmul with linop is same as with matrix
+                    v1 = torch.randn(hw[0], dtype=dtype, device=device)
+                    v2 = torch.randn(hw[1], dtype=dtype, device=device)
+                    assert torch.allclose(
+                        v1 @ lop1, v1 @ mat1a, atol=tol
+                    ), "Mismatching adjoint vecmul between lop and mat?"
+                    assert torch.allclose(
+                        lop1 @ v2, mat1a @ v2, atol=tol
+                    ), "Wrong vecmul between lop and mat?"
+                    # transposed linop is correct
+                    lopT = TransposedLinOp(lop1)
+                    matTa = linop_to_matrix(
+                        lopT, lop1.dtype, device, adjoint=False
+                    )
+                    matTb = linop_to_matrix(
+                        lopT, lop1.dtype, device, adjoint=True
+                    )
+                    assert torch.allclose(
+                        mat1a.H, matTa, atol=tol
+                    ), "Wrong iid transposition?"
+                    assert torch.allclose(
+                        mat1a.H, matTb, atol=tol
+                    ), "Wrong iid transposition? (adjoint)"
 
 
 def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
@@ -307,7 +374,6 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     with pytest.raises(NotImplementedError):
         SSRFT.issrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
     # non-orthogonal norm raises error (linop)
-
     with pytest.raises(NotImplementedError):
         lop = SsrftNoiseLinOp(hw, 0, norm="XXXX")
         lop @ torch.ones(10)
@@ -449,7 +515,14 @@ def test_ssrft_correctness():
     TEST TRANSPOSITIONS ALSO IN FORMAL FOR ALL LINOPS!
     """
     # autocorrelation_test_helper(noise1)
-    pass
+
+    # lopT = TransposedLinOp(lop)
+    # lopmatT = linop_to_matrix(
+    #     lopT, dtype, device, adjoint=False
+    # )
+    # assert (
+    #     mat.H == lopmatT
+    # ).all(), "Incorrect sum+ transposition! (fwd)"
 
     # TODO:
     # * adapt ssrft to also admit complex (phase noise instead of rademacher)
