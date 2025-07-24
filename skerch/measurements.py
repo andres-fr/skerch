@@ -31,6 +31,10 @@ def perform_measurements(lop, meas_lop, adjoint=False, parallel_mode=None):
     """
     :param lop: must satisfy shape and @
     :param meas_lop: must satisfy shape, get_vector and also dtype
+    :param adjoint: If false, output measurement is ``lop @ meas_lop``.
+      Otherwise, ``meas_lop.H @ lop`` (although ``meas_lop`` is given without
+      )
+
     """
     h1, w1 = lop.shape
     h2, w2 = meas_lop.shape
@@ -44,7 +48,24 @@ def perform_measurements(lop, meas_lop, adjoint=False, parallel_mode=None):
     if parallel_mode is None:
         warnings.warn("measurements can be parallelized", RuntimeWarning)
         #
+        """ actually perform measurements!
+
+        HEADACHES:
+        1. typed ssrft is just ugly
+        2. transpose does not have dtype, this is a requirement of this fn
+
+
+        SOLUTION:
+
+        instead of providing the linop, provide here the function that just
+        gets called for a set of idxs to get measlop vectors, and this fn
+        just calls it.
+
+        This way we wont need dtype, and transposition can happen in the
+        fn.
+        """
         dtype = meas_lop.dtype
+        # breakpoint()
     elif parallel_mode == "mp":
         raise NotImplementedError
     else:
@@ -367,24 +388,28 @@ class SsrftNoiseLinOp(BaseLinOp):
     """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
     This class encapsulates the forward and adjoint SSRFT transforms into a
-    single linear operator, which is deterministic for the same shape and seed
-    (particularly, also across different torch devices).
+    single linear operator with orthogonal columns, which is deterministic for
+    the same shape and seed (also across different torch devices).
 
-    Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
-    efficient to apply this operator by row/column. Instead, this
-    implementation applies the SSRFT directly to the input, by vector,
-    but it also provides ``get_vector`` functionality via one-hot vecmul to
-    facilitate parallel measurements via :func:`perform_measurements`.
 
     .. note::
 
       This linop can either be square or tall, but never fat (i.e. width must
       be less or equal than height). Since the SSRFT cannot increase the
       dimensionality of its input, the forward matmul of this linop is actually
-      the inverse SSRFT, and the adjoint matmul is
-      This is a slight change in format that doesn't affect the semantics of
-      this linop, and makes it more compatible with other noise linops, which
-      are typically also tall instead of fat.
+      the inverse SSRFT, and the adjoint matmul is the forward SSRFT.
+      This slight change in format that doesn't really affect the semantics of
+      the SSRFT, and it makes it more compatible with other noise linops, which
+      are typically also tall instead of fat. It is also more common to think
+      about orthogonal columns than rows.
+
+    .. note::
+
+    Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
+    efficient to apply this operator by row/column. Instead, this
+    implementation applies the SSRFT directly to the input, by vector,
+    but it also provides ``get_vector`` functionality via one-hot vecmul to
+    facilitate parallel measurements via :func:`perform_measurements`.
     """
 
     def __init__(self, shape, seed, norm="ortho"):

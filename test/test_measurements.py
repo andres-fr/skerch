@@ -66,6 +66,12 @@ def dtypes_tols():
 
 
 @pytest.fixture
+def parallel_modes():
+    result = (None, "mp")
+    return result
+
+
+@pytest.fixture
 def complex_dtypes_tols():
     """Error tolerances for each complex dtype."""
     result = {
@@ -101,7 +107,7 @@ def iid_hw_and_autocorr_tolerances():
 @pytest.fixture
 def ssrft_hw_and_autocorr_tolerances():
     """Error tolerances for each complex dtype."""
-    hw = (20, 20)
+    hw = (30, 10)
     delta_at_least = 0.7
     nondelta_at_most = 0.5
     return hw, delta_at_least, nondelta_at_most
@@ -134,7 +140,11 @@ def test_perform_measurements_formal():
 
 
 def test_perform_measurements_correctness(
-    rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    iid_noise_linop_types,
+    parallel_modes,
 ):
     """
     PLAN:
@@ -188,37 +198,18 @@ def test_perform_measurements_correctness(
                     linop_to_matrix(l, dtype, device, adjoint=False)
                     for l in meas_lops
                 ]
-                breakpoint()
-
-                for lop_type, complex_only in iid_noise_linop_types:
-                    if complex_only and dtype not in {
-                        torch.complex32,
-                        torch.complex64,
-                        torch.complex128,
-                    }:
-                        continue
-                    # create meas linop and perform direct measurements
-                    mop = lop_type(
-                        meas_hw, seed, dtype, by_row=False, register=False
-                    )
-                    mopmat = linop_to_matrix(mop, dtype, device, adjoint=False)
-                    meas = mat @ mopmat
-                    measT = mopmat.H @ mat
-                    # now perform implicit measurements
-                    """
-                    use meas fn, with None and mp parallel.
-                    Resulting measurements should be
-                    """
-                    breakpoint()
-
-                    lop @ mopmat
-                    mat @ mopmat
-
-    #
-    #
-    breakpoint()
-    hw = (5, 5)
-    dtype = torch.float32
+                for mop, mm in zip(meas_lops, meas_mats):
+                    mopT = TransposedLinOp(mop)
+                    y1 = mat @ mm
+                    y2 = mm.H @ mat
+                    for parall in parallel_modes:
+                        y1b = perform_measurements(
+                            lop, mop, adjoint=False, parallel_mode=parall
+                        )
+                        y2b = perform_measurements(
+                            lop, mopT, adjoint=True, parallel_mode=parall
+                        )
+                        breakpoint()
 
 
 # ##############################################################################
@@ -646,7 +637,7 @@ def test_ssrft_correctness(
 
     And also:
 
-    * SSRFT linop is unitary when square
+    * SSRFT linop has orthonormal columns
     * ``issrft(ssrft(x))==x`` and ``ssrft(issrft(x)) == x`` for full dimension
     """
     hw, delta_at_least, nondelta_at_most = ssrft_hw_and_autocorr_tolerances
@@ -683,23 +674,23 @@ def test_ssrft_correctness(
                 assert torch.allclose(
                     mat.H, matTb, atol=tol
                 ), "Wrong iid transposition? (adjoint)"
-                # Unitary when square
-                assert hw[0] == hw[1], "Square linop required!"
+                # Orthonormal columns
+                assert hw[0] != hw[1], "Tall linop required for this test!"
                 assert torch.allclose(
                     mat.H @ mat,
-                    torch.eye(hw[0], dtype=mat.dtype, device=mat.device),
+                    torch.eye(hw[1], dtype=mat.dtype, device=mat.device),
                     atol=tol,
-                ), "SSRFT square matrix not unitary?"
+                ), "SSRFT columns not orthonormal?"
                 # issrft and ssrft invert each other
                 w1 = SSRFT.issrft(
-                    SSRFT.ssrft(v1, hw[0], seed=seed, norm="ortho"),
-                    hw[0],
+                    SSRFT.ssrft(v1, len(v1), seed=seed, norm="ortho"),
+                    len(v1),
                     seed=seed,
                     norm="ortho",
                 )
                 w2 = SSRFT.ssrft(
-                    SSRFT.issrft(v2, hw[0], seed=seed, norm="ortho"),
-                    hw[0],
+                    SSRFT.issrft(v2, len(v2), seed=seed, norm="ortho"),
+                    len(v2),
                     seed=seed,
                     norm="ortho",
                 )
