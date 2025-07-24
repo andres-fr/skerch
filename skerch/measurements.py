@@ -34,6 +34,7 @@ def perform_measurements(lop, meas_lop, adjoint=False, parallel_mode=None):
     """
     h1, w1 = lop.shape
     h2, w2 = meas_lop.shape
+    dtype = meas_lop.dtype
     if (adjoint and w2 != h1) or ((not adjoint) and w1 != h2):
         raise BadShapeError(
             f"Incompatible shapes! {lop.shape}, {meas_lop.shape}, "
@@ -475,6 +476,8 @@ class TypedSsrftNoiseLinOp(SsrftNoiseLinOp):
     def __repr__(self):
         """Returns a string: <classname(shape, seed=..., by_row=...)>."""
         clsname = self.__class__.__name__
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed}, "
-        ")>"
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed}, "
+            f"dtype={self.dtype}, by_row={self.by_row})>"
+        )
         return s

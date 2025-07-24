@@ -128,6 +128,9 @@ def test_perform_measurements_formal():
     # unknown parallel raises error
     with pytest.raises(ValueError):
         perform_measurements(m1, m2, adjoint=False, parallel_mode="...")
+    # if meas_linop has no dtype attribute raises error
+    with pytest.raises(AttributeError):
+        perform_measurements(m1, SsrftNoiseLinOp((5, 4), 0))
 
 
 def test_perform_measurements_correctness(
@@ -146,44 +149,76 @@ def test_perform_measurements_correctness(
     """
     hw = (10, 10)
     meas_hw = (10, 5)
-    # #
-    # for seed in rng_seeds:
-    #     for device in torch_devices:
-    #         for dtype, tol in dtypes_tols.items():
-    #             lop = GaussianNoiseLinOp(
-    #                 hw, seed=123, dtype=dtype, by_row=False, register=False
-    #             )
-    #             mat = linop_to_matrix(lop, dtype, device, adjoint=False)
-    #             #
-    #             for lop_type, complex_only in iid_noise_linop_types:
-    #                 if complex_only and dtype not in {
-    #                     torch.complex32,
-    #                     torch.complex64,
-    #                     torch.complex128,
-    #                 }:
-    #                     continue
-    #                 # create meas linop and perform direct measurements
-    #                 mop = lop_type(
-    #                     meas_hw, seed, dtype, by_row=False, register=False
-    #                 )
-    #                 mopmat = linop_to_matrix(mop, dtype, device, adjoint=False)
-    #                 meas = mat @ mopmat
-    #                 measT = mopmat.H @ mat
-    #                 # now perform implicit measurements
-    #                 """
-    #                 use meas fn, with None and mp parallel.
-    #                 Resulting measurements should be
-    #                 """
-    #                 breakpoint()
+    #
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                # create lop, measurement lops and corresponding matrices
+                lop = GaussianNoiseLinOp(
+                    hw, seed=123, dtype=dtype, by_row=False, register=False
+                )
+                mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                meas_lops = [
+                    RademacherNoiseLinOp(
+                        meas_hw, seed, dtype, by_row=False, register=False
+                    ),
+                    GaussianNoiseLinOp(
+                        meas_hw, seed, dtype, by_row=False, register=False
+                    ),
+                    TypedSsrftNoiseLinOp(
+                        meas_hw, seed, dtype, by_row=False, norm="ortho"
+                    ),
+                ]
+                if dtype in {
+                    torch.complex32,
+                    torch.complex64,
+                    torch.complex128,
+                }:
+                    meas_lops.append(
+                        PhaseNoiseLinOp(
+                            meas_hw,
+                            seed,
+                            dtype,
+                            by_row=False,
+                            register=False,
+                            conj=False,
+                        )
+                    )
+                meas_mats = [
+                    linop_to_matrix(l, dtype, device, adjoint=False)
+                    for l in meas_lops
+                ]
+                breakpoint()
 
-    #                 lop @ mopmat
-    #                 mat @ mopmat
+                for lop_type, complex_only in iid_noise_linop_types:
+                    if complex_only and dtype not in {
+                        torch.complex32,
+                        torch.complex64,
+                        torch.complex128,
+                    }:
+                        continue
+                    # create meas linop and perform direct measurements
+                    mop = lop_type(
+                        meas_hw, seed, dtype, by_row=False, register=False
+                    )
+                    mopmat = linop_to_matrix(mop, dtype, device, adjoint=False)
+                    meas = mat @ mopmat
+                    measT = mopmat.H @ mat
+                    # now perform implicit measurements
+                    """
+                    use meas fn, with None and mp parallel.
+                    Resulting measurements should be
+                    """
+                    breakpoint()
 
-    # #
-    # #
-    # breakpoint()
-    # hw = (5, 5)
-    # dtype = torch.float32
+                    lop @ mopmat
+                    mat @ mopmat
+
+    #
+    #
+    breakpoint()
+    hw = (5, 5)
+    dtype = torch.float32
 
 
 # ##############################################################################
@@ -673,11 +708,23 @@ def test_ssrft_correctness(
 
 
 def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
-    """
-    So the plan here is to create a typed ssrft for various dtypes,
-    and check that get_vector indeed respects this.
+    """Test case for extra functionality provided by Typed SSRFT.
 
+    Specifically:
+    * Repr creates correct strings
+    * By row/column results in the same matrix
+    * Produced matrix is in the requested device and dtype
     """
+    # correct repr string
+    lop = TypedSsrftNoiseLinOp(
+        (3, 3), 0, torch.float32, by_row=False, norm="ortho"
+    )
+    assert (
+        str(lop)
+        == "<TypedSsrftNoiseLinOp(3x3, seed=0, dtype=torch.float32, "
+        + "by_row=False)>"
+    ), "Unexpected repr for Typed SSRFT noise linop!"
+    #
     hw = (5, 5)
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
@@ -688,15 +735,18 @@ def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
                 hw, seed, dtype, by_row=False, norm="ortho"
             )
             for device in torch_devices:
+                # convert to matrix using by row or by column
                 mat1 = torch.zeros(hw, dtype=dtype, device=device)
                 mat2 = torch.zeros_like(mat1)
                 for idx in range(hw[0]):
                     mat1[idx, :] = lop1.get_vector(idx, device)
                 for idx in range(hw[1]):
                     mat2[:, idx] = lop2.get_vector(idx, device)
+                # check that row/col matrices are same
                 assert torch.allclose(
                     mat1, mat2, atol=tol
                 ), "Inconsistent get_vector by row/col?"
+                # check correct dtype and device
                 assert (
                     lop1.get_vector(idx, device).dtype == dtype
                 ), "Incorrect row dtype?"
