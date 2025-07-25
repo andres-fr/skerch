@@ -5,6 +5,9 @@
 """
 """
 
+from concurrent.futures import ProcessPoolExecutor
+from functools import partial
+
 from collections import defaultdict
 import warnings
 import torch
@@ -27,6 +30,20 @@ from .utils import (
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
+def perform_measurement(idx, get_meas_vec, lop, adjoint=False):
+    """Performs a single measurement.
+
+    This function  applies ``get_meas_vec(idx)`` to ``lop``, and returns the
+    pair ``(idx, measurement)``, which is used by :func:`perform_measurements`
+    to build its output.
+
+    Note that, if multiprocessing parallelism is used, ``get_meas_vec`` should
+    be a first-class function (not nested and not a lambda).
+    """
+    result = get_meas_vec(idx) @ lop if adjoint else lop @ get_meas_vec(idx)
+    return idx, result
+
+
 def perform_measurements(
     lop,
     get_meas_vec,
@@ -35,26 +52,40 @@ def perform_measurements(
     parallel_mode=None,
     as_compact_matrix=False,
 ):
-    """
+    """Performs multiple measurements.
+
     :param lop: must satisfy shape and @ from the respective side
     :param get_meas_vec: A function such that ``get_meas_vec(i)`` returns
-      either the i-th row or column of a measurement vector.
+      a tuple ``(i, vec_i)`` where ``vec_i`` is either the i-th row or column
+      of a measurement linop.
     :param meas_idxs: Iterable of integers to call ``get_meas_vec`` with.
     :param adjoint: If true, measurements are in the form ``measvec @ lop``,
       otherwise ``lop @ measvec``.
-    :returns: A dictionary in the form ``{meas_idx: meas, ...}``.
-
+    :param parallel_mode: If none, measurements are run sequentially. When
+      operating on CPU, and if all involved objects are serializable via
+      pickle, the ``mp`` mode can be used for CPU multiprocess parallelization.
+    :returns: A dictionary in the form ``{meas_idx: meas, ...}``. If
+      ``as_compact_matrix`` is true, a pair in the form
+      ``(sorted_meas_idxs, meas_matrix)``.
     """
     result = {}
+    #
     if parallel_mode is None:
-        warnings.warn("measurements can be parallelized", RuntimeWarning)
+        warnings.warn("CPU measurements can be parallelized", RuntimeWarning)
         for idx in meas_idxs:
-            meas = get_meas_vec(idx)
-            result[idx] = meas @ lop if adjoint else lop @ meas
+            measvec = get_meas_vec(idx)
+            result[idx] = measvec @ lop if adjoint else lop @ measvec
+    #
     elif parallel_mode == "mp":
-        for idx in meas_idxs:
-            meas = get_meas_vec(idx)
-            result[idx] = meas @ lop if adjoint else lop @ meas
+        meas_fn = partial(
+            perform_measurement,
+            get_meas_vec=get_meas_vec,
+            lop=lop,
+            adjoint=adjoint,
+        )
+        with ProcessPoolExecutor() as pool:
+            result = dict(pool.map(meas_fn, meas_idxs))
+    #
     else:
         raise ValueError(f"Unknown parallel_mode! {parallel_mode}")
     #
@@ -63,6 +94,7 @@ def perform_measurements(
         result = torch.stack([result[idx] for idx in sorted_idxs])
         if not adjoint:
             result = result.T
+        result = (sorted_idxs, result)
     return result
 
 

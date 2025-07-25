@@ -26,6 +26,7 @@ LATER TODO:
 import warnings
 import pytest
 import torch
+from functools import partial
 
 from skerch.linops import (
     linop_to_matrix,
@@ -129,6 +130,20 @@ class BasicMatrixLinOp:
         return x @ self.matrix
 
 
+def get_meas_vec(idx, meas_lop, device=None, dtype=None, conj=False):
+    """ """
+    if isinstance(meas_lop, torch.Tensor):
+        result = meas_lop[:, idx]
+    elif isinstance(meas_lop, SsrftNoiseLinOp):
+        if device is None or dtype is None:
+            raise ValueError("SsrftNoiseLinop requires device and dtype!")
+        result = meas_lop.get_vector(idx, device, dtype, by_row=False)
+    else:
+        result = meas_lop.get_vector(idx, device)
+    #
+    return result.conj() if conj else result
+
+
 # ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
@@ -169,7 +184,7 @@ def test_perform_measurements_formal():
         parallel_mode=None,
         as_compact_matrix=False,
     )
-    meas_mat = perform_measurements(
+    meas_idxs, meas_mat = perform_measurements(
         m1,
         meas_fn,
         idxs,
@@ -178,6 +193,7 @@ def test_perform_measurements_formal():
         as_compact_matrix=True,
     )
     #
+    assert meas_idxs == list(range(m2.shape[1])), "Incorrect meas_idxs?"
     assert isinstance(meas_mat, torch.Tensor), "meas_mat not a tensor?"
     assert meas_mat.shape == (
         m1.shape[0],
@@ -204,32 +220,25 @@ def test_perform_measurements_correctness(
     iid_noise_linop_types,
     parallel_modes,
 ):
-    """
-    PLAN:
+    """Test case for correctness of perform_measurements:
 
-    For a matrix-free lop
-    * perform measurements works for all measurement
-
-    given a linop (also its matrix), run perform_meas in all configurations
-    and for all linops
-
-    then also run the mat@mat versions and compare correctness.
-
-
-    probably we need to extend the formals once implemented
-
-    Test as_compact_matrix=False
+    For each seed/dtype/device, reates a basic random lop/matrix, and all
+    supported measurement lops/matrices.
+    Then, compares the mat@mat measurements with the output of
+    ``perform_measurements`` on all supported parallelism modes, testing:
+    * ``perform_measurements`` yields same output as direct matmul
+    * Output does not depend on the type of parallelization
     """
     hw = (10, 10)
     meas_hw = (10, 5)
     #
     for seed in rng_seeds:
-        for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+        for dtype, tol in dtypes_tols.items():
+            for device in torch_devices:
                 # create matrix to measure from, and make basic lop
                 mat = gaussian_noise(hw, seed=seed, dtype=dtype, device=device)
                 lop = BasicMatrixLinOp(mat)
-                # create measlops and convert them to matrices for testing
+                # create measlops and convert them to matrices
                 meas_lops = [
                     RademacherNoiseLinOp(
                         meas_hw, seed, dtype, by_row=False, register=False
@@ -258,22 +267,24 @@ def test_perform_measurements_correctness(
                     linop_to_matrix(l, dtype, device, adjoint=False)
                     for l in meas_lops
                 ]
+                # begin tests
                 for mop, mm in zip(meas_lops, meas_mats):
                     # direct computation of measurements
                     y1 = mat @ mm
                     y2 = mm.H @ mat
                     for parall in parallel_modes:
+                        # mp only works on CPU
+                        if parall == "mp" and device != "cpu":
+                            continue
                         # indirect computation of measurements
-                        def meas_fn(idx):
-                            if isinstance(mop, SsrftNoiseLinOp):
-                                x = mop.get_vector(
-                                    idx, device, dtype, by_row=False
-                                )
-                            else:
-                                x = mop.get_vector(idx, device)
-                            return x
-
-                        z1 = perform_measurements(
+                        meas_fn = partial(
+                            get_meas_vec,
+                            meas_lop=mop,
+                            device=device,
+                            dtype=dtype,
+                            conj=False,
+                        )
+                        _, z1 = perform_measurements(
                             lop,
                             meas_fn,
                             range(mop.shape[1]),
@@ -281,17 +292,14 @@ def test_perform_measurements_correctness(
                             parallel_mode=parall,
                             as_compact_matrix=True,
                         )
-
-                        def meas_fn(idx):
-                            if isinstance(mop, SsrftNoiseLinOp):
-                                x = mop.get_vector(
-                                    idx, device, dtype, by_row=False
-                                )
-                            else:
-                                x = mop.get_vector(idx, device)
-                            return x.conj()
-
-                        z2 = perform_measurements(
+                        meas_fn = partial(
+                            get_meas_vec,
+                            meas_lop=mop,
+                            device=device,
+                            dtype=dtype,
+                            conj=True,
+                        )
+                        _, z2 = perform_measurements(
                             lop,
                             meas_fn,
                             range(mop.shape[1]),
@@ -299,14 +307,69 @@ def test_perform_measurements_correctness(
                             parallel_mode=parall,
                             as_compact_matrix=True,
                         )
-
-                        # test that perform_measurements yields correct output
+                        # test that perform_measurements yields same as direct
                         assert torch.allclose(
                             y1, z1, atol=tol
                         ), "Wrong perform_measurements (fwd)?"
                         assert torch.allclose(
                             y2, z2, atol=tol
                         ), "Wrong perform_measurements (adj)?"
+            # on CPU, test that all different parallel modes yield same result
+            mat1 = gaussian_noise(hw, seed=seed, dtype=dtype, device="cpu")
+            mat2 = gaussian_noise(
+                meas_hw, seed=seed + 1, dtype=dtype, device="cpu"
+            )
+            meas_fn = partial(
+                get_meas_vec,
+                meas_lop=mat2,
+                device=mat2.device,
+                dtype=mat2.dtype,
+                conj=False,
+            )
+            _, meas1a = perform_measurements(
+                mat1,
+                meas_fn,
+                range(mat2.shape[1]),
+                adjoint=False,
+                parallel_mode=None,
+                as_compact_matrix=True,
+            )
+            _, meas1b = perform_measurements(
+                mat1,
+                meas_fn,
+                range(mat2.shape[1]),
+                adjoint=False,
+                parallel_mode="mp",
+                as_compact_matrix=True,
+            )
+            assert (meas1a == meas1b).all(), "Parallel mode alters output?"
+            #
+            meas_fn = partial(
+                get_meas_vec,
+                meas_lop=mat2,
+                device=mat2.device,
+                dtype=mat2.dtype,
+                conj=True,
+            )
+            _, meas2a = perform_measurements(
+                mat1,
+                meas_fn,
+                range(mat2.shape[1]),
+                adjoint=True,
+                parallel_mode=None,
+                as_compact_matrix=True,
+            )
+            _, meas2b = perform_measurements(
+                mat1,
+                meas_fn,
+                range(mat2.shape[1]),
+                adjoint=True,
+                parallel_mode="mp",
+                as_compact_matrix=True,
+            )
+            assert (
+                meas2a == meas2b
+            ).all(), "Parallel mode alters output? (conj)"
 
 
 # ##############################################################################
