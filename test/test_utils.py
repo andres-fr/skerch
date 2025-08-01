@@ -7,12 +7,13 @@
 
 import pytest
 import torch
+import numpy as np
 
 from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
-
+from skerch.utils import qr, pinv
 
 from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
@@ -277,3 +278,81 @@ def test_noise_sources(
                                 m1_conj,
                                 atol=tol,
                             ), "phase_shift not conjugating mask correctly?"
+
+
+# ##############################################################################
+# # MATRIX ROUTINE WRAPPERS
+# ##############################################################################
+def test_qr(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for QR wrapper (formal and correctness)"""
+    # fat matrices trigger error
+    with pytest.raises(ValueError):
+        _ = qr(torch.zeros((5, 10)), in_place_q=False, return_R=False)
+    with pytest.raises(ValueError):
+        _ = qr(torch.zeros((5, 10)), in_place_q=True, return_R=False)
+    with pytest.raises(ValueError):
+        _ = qr(torch.zeros((5, 10)), in_place_q=False, return_R=True)
+    #
+    hw = (20, 5)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                tnsr = gaussian_noise(hw, 0, 1, seed, dtype, device)
+                arr = tnsr.cpu().numpy()
+                Itnsr = torch.eye(hw[1], dtype=dtype, device=device)
+                Iarr = Itnsr.cpu().numpy()
+                Q1, R1 = qr(tnsr, in_place_q=False, return_R=True)
+                Q2, R2 = qr(arr, in_place_q=False, return_R=True)
+                # test correctness of QR decomposition
+                assert torch.allclose(
+                    tnsr, Q1 @ R1, atol=tol
+                ), "Incorrect torch QR?"
+                assert np.allclose(
+                    arr, Q2 @ R2, atol=tol
+                ), "Incorrect numpy QR?"
+                # test orthogonality of Q
+                assert torch.allclose(
+                    Itnsr, Q1.H @ Q1, atol=tol
+                ), "Torch Q not orthogonal?"
+                assert np.allclose(
+                    Iarr, Q2.conj().T @ Q2, atol=tol
+                ), "Numpy Q not orthogonal?"
+                # test correctness of in-place
+                Q1b = qr(tnsr, in_place_q=True, return_R=False)
+                Q2b = qr(arr, in_place_q=True, return_R=False)
+                assert Q1b is tnsr, "In-place not returning tensor!"
+                assert Q2b is arr, "In-place not returning array!"
+                assert torch.allclose(
+                    tnsr, Q1b, atol=tol
+                ), "Incorrect torch in-place QR?"
+                assert np.allclose(
+                    arr, Q2b, atol=tol
+                ), "Incorrect torch in-place QR?"
+
+
+def test_pinv(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for QR wrapper (formal and correctness)"""
+    hw = (10, 10)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                tnsr = gaussian_noise(hw, 0, 1, seed, dtype, device)
+                arr = tnsr.cpu().numpy()
+                Itnsr = torch.eye(hw[1], dtype=dtype, device=device)
+                Iarr = Itnsr.cpu().numpy()
+                #
+                tnsr_inv = pinv(tnsr)
+                arr_inv = pinv(arr)
+                #
+                assert torch.allclose(
+                    Itnsr, tnsr @ tnsr_inv, atol=tol
+                ), "Incorrect torch pinv?"
+                assert torch.allclose(
+                    Itnsr, tnsr_inv @ tnsr, atol=tol
+                ), "Incorrect torch pinv (adj)?"
+                assert np.allclose(
+                    Iarr, arr @ arr_inv, atol=tol
+                ), "Incorrect numpy pinv?"
+                assert np.allclose(
+                    Iarr, arr_inv @ arr, atol=tol
+                ), "Incorrect numpy pinv (adj)?"

@@ -421,6 +421,7 @@ def test_iid_measurements_formal(
             _ = lop_type((5, 5), seed=1, dtype=dtype2, by_row=False)
         with pytest.raises(BadSeedError):
             _ = lop_type((5, 5), seed=1, dtype=dtype1, by_row=True)
+        lop_type.REGISTER.clear()  # clear register for this lop_type
         # invalid index triggers error
         with pytest.raises(ValueError):
             lop.get_vector(idx=-1, device="cpu")

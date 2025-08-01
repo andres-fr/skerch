@@ -6,7 +6,7 @@
 
 
 import torch
-
+import scipy
 
 # ##############################################################################
 # # DTYPES
@@ -222,3 +222,52 @@ def phase_shift(x, seed=None, inplace=True, rng_device="cpu", conj=False):
         return x, shift
     else:
         return x * shift, shift
+
+
+# ##############################################################################
+# # MATRIX ROUTINE WRAPPERS
+# ##############################################################################
+def qr(matrix, in_place_q=False, return_R=False):
+    """Thin QR-decomposition of given matrix.
+
+    :param matrix: matrix to orthogonalize, needs to be compatible with either
+      ``scipy.linalg.qr`` or ``torch.linalg.qr``. It must be square or tall.
+    :param in_place_q: If true, ``matrix[:] = Q`` will be performed.
+    :returns: If ``return_R`` is true, returns ``(Q, R)`` such that ``Q``
+      has orthonormal columns, ``R`` is upper triangular and ``matrix=Q @ R``
+      as per the QR decomposition. Otherwise, returns just ``Q``.
+    """
+    h, w = matrix.shape
+    if h < w:
+        raise ValueError("Only non-fat matrices supported!")
+    #
+    if isinstance(matrix, torch.Tensor):
+        Q, R = torch.linalg.qr(matrix, mode="reduced")
+    else:
+        Q, R = scipy.linalg.qr(
+            matrix,
+            mode="economic",
+            pivoting=False,  # TODO: support pivoting in all modalities
+        )
+    #
+    if in_place_q:
+        matrix[:] = Q
+        Q = matrix
+    if return_R:
+        return Q, R
+    else:
+        return Q
+
+
+def pinv(matrix):
+    """Pseudo-inversion of a given matrix.
+
+    :param matrix: matrix to pseudo-invert, of shape ``(h, w)``. It needs to be
+      compatible with either ``scipy.linalg.pinv`` or ``torch.linalg.qr``.
+    :returns: Pseudoinverse of ``matrix`` with shape ``(w, h)``.
+    """
+    if isinstance(matrix, torch.Tensor):
+        result = torch.linalg.pinv(matrix)
+    else:
+        result = scipy.linalg.pinv(matrix)
+    return result

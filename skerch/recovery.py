@@ -3,10 +3,29 @@
 
 
 """
+
+TODO:
+* Implement 3 recovery methods
+  - test correctness and formal
+* Implement all sketched algorithms as meas-recovery
+* HDF5?
+
+
+CHANGELOG:
+* support for complex datatypes
+* Support for (approximately) low-rank plus diagonal synthetic matrices
+* Linop API:
+  - New core functionality: Transposed, Signed Sum, Banded, ByVector
+  - New measurement linops: Rademacher, Gaussian, Phase, SSRFT
+* Sketching API:
+  - Modular measurement API supporting MP parallelization
+  - Modular recovery methods (singlepass, oversampled, Nystrom)
+  - Algorithms: XDiag/DiagPP, SSVD, Sketchlord, Triangular
 """
 
 import torch
 
+from .linops import TransposedLinOp
 
 # ##############################################################################
 # # HELPERS
@@ -16,19 +35,18 @@ import torch
 # ##############################################################################
 # # SINGLE-PASS
 # ##############################################################################
-def singlepass_recovery(
+def __singlepass_recovery(
     sketch_right,
     sketch_left,
-    measmat_right,
+    mop_right,
 ):
     """Recovering the SVD of a matrix ``A`` from left and right sketches.
 
-    :param sketch_right: Sketches ``L @ measmat_right``.
-    :param sketch_left: Sketches ``measmat_left @ L``.
-    :param measmat_right: Right measurement matrix.
+    :param sketch_right: Sketches ``A @ measmat_right``.
+    :param sketch_left: Sketches ``measmat_left @ A``.
+    :param mop_right: Right measurement linop.
     :returns: The triple ``U, S, V`` with ``U @ diag(S) @ V.T`` approximating
-      ``L``, and ``U, V`` having orthonormal columns.
-
+      ``A``, and ``U, V`` having orthonormal columns.
 
     Assuming ``A \approx A @ Q @ Q.T``, and given ``Y, W.T, Omega``, where
     ``Y = A @ Omega`` and ``W.T = Psi.T @ A`` are our random measurements,
@@ -47,6 +65,7 @@ def singlepass_recovery(
     Thus, we just need to solve a well-conditioned least-squares problem to
     approximate ``A``. To obtain the full SVD, we further need to compute the
     SVD of ``Y @ pinv(Q.T @ Omega)`` and recombine.
+
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
     Q, R = torch.linalg.qr(sketch_left)  # Q spans V
@@ -59,7 +78,7 @@ def singlepass_recovery(
 # ##############################################################################
 # # OVERSAMPLED
 # ##############################################################################
-def oversampled_recovery(
+def ___oversampled_recovery(
     lop,
     num_meas,
     sketch1,
