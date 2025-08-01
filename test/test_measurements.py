@@ -4,22 +4,9 @@
 
 """Pytest for noisy measurements.
 
-* perform_measurements
+* perform_measurements helper function
 * IID (Gaussian, Rademacher, Phase)
 * SSRFT (transform and linop)
-
-
-
-
-TODO:
-* Implement and benchmark MP measurements, pass all utests
-
-
-LATER TODO:
-* Implement 3 recovery methods
-  - test correctness and formal
-* Implement all sketched algorithms as meas-recovery
-* HDF5?
 """
 
 
