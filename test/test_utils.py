@@ -13,7 +13,7 @@ from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
-from skerch.utils import qr, pinv
+from skerch.utils import qr, pinv, lstsq
 
 from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
@@ -330,8 +330,12 @@ def test_qr(rng_seeds, torch_devices, dtypes_tols):
                 ), "Incorrect torch in-place QR?"
 
 
-def test_pinv(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for QR wrapper (formal and correctness)"""
+def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for matrix inversion wrappers (formal and correctness).
+
+    * pinv
+    * lstsq
+    """
     hw = (10, 10)
     for seed in rng_seeds:
         for device in torch_devices:
@@ -340,10 +344,9 @@ def test_pinv(rng_seeds, torch_devices, dtypes_tols):
                 arr = tnsr.cpu().numpy()
                 Itnsr = torch.eye(hw[1], dtype=dtype, device=device)
                 Iarr = Itnsr.cpu().numpy()
-                #
+                # pinv
                 tnsr_inv = pinv(tnsr)
                 arr_inv = pinv(arr)
-                #
                 assert torch.allclose(
                     Itnsr, tnsr @ tnsr_inv, atol=tol
                 ), "Incorrect torch pinv?"
@@ -356,3 +359,14 @@ def test_pinv(rng_seeds, torch_devices, dtypes_tols):
                 assert np.allclose(
                     Iarr, arr_inv @ arr, atol=tol
                 ), "Incorrect numpy pinv (adj)?"
+                # lstsq
+                tnsr2 = gaussian_noise(hw, 0, 1, seed + 1, dtype, device)
+                arr2 = tnsr2.cpu().numpy()
+                tinv2 = lstsq(tnsr, tnsr2)
+                ainv2 = lstsq(arr, arr2)
+                assert torch.allclose(
+                    tinv2, tnsr_inv @ tnsr2, atol=tol
+                ), "Incorrect torch lstsq?"
+                assert np.allclose(
+                    ainv2, arr_inv @ arr2, atol=tol
+                ), "Incorrect numpy lstsq?"

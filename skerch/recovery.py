@@ -11,6 +11,11 @@ TODO:
 * HDF5?
 
 
+* check that all 3 are close enough?? how?
+* check that they work on general matrices
+
+
+
 CHANGELOG:
 * support for complex datatypes
 * Support for (approximately) low-rank plus diagonal synthetic matrices
@@ -26,6 +31,7 @@ CHANGELOG:
 import torch
 
 from .linops import TransposedLinOp
+from .utils import qr
 
 # ##############################################################################
 # # HELPERS
@@ -35,7 +41,9 @@ from .linops import TransposedLinOp
 # ##############################################################################
 # # SINGLE-PASS
 # ##############################################################################
-def __singlepass_recovery(
+
+
+def singlepass(
     sketch_right,
     sketch_left,
     mop_right,

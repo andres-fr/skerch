@@ -2,12 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for recovery
-
-
-* check that all 3 are close enough?? how?
-* check that they work on general matrices
-"""
+"""Pytest for :mod:`recovery`."""
 
 
 import pytest

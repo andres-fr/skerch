@@ -271,3 +271,15 @@ def pinv(matrix):
     else:
         result = scipy.linalg.pinv(matrix)
     return result
+
+
+def lstsq(A, b):
+    """Least-squares solver.
+
+    :returns: ``x`` such that ``frob(Ax - b)`` is minimized.
+    """
+    if isinstance(A, torch.Tensor):
+        result = torch.linalg.lstsq(A, b).solution
+    else:
+        result = scipy.linalg.lstsq(A, b)[0]
+    return result
