@@ -77,6 +77,35 @@ def ssrft_hw_and_autocorr_tolerances():
 
 
 # ##############################################################################
+# # HELPERS
+# ##############################################################################
+def svd_test_helper(mat, svals, I, U, S, Vh, atol):
+    """SVD test helper.
+
+    Given the produced SVD of ``mat``, tests that:
+
+    * The SVD is actually close to the matrix
+    * The recovered ``S`` are close to the corresponding ``svals``
+    * ``U, V`` have orthonormal columns
+    * The devices and dtypes all match
+    """
+    # correctness of result
+    assert torch.allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
+    # orthogonality of recovered U, V
+    assert torch.allclose(I, U.H @ U, atol=atol), "U not orthogonal?"
+    assert torch.allclose(I, Vh @ Vh.H, atol=atol), "V not orthogonal?"
+    # correctness of recovered svals
+    assert torch.allclose(svals[: len(S)], S, atol=atol), "Incorrect  svals!"
+    # matching device and type
+    assert U.device == mat.device, "Incorrect U singlepass torch device!"
+    assert S.device == mat.device, "Incorrect S singlepass torch device!"
+    assert Vh.device != mat.device, "Incorrect V singlepass torch device!"
+    assert U.dtype == mat.dtype, "Incorrect U singlepass torch dtype!"
+    assert S.dtype == mat.real.dtype, "Incorrect S singlepass torch dtype!"
+    assert Vh.dtype == mat.dtype, "Incorrect V singlepass torch dtype!"
+
+
+# ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
 def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
@@ -124,37 +153,7 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
                 Y1 = mat1 @ right1  # tall
                 Z1 = left1 @ mat1  # fat
                 U1rec, S1rec, Vh1rec = singlepass(Y1, Z1, right1)
-                # correctness of result
-                assert torch.allclose(
-                    mat1, (U1 * S1) @ Vh1, atol=tol
-                ), "Incorrect singlepass torch recovery!"
-                # orthogonality of recovered U, V
-                assert torch.allclose(
-                    I1, U1rec.H @ U1rec, atol=tol
-                ), "Singlepass torch U not orthogonal?"
-                assert torch.allclose(
-                    I1, Vh1rec @ Vh1rec.H, atol=tol
-                ), "Singlepass torch V not orthogonal?"
-                # correctness of recovered svals
-                assert torch.allclose(
-                    S1[:meas], S1rec, atol=tol
-                ), "Incorrect singlepass torch svals!"
-                # matching device and type
-                assert (
-                    U1rec.device == mat1.device
-                ), "Incorrect U singlepass torch device!"
-                assert (
-                    S1rec.device == mat1.device
-                ), "Incorrect S singlepass torch device!"
-                assert (
-                    Vh1rec.device == mat1.device
-                ), "Incorrect V singlepass torch device!"
-                assert (
-                    U1rec.dtype == mat1.dtype
-                ), "Incorrect U singlepass torch dtype!"
-                assert (
-                    S1rec.dtype == mat1.real.dtype
-                ), "Incorrect S singlepass torch dtype!"
-                assert (
-                    Vh1rec.dtype == mat1.dtype
-                ), "Incorrect V singlepass torch dtype!"
+                try:
+                    svd_test_helper(mat1, S1, I1, U1rec, S1rec, Vh1rec, tol)
+                except AssertionError as ae:
+                    raise AssertionError("Singlepass torch error!") from ae
