@@ -135,7 +135,13 @@ def get_meas_vec(idx, meas_lop, device=None, dtype=None, conj=False):
 # # PERFORM MEASUREMENTS
 # ##############################################################################
 def test_perform_measurements_formal():
-    """ """
+    """Formal test case for perform_measurements.
+
+    * No parallelization raises warning
+    * Unknown parallel mode raises error
+    * As-compact-matrix returns idxs and correct shape/device/dtype, and dict
+      with also correct features otherwise
+    """
     m1, m2 = torch.ones((5, 5)), torch.ones((5, 4))
     idxs = list(range(4))
 

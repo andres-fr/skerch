@@ -7,23 +7,10 @@
 
 import pytest
 import torch
-from skerch.linops import (
-    linop_to_matrix,
-    TransposedLinOp,
-)
-
-from skerch.measurements import (
-    perform_measurements,
-    RademacherNoiseLinOp,
-    GaussianNoiseLinOp,
-    PhaseNoiseLinOp,
-    SSRFT,
-    SsrftNoiseLinOp,
-)
-
-from skerch.utils import gaussian_noise, BadShapeError, BadSeedError
-
-from . import rng_seeds, torch_devices, autocorrelation_test_helper
+from skerch.utils import gaussian_noise, svd
+from skerch.synthmat import RandomLordMatrix
+from skerch.recovery import singlepass
+from . import rng_seeds, torch_devices
 
 
 # ##############################################################################
@@ -90,39 +77,84 @@ def ssrft_hw_and_autocorr_tolerances():
 
 
 # ##############################################################################
-# # HELPERS
-# ##############################################################################
-class BasicMatrixLinOp:
-    """Intentionally simple linop, only supporting ``shape`` and @."""
-
-    def __init__(self, matrix):
-        """ """
-        self.matrix = matrix
-        self.shape = matrix.shape
-
-    def __matmul__(self, x):
-        """ """
-        return self.matrix @ x
-
-    def __rmatmul__(self, x):
-        """ """
-        return x @ self.matrix
-
-
-def get_meas_vec(idx, meas_lop, device=None, dtype=None, conj=False):
-    """ """
-    if isinstance(meas_lop, torch.Tensor):
-        result = meas_lop[:, idx]
-    elif isinstance(meas_lop, SsrftNoiseLinOp):
-        if device is None or dtype is None:
-            raise ValueError("SsrftNoiseLinop requires device and dtype!")
-        result = meas_lop.get_vector(idx, device, dtype, by_row=False)
-    else:
-        result = meas_lop.get_vector(idx, device)
-    #
-    return result.conj() if conj else result
-
-
-# ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
+def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for recovery (formal and correctness).
+
+    For torch/numpy inputs, and for all recovery methods, test:
+    * xxx
+    *
+    * Output is in matching device and dtype
+
+
+    1. our target linop is a lr matrix
+
+
+    we need both sketches and the mop
+    everything should have different types
+    """
+    hw, rank, meas = (50, 50), 5, 25
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                # torch identity, low-rank matrix and noisy matrices
+                I1 = torch.eye(meas, dtype=dtype, device=device)
+                mat1, _ = RandomLordMatrix.exp(
+                    hw,
+                    rank,
+                    decay=100,
+                    diag_ratio=0.0,
+                    symmetric=False,
+                    psd=False,
+                    seed=seed,
+                    dtype=dtype,
+                    device=device,
+                )
+                U1, S1, Vh1 = svd(mat1)
+                right1 = gaussian_noise(
+                    (hw[1], meas), seed=seed + 100, device=device, dtype=dtype
+                )
+                left1 = gaussian_noise(
+                    (meas, hw[0]), seed=seed + 101, device=device, dtype=dtype
+                )
+                #
+                # SINGLEPASS
+                # measurements and recovery
+                Y1 = mat1 @ right1  # tall
+                Z1 = left1 @ mat1  # fat
+                U1rec, S1rec, Vh1rec = singlepass(Y1, Z1, right1)
+                # correctness of result
+                assert torch.allclose(
+                    mat1, (U1 * S1) @ Vh1, atol=tol
+                ), "Incorrect singlepass torch recovery!"
+                # orthogonality of recovered U, V
+                assert torch.allclose(
+                    I1, U1rec.H @ U1rec, atol=tol
+                ), "Singlepass torch U not orthogonal?"
+                assert torch.allclose(
+                    I1, Vh1rec @ Vh1rec.H, atol=tol
+                ), "Singlepass torch V not orthogonal?"
+                # correctness of recovered svals
+                assert torch.allclose(
+                    S1[:meas], S1rec, atol=tol
+                ), "Incorrect singlepass torch svals!"
+                # matching device and type
+                assert (
+                    U1rec.device == mat1.device
+                ), "Incorrect U singlepass torch device!"
+                assert (
+                    S1rec.device == mat1.device
+                ), "Incorrect S singlepass torch device!"
+                assert (
+                    Vh1rec.device == mat1.device
+                ), "Incorrect V singlepass torch device!"
+                assert (
+                    U1rec.dtype == mat1.dtype
+                ), "Incorrect U singlepass torch dtype!"
+                assert (
+                    S1rec.dtype == mat1.real.dtype
+                ), "Incorrect S singlepass torch dtype!"
+                assert (
+                    Vh1rec.dtype == mat1.dtype
+                ), "Incorrect V singlepass torch dtype!"

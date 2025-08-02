@@ -139,7 +139,6 @@ class RandomLordMatrix:
     def _decay_helper(
         svals,
         shape=(100, 100),
-        rank=10,
         decay=0.5,
         symmetric=True,
         seed=0b1110101001010101011,
@@ -258,7 +257,7 @@ class RandomLordMatrix:
                 i += 1
         #
         result = cls._decay_helper(
-            svals, shape, rank, decay, symmetric, seed, dtype, device, psd
+            svals, shape, decay, symmetric, seed, dtype, device, psd
         )
         #
         diag_dim = min(h, w)
@@ -310,7 +309,7 @@ class RandomLordMatrix:
                 i += 1
         #
         result = cls._decay_helper(
-            svals, shape, rank, decay, symmetric, seed, dtype, device, psd
+            svals, shape, decay, symmetric, seed, dtype, device, psd
         )
         #
         diag_dim = min(h, w)

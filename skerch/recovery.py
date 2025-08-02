@@ -31,7 +31,7 @@ CHANGELOG:
 import torch
 
 from .linops import TransposedLinOp
-from .utils import qr, svd
+from .utils import qr, svd, lstsq
 
 # ##############################################################################
 # # HELPERS
@@ -41,17 +41,17 @@ from .utils import qr, svd
 # ##############################################################################
 # # SINGLE-PASS
 # ##############################################################################
-
-
 def singlepass(
     sketch_right,
     sketch_left,
     mop_right,
 ):
-    """Recovering the SVD of a matrix ``A`` from left and right sketches.
+    r"""Recovering the SVD of a matrix ``A`` from left and right sketches.
 
-    :param sketch_right: Sketches ``A @ measmat_right``.
-    :param sketch_left: Sketches ``measmat_left @ A``.
+    :param sketch_right: Sketches ``A @ measmat_right`` (typically a tall
+      matrix).
+    :param sketch_left: Sketches ``(measmat_left @ A)`` (typically a fat
+      matrix).
     :param mop_right: Right measurement linop.
     :returns: The triple ``U, S, V`` with ``U @ diag(S) @ V.T`` approximating
       ``A``, and ``U, V`` having orthonormal columns.
@@ -60,12 +60,12 @@ def singlepass(
     ``Y = A @ Omega`` and ``W.T = Psi.T @ A`` are our random measurements,
     we can recover ``A`` without any further measurements.
 
-    First, obtain ``Q`` via QR decomposition of ``Y``. Then, it holds
+    First, obtain ``Q`` via QR decomposition of ``W``. Then, it holds
 
     .. math::
 
        \begin{align}
-       Y @ (Q^T \Omega)^{-1} Q^T = (A \Omega) (Q^T \Omega)^{-1} Q^T\\
+       Y  (Q^T \Omega)^{-1} Q^T = (A \Omega) (Q^T \Omega)^{-1} Q^T\\
                         &\approx (A Q Q^T \Omega) (Q^T \Omega)^{-1} Q^T \\
                               &= (A Q)  Q^T \approx A \\
        \end{align}
@@ -76,18 +76,11 @@ def singlepass(
 
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
-    Q = qr(sketch_left)
-    B = Q @ mop_right
+    Qh = qr(sketch_left.H).H
+    B = Qh @ mop_right
     YBinv = lstsq(B.H, sketch_right.H).H
     U, S, Vh = svd(YBinv)
-    return U, S, (Q @ Vh.H)
-
-    # breakpoint()
-    # Q, R = torch.linalg.qr(sketch_left)  # Q spans V
-    # B = Q.T @ measmat_right
-    # YBinv = torch.linalg.lstsq(B.T, sketch_right.T).solution.T  # S @ inv(B)
-    # U, Sigma, Zt = torch.linalg.svd(YBinv, full_matrices=False)
-    # return U, Sigma, (Q @ Zt.T)
+    return U, S, (Vh @ Qh)
 
 
 # ##############################################################################
