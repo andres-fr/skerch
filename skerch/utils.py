@@ -227,49 +227,46 @@ def phase_shift(x, seed=None, inplace=True, rng_device="cpu", conj=False):
 # ##############################################################################
 # # MATRIX ROUTINE WRAPPERS
 # ##############################################################################
-def qr(matrix, in_place_q=False, return_R=False):
+def qr(A, in_place_q=False, return_R=False):
     """Thin QR-decomposition of given matrix.
 
-    :param matrix: matrix to orthogonalize, needs to be compatible with either
+    :param A: Matrix to orthogonalize, needs to be compatible with either
       ``scipy.linalg.qr`` or ``torch.linalg.qr``. It must be square or tall.
-    :param in_place_q: If true, ``matrix[:] = Q`` will be performed.
+    :param in_place_q: If true, ``A[:] = Q`` will be performed.
     :returns: If ``return_R`` is true, returns ``(Q, R)`` such that ``Q``
-      has orthonormal columns, ``R`` is upper triangular and ``matrix=Q @ R``
+      has orthonormal columns, ``R`` is upper triangular and ``A = Q @ R``
       as per the QR decomposition. Otherwise, returns just ``Q``.
     """
-    h, w = matrix.shape
+    h, w = A.shape
     if h < w:
         raise ValueError("Only non-fat matrices supported!")
     #
-    if isinstance(matrix, torch.Tensor):
-        Q, R = torch.linalg.qr(matrix, mode="reduced")
+    if isinstance(A, torch.Tensor):
+        Q, R = torch.linalg.qr(A, mode="reduced")
     else:
-        Q, R = scipy.linalg.qr(
-            matrix,
-            mode="economic",
-            pivoting=False,  # TODO: support pivoting in all modalities
-        )
+        # TODO: support pivoting in all modalities
+        Q, R = scipy.linalg.qr(A, mode="economic", pivoting=False)
     #
     if in_place_q:
-        matrix[:] = Q
-        Q = matrix
+        A[:] = Q
+        Q = A
     if return_R:
         return Q, R
     else:
         return Q
 
 
-def pinv(matrix):
+def pinv(A):
     """Pseudo-inversion of a given matrix.
 
-    :param matrix: matrix to pseudo-invert, of shape ``(h, w)``. It needs to be
+    :param A: matrix to pseudo-invert, of shape ``(h, w)``. It needs to be
       compatible with either ``scipy.linalg.pinv`` or ``torch.linalg.qr``.
-    :returns: Pseudoinverse of ``matrix`` with shape ``(w, h)``.
+    :returns: Pseudoinverse of ``A`` with shape ``(w, h)``.
     """
-    if isinstance(matrix, torch.Tensor):
-        result = torch.linalg.pinv(matrix)
+    if isinstance(A, torch.Tensor):
+        result = torch.linalg.pinv(A)
     else:
-        result = scipy.linalg.pinv(matrix)
+        result = scipy.linalg.pinv(A)
     return result
 
 
@@ -283,3 +280,36 @@ def lstsq(A, b):
     else:
         result = scipy.linalg.lstsq(A, b)[0]
     return result
+
+
+def svd(A):
+    """Singular Value Decomposition.
+
+    :returns: The SVD ``(U, S, Vh)`` such that ``A = U @ diag(S) @ Vh``.
+    """
+    if isinstance(A, torch.Tensor):
+        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+    else:
+        U, S, Vh = scipy.linalg.svd(A, full_matrices=False)
+    return U, S, Vh
+
+
+def eigh(A, by_descending_magnitude=True):
+    """Hermitian Eigendecomposition.
+
+    :param by_descending_magnitude: If true, eigenpairs are given by descending
+      magnitude of eigenvalues (e.g. -4, 3, 0.1, -0.001, 0). If false,
+      eigenpairs are given by descending value (e.g. 3, 0.1, 0, -0.001, -4).
+    :returns: The eigendecomposition ``(Lambda, Q)`` such that
+      ``A = Q @ diag(Lambda) @ Q.H``.
+    """
+    # compute EIGH
+    if isinstance(A, torch.Tensor):
+        ews, evs = torch.linalg.eigh(A)
+        idxs = (abs(ews) if by_descending_magnitude else ews).argsort().flip(0)
+    else:
+        ews, evs = scipy.linalg.eigh(A)
+        idxs = (abs(ews) if by_descending_magnitude else ews).argsort()[::-1]
+    # sort eigenpairs and return
+    ews, evs = ews[idxs], evs[:, idxs]
+    return ews, evs

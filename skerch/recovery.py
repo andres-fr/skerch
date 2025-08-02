@@ -31,7 +31,7 @@ CHANGELOG:
 import torch
 
 from .linops import TransposedLinOp
-from .utils import qr
+from .utils import qr, svd
 
 # ##############################################################################
 # # HELPERS
@@ -76,11 +76,18 @@ def singlepass(
 
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
-    Q, R = torch.linalg.qr(sketch_left)  # Q spans V
-    B = Q.T @ measmat_right
-    YBinv = torch.linalg.lstsq(B.T, sketch_right.T).solution.T  # S @ inv(B)
-    U, Sigma, Zt = torch.linalg.svd(YBinv, full_matrices=False)
-    return U, Sigma, (Q @ Zt.T)
+    Q = qr(sketch_left)
+    B = Q @ mop_right
+    YBinv = lstsq(B.H, sketch_right.H).H
+    U, S, Vh = svd(YBinv)
+    return U, S, (Q @ Vh.H)
+
+    # breakpoint()
+    # Q, R = torch.linalg.qr(sketch_left)  # Q spans V
+    # B = Q.T @ measmat_right
+    # YBinv = torch.linalg.lstsq(B.T, sketch_right.T).solution.T  # S @ inv(B)
+    # U, Sigma, Zt = torch.linalg.svd(YBinv, full_matrices=False)
+    # return U, Sigma, (Q @ Zt.T)
 
 
 # ##############################################################################

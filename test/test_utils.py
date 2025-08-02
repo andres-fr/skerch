@@ -13,7 +13,7 @@ from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
-from skerch.utils import qr, pinv, lstsq
+from skerch.utils import qr, pinv, lstsq, svd, eigh
 
 from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
@@ -284,7 +284,14 @@ def test_noise_sources(
 # # MATRIX ROUTINE WRAPPERS
 # ##############################################################################
 def test_qr(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for QR wrapper (formal and correctness)"""
+    """Test case for QR wrapper (formal and correctness).
+
+    * Fat matrices trigger error
+    * ``Q @ R`` equals given matrix
+    * ``Q`` is orthogonal
+    * In-place operation yields correct result
+    * Output is in matching device and dtype
+    """
     # fat matrices trigger error
     with pytest.raises(ValueError):
         _ = qr(torch.zeros((5, 10)), in_place_q=False, return_R=False)
@@ -328,13 +335,21 @@ def test_qr(rng_seeds, torch_devices, dtypes_tols):
                 assert np.allclose(
                     arr, Q2b, atol=tol
                 ), "Incorrect torch in-place QR?"
+                # matching device and dtype
+                assert Q1.device == tnsr.device, "Incorrect torch Q device?"
+                assert R1.device == tnsr.device, "Incorrect torch R device?"
+                assert Q1.dtype == tnsr.dtype, "Incorrect torch Q dtype?"
+                assert R1.dtype == tnsr.dtype, "Incorrect torch R dtype?"
+                assert Q2.dtype == arr.dtype, "Incorrect numpy Q dtype?"
+                assert R2.dtype == arr.dtype, "Incorrect numpy R dtype?"
 
 
 def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
     """Test case for matrix inversion wrappers (formal and correctness).
 
-    * pinv
-    * lstsq
+    * ``pinv`` yields the correct inverse
+    * ``lstsq`` yields equivalent result to multiplying with ``pinv``.
+    * Output is in matching device and dtype
     """
     hw = (10, 10)
     for seed in rng_seeds:
@@ -344,7 +359,7 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
                 arr = tnsr.cpu().numpy()
                 Itnsr = torch.eye(hw[1], dtype=dtype, device=device)
                 Iarr = Itnsr.cpu().numpy()
-                # pinv
+                # pinv correctness
                 tnsr_inv = pinv(tnsr)
                 arr_inv = pinv(arr)
                 assert torch.allclose(
@@ -359,7 +374,7 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
                 assert np.allclose(
                     Iarr, arr_inv @ arr, atol=tol
                 ), "Incorrect numpy pinv (adj)?"
-                # lstsq
+                # lstsq correctness
                 tnsr2 = gaussian_noise(hw, 0, 1, seed + 1, dtype, device)
                 arr2 = tnsr2.cpu().numpy()
                 tinv2 = lstsq(tnsr, tnsr2)
@@ -370,3 +385,140 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
                 assert np.allclose(
                     ainv2, arr_inv @ arr2, atol=tol
                 ), "Incorrect numpy lstsq?"
+                # matching device and dtype
+                assert (
+                    tnsr_inv.device == tnsr.device
+                ), "Incorrect torch pinv device?"
+                assert (
+                    tnsr_inv.dtype == tnsr.dtype
+                ), "Incorrect torch pinv dtype?"
+                assert (
+                    arr_inv.dtype == arr.dtype
+                ), "Incorrect numpy pinv dtype?"
+                #
+                assert (
+                    tinv2.device == tnsr.device
+                ), "Incorrect torch lstsq device?"
+                assert (
+                    tinv2.dtype == tnsr.dtype
+                ), "Incorrect torch lstsq dtype?"
+                assert ainv2.dtype == arr.dtype, "Incorrect numpy lstsq dtype?"
+
+
+def test_svd(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for singular val decomp wrapper (formal and correctness)
+
+    * Singular bases are orthogonal
+    * Singular values are given as real vectors of nonascending nonneg values
+    * ``U @ diag(S) @ Vh`` equals given matrix
+    * Output is in matching device and dtype (svals are always floats)
+    """
+    hw = (10, 10)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                tnsr = gaussian_noise(hw, 0, 1, seed, dtype, device)
+                arr = tnsr.cpu().numpy()
+                Itnsr = torch.eye(min(hw), dtype=dtype, device=device)
+                Iarr = Itnsr.cpu().numpy()
+                #
+                u1, s1, vh1 = svd(tnsr)
+                u2, s2, vh2 = svd(arr)
+                # u and v are orthogonal
+                assert torch.allclose(
+                    Itnsr, u1.H @ u1, atol=tol
+                ), "Torch U not orthogonal?"
+                assert np.allclose(
+                    Iarr, u2.conj().T @ u2, atol=tol
+                ), "Numpy U not orthogonal?"
+                assert torch.allclose(
+                    Itnsr, vh1 @ vh1.H, atol=tol
+                ), "Torch V not orthogonal?"
+                assert np.allclose(
+                    Iarr, vh2 @ vh2.conj().T, atol=tol
+                ), "Numpy V not orthogonal?"
+                # s are nonnegative vectors in descending order
+                assert s1.shape == (min(hw),), "Torch svals not a vector?"
+                assert s2.shape == (min(hw),), "Numpy svals not a vector?"
+                assert (s1 >= 0).all(), "Negative torch svals?"
+                assert (s2 >= 0).all(), "Negative numpy svals?"
+                assert (s1.diff() <= 0).all(), "Ascending torch svals?"
+                assert (np.diff(s2) <= 0).all(), "Ascending numpy svals?"
+                # correctness
+                assert torch.allclose(
+                    tnsr, (u1 * s1) @ vh1, atol=tol
+                ), "Incorrect torch SVD?"
+                assert np.allclose(
+                    arr, (u2 * s2) @ vh2, atol=tol
+                ), "Incorrect numpy SVD?"
+                # matching device and dtype
+                assert u1.device == tnsr.device, "Incorrect torch U device?"
+                assert u1.dtype == tnsr.dtype, "Incorrect torch U dtype?"
+                assert u2.dtype == arr.dtype, "Incorrect numpy U dtype?"
+                assert s1.device == tnsr.device, "Incorrect torch S device?"
+                assert s1.dtype == tnsr.real.dtype, "Incorrect torch S dtype?"
+                assert s2.dtype == arr.real.dtype, "Incorrect numpy S dtype?"
+                assert vh1.device == tnsr.device, "Incorrect torch V device?"
+                assert vh1.dtype == tnsr.dtype, "Incorrect torch V dtype?"
+                assert vh2.dtype == arr.dtype, "Incorrect numpy V dtype?"
+
+
+def test_eigh(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for Hermitian eigdecomp wrapper (formal and correctness)
+
+    * Eigenbasis is orthogonal
+    * Eigenvalues are given as real vectors by descending magnitude/value
+    * ``Q @ diag(Lambda) @ Q.H`` equals given matrix
+    * Output is in matching device and dtype
+    """
+    hw = (10, 10)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                tnsr = gaussian_noise(hw, 0, 1, seed, dtype, device)
+                tnsr = tnsr + tnsr.H  # make it hermitian
+                arr = tnsr.cpu().numpy()
+                Itnsr = torch.eye(min(hw), dtype=dtype, device=device)
+                Iarr = Itnsr.cpu().numpy()
+                for by_mag in (True, False):
+                    ews1, evs1 = eigh(tnsr, by_descending_magnitude=by_mag)
+                    ews2, evs2 = eigh(arr, by_descending_magnitude=by_mag)
+                    # eigenbasis is orthogonal
+                    assert torch.allclose(
+                        Itnsr, evs1.H @ evs1, atol=tol
+                    ), "Torch eigenbasis not orthogonal?"
+                    assert np.allclose(
+                        Iarr, evs2.conj().T @ evs2, atol=tol
+                    ), "Numpy eigenbasis not orthogonal?"
+                    # eigenvalues are vectors in descending mag/val
+                    assert ews1.shape == (min(hw),), "Torch ews not a vector?"
+                    assert ews2.shape == (min(hw),), "Numpy ews not a vector?"
+                    sorted1 = abs(ews1) if by_mag else ews1
+                    sorted2 = abs(ews2) if by_mag else ews2
+                    assert (
+                        sorted1.diff() <= 0
+                    ).all(), "Torch eigvals in wrong order? (by_mag={by_mag})"
+                    assert (
+                        np.diff(sorted2) <= 0
+                    ).all(), "Numpy eigvals in wrong order? (by_mag={by_mag})"
+                    # correctness
+                    assert torch.allclose(
+                        tnsr, (evs1 * ews1) @ evs1.H, atol=tol
+                    ), "Incorrect torch EIGH?"
+                    assert np.allclose(
+                        arr, (evs2 * ews2) @ evs2.conj().T, atol=tol
+                    ), "Incorrect numpy EIGH?"
+                    # matching device and type
+                    assert evs1.device == tnsr.device, "Incorrect torch Q dev?"
+                    assert evs1.dtype == tnsr.dtype, "Incorrect torch Q dtype?"
+                    assert evs2.dtype == arr.dtype, "Incorrect numpy Q dtype?"
+                    #
+                    assert (
+                        ews1.device == tnsr.device
+                    ), "Incorrect torch ew dev?"
+                    assert (
+                        ews1.dtype == tnsr.real.dtype
+                    ), "Incorrect torch ew dtype?"
+                    assert (
+                        ews2.dtype == arr.real.dtype
+                    ), "Incorrect numpy ew dtype?"
