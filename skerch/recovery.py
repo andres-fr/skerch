@@ -28,18 +28,13 @@ CHANGELOG:
   - Algorithms: XDiag/DiagPP, SSVD, Sketchlord, Triangular
 """
 
-import torch
 
-from .linops import TransposedLinOp
+import torch
 from .utils import qr, svd, lstsq
 
-# ##############################################################################
-# # HELPERS
-# ##############################################################################
-
 
 # ##############################################################################
-# # SINGLE-PASS
+# # RECOVERY ALGORITHMS
 # ##############################################################################
 def singlepass(
     sketch_right,
@@ -76,9 +71,9 @@ def singlepass(
 
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
-    Qh = qr(sketch_left.H).H
+    Qh = qr(sketch_left.conj().T).conj().T
     B = Qh @ mop_right
-    YBinv = lstsq(B.H, sketch_right.H).H
+    YBinv = lstsq(B.conj().T, sketch_right.conj().T).conj().T
     U, S, Vh = svd(YBinv)
     return U, S, (Vh @ Qh)
 

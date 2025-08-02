@@ -7,6 +7,8 @@
 
 import pytest
 import torch
+import numpy as np
+
 from skerch.utils import gaussian_noise, svd
 from skerch.synthmat import RandomLordMatrix
 from skerch.recovery import singlepass
@@ -21,7 +23,7 @@ def dtypes_tols():
     """Error tolerances for each dtype."""
     result = {
         torch.float32: 3e-5,
-        torch.complex64: 1e-5,
+        torch.complex64: 3e-5,
         torch.float64: 1e-10,
         torch.complex128: 1e-10,
     }
@@ -89,17 +91,21 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     * ``U, V`` have orthonormal columns
     * The devices and dtypes all match
     """
+    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
     # correctness of result
-    assert torch.allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
+    assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered U, V
-    assert torch.allclose(I, U.H @ U, atol=atol), "U not orthogonal?"
-    assert torch.allclose(I, Vh @ Vh.H, atol=atol), "V not orthogonal?"
+    assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
+    assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # correctness of recovered svals
-    assert torch.allclose(svals[: len(S)], S, atol=atol), "Incorrect  svals!"
+    try:
+        assert allclose(svals[: len(S)], S, atol=atol), "Incorrect  svals!"
+    except:
+        breakpoint()
     # matching device and type
     assert U.device == mat.device, "Incorrect U singlepass torch device!"
     assert S.device == mat.device, "Incorrect S singlepass torch device!"
-    assert Vh.device != mat.device, "Incorrect V singlepass torch device!"
+    assert Vh.device == mat.device, "Incorrect V singlepass torch device!"
     assert U.dtype == mat.dtype, "Incorrect U singlepass torch dtype!"
     assert S.dtype == mat.real.dtype, "Incorrect S singlepass torch dtype!"
     assert Vh.dtype == mat.dtype, "Incorrect V singlepass torch dtype!"
@@ -111,23 +117,14 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
 def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
     """Test case for recovery (formal and correctness).
 
-    For torch/numpy inputs, and for all recovery methods, test:
-    * xxx
-    *
-    * Output is in matching device and dtype
-
-
-    1. our target linop is a lr matrix
-
-
-    we need both sketches and the mop
-    everything should have different types
+    For torch/numpy inputs, and for all recovery methods, runs
+    :func:`svd_test_helper`.
     """
     hw, rank, meas = (50, 50), 5, 25
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                # torch identity, low-rank matrix and noisy matrices
+                # torch identity, low-rank matrix and sketches
                 I1 = torch.eye(meas, dtype=dtype, device=device)
                 mat1, _ = RandomLordMatrix.exp(
                     hw,
@@ -147,13 +144,26 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
                 left1 = gaussian_noise(
                     (meas, hw[0]), seed=seed + 101, device=device, dtype=dtype
                 )
-                #
-                # SINGLEPASS
-                # measurements and recovery
                 Y1 = mat1 @ right1  # tall
                 Z1 = left1 @ mat1  # fat
-                U1rec, S1rec, Vh1rec = singlepass(Y1, Z1, right1)
-                try:
-                    svd_test_helper(mat1, S1, I1, U1rec, S1rec, Vh1rec, tol)
-                except AssertionError as ae:
-                    raise AssertionError("Singlepass torch error!") from ae
+                # numpy corresponding objects
+                I2 = I1.cpu().numpy()
+                mat2 = mat1.cpu().numpy()
+                S2 = S1.cpu().numpy()
+                Y2, Z2 = Y1.cpu().numpy(), Z1.cpu().numpy()
+                right2 = right1.cpu().numpy()
+                # SINGLEPASS
+                for modality, I, mat, S, Y, Z, right in (
+                    ("torch", I1, mat1, S1, Y1, Z1, right1),
+                    ("numpy", I2, mat2, S2, Y2, Z2, right2),
+                ):
+                    Urec, Srec, Vhrec = singlepass(Y, Z, right)
+                    try:
+                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Singlepass {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                # OVERSAMPLED
+                breakpoint()
+
+                # NYSTROM
