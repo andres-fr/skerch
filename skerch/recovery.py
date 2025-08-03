@@ -30,7 +30,7 @@ CHANGELOG:
 
 
 import torch
-from .utils import qr, svd, lstsq
+from .utils import qr, svd, lstsq, eigh
 
 
 # ##############################################################################
@@ -41,6 +41,7 @@ def singlepass(
     sketch_left,
     mop_right,
     rcond=1e-8,
+    as_svd=True,
 ):
     r"""Recovering the SVD of a matrix ``A`` from left and right sketches.
 
@@ -72,11 +73,61 @@ def singlepass(
 
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
-    Qh = qr(sketch_left.conj().T).conj().T
+    Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
     B = Qh @ mop_right
-    YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-    U, S, Vh = svd(YBinv)
-    return U, S, (Vh @ Qh)
+    if as_svd:
+        """
+        .
+        .
+        .
+        .
+        .
+        .
+        """
+        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        aaa = YBinv @ Qh
+
+        # U, S, Vh = svd(YBinv)
+        # result = U, S, (Vh @ Qh)
+        P, R = qr(sketch_right, in_place_q=False, return_R=True)
+        RBinv = lstsq(B.T, R.T, rcond=rcond).T  # R @ inv(B)
+        BRinv = lstsq(R.T, B.T, rcond=rcond).T  # B @ inv(R)
+        Z, S2, _ = svd(RBinv.T @ RBinv)
+        # S = S2.clip_(0, None) ** 0.5
+        S = S2**0.5
+        Vh = Z.T @ Qh
+        #### U = P @ (BRinv.T @ Z) * S
+
+        U = (P @ RBinv @ Z) / S
+        result = U, S, Vh
+        #
+        bbb = (U * S) @ Vh
+
+        import matplotlib.pyplot as plt
+
+        breakpoint()
+
+        torch.dist((U * S) @ Z.T, P @ RBinv)
+
+    else:
+        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        result = YBinv, Qh
+    return result
+
+    # P, S = torch.linalg.qr(sketch_right)  # P spans U
+    # Q, R = torch.linalg.qr(sketch_left)  # Q spans V
+    # #
+    # B = Q.T @ measmat_right
+    # SBinv = torch.linalg.lstsq(B.T, S.T).solution.T  # S @ inv(B)
+    # BSinv = torch.linalg.lstsq(S.T, B.T).solution.T  # B @ inv(S)
+    # ew_sq, Z = torch.linalg.eigh(SBinv.T @ SBinv)  # ascending EW magnitude
+    # ew_sq.clip_(0, None)  # since ew_sq must be nonnegative, avoid num. err.
+    # ew_sq, Z = ew_sq.flip(0), Z.flip(1)  # descending EW magnitude
+    # Sigma = ew_sq**0.5
+    # V = Q @ Z
+    # U = P @ (BSinv.T @ Z) * Sigma
+    # #
+    # return U, Sigma, V
 
 
 def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
@@ -98,6 +149,36 @@ def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
     return result
 
 
+def compact(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
+    """Recovering the SVD of a matrix ``L`` from left and right sketches.
+
+    This function has the same interface as :func:`singlepass`, but
+    it differs in the solving mechanism. Given ``Y, W.T, Omega``, where
+    ``Y = A @ Omega`` and ``W.T = Psi.T @ A``, we first compute the QR
+    decompositions ``Y = PS`` and ``W = QR``.
+
+
+
+    This method has one QR decomposition more than single-pass, but all
+    least-squares and SVD operations are compact, which may result in
+    substantial speedup depending on problem dimensionality.
+    """
+    P, S = torch.linalg.qr(sketch_right)  # P spans U
+    Q, R = torch.linalg.qr(sketch_left)  # Q spans V
+    #
+    B = Q.T @ measmat_right
+    SBinv = torch.linalg.lstsq(B.T, S.T).solution.T  # S @ inv(B)
+    BSinv = torch.linalg.lstsq(S.T, B.T).solution.T  # B @ inv(S)
+    ew_sq, Z = torch.linalg.eigh(SBinv.T @ SBinv)  # ascending EW magnitude
+    ew_sq.clip_(0, None)  # since ew_sq must be nonnegative, avoid num. err.
+    ew_sq, Z = ew_sq.flip(0), Z.flip(1)  # descending EW magnitude
+    Sigma = ew_sq**0.5
+    V = Q @ Z
+    U = P @ (BSinv.T @ Z) * Sigma
+    #
+    return U, Sigma, V
+
+
 def oversampled():
     """ """
     pass
@@ -106,7 +187,7 @@ def oversampled():
 # ##############################################################################
 # # OVERSAMPLED
 # ##############################################################################
-def ___oversampled_recovery(
+def oversampled_recovery(
     lop,
     num_meas,
     sketch1,
@@ -140,8 +221,3 @@ def ___oversampled_recovery(
     U = sketch1 @ u
     V = sketch2 @ vt.T
     return U, Sigma, V
-
-
-# ##############################################################################
-# # GENERALIZED NYSTROM
-# ##############################################################################

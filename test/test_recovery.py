@@ -62,6 +62,7 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     * The devices and dtypes all match
     """
     allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
+    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
     # correctness of result
     assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered U, V
@@ -69,6 +70,9 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # correctness of recovered svals
     assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
+    # svals nonnegative and by descending magnitude
+    assert (S >= 0).all(), "Negative svals!"
+    assert (diff(S) <= 0).all(), "Ascending svals?"
     # matching device and type
     assert U.device == mat.device, "Incorrect U device!"
     assert S.device == mat.device, "Incorrect S device!"
@@ -85,7 +89,8 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
     """Test case for recovery (formal and correctness).
 
     For torch/numpy inputs, and for all recovery methods, runs
-    :func:`svd_test_helper`.
+    :func:`svd_test_helper`. This tests that provided outputs are correct,
+    have the expected properties and are in the matching device/dtype.
     """
     hw, rank, meas = (50, 50), 5, 25
     for seed in rng_seeds:
@@ -124,12 +129,19 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
                     ("torch", I1, mat1, S1, Y1, Z1, right1),
                     ("numpy", I2, mat2, S2, Y2, Z2, right2),
                 ):
-                    # singlepass
-                    Urec, Srec, Vhrec = singlepass(Y, Z, right)
+                    # singlepass - UV
+                    Urec, Vhrec = singlepass(Y, Z, right, as_svd=False)
+                    try:
+                        uv_test_helper(mat, Urec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Singlepass-UV {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                    # singlepass - SVD
+                    Urec, Srec, Vhrec = singlepass(Y, Z, right, as_svd=True)
                     try:
                         svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                     except AssertionError as ae:
-                        errmsg = f"Singlepass {modality} error!"
+                        errmsg = f"Singlepass-SVD {modality} error!"
                         raise AssertionError(errmsg) from ae
                     # nystrom - UV
                     Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
