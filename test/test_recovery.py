@@ -11,7 +11,7 @@ import numpy as np
 
 from skerch.utils import gaussian_noise, svd
 from skerch.synthmat import RandomLordMatrix
-from skerch.recovery import singlepass
+from skerch.recovery import singlepass, nystrom, oversampled
 from . import rng_seeds, torch_devices
 
 
@@ -81,6 +81,24 @@ def ssrft_hw_and_autocorr_tolerances():
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
+def uv_test_helper(mat, U, Vh, atol):
+    """UV test helper.
+
+    Given the decomposition ``mat = U @ Vh``, tests that:
+
+    * The equality actually holds
+    * The devices and dtypes all match
+    """
+    allclose = torch.allclose if isinstance(mat, torch.Tensor) else np.allclose
+    # correctness of result
+    assert allclose(mat, U @ Vh, atol=atol), "Incorrect recovery!"
+    # matching device and type
+    assert U.device == mat.device, "Incorrect U device!"
+    assert Vh.device == mat.device, "Incorrect V device!"
+    assert U.dtype == mat.dtype, "Incorrect U dtype!"
+    assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
+
+
 def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     """SVD test helper.
 
@@ -98,17 +116,14 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
     assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # correctness of recovered svals
-    try:
-        assert allclose(svals[: len(S)], S, atol=atol), "Incorrect  svals!"
-    except:
-        breakpoint()
+    assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
     # matching device and type
-    assert U.device == mat.device, "Incorrect U singlepass torch device!"
-    assert S.device == mat.device, "Incorrect S singlepass torch device!"
-    assert Vh.device == mat.device, "Incorrect V singlepass torch device!"
-    assert U.dtype == mat.dtype, "Incorrect U singlepass torch dtype!"
-    assert S.dtype == mat.real.dtype, "Incorrect S singlepass torch dtype!"
-    assert Vh.dtype == mat.dtype, "Incorrect V singlepass torch dtype!"
+    assert U.device == mat.device, "Incorrect U device!"
+    assert S.device == mat.device, "Incorrect S device!"
+    assert Vh.device == mat.device, "Incorrect V device!"
+    assert U.dtype == mat.dtype, "Incorrect U dtype!"
+    assert S.dtype == mat.real.dtype, "Incorrect S dtype!"
+    assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
 
 
 # ##############################################################################
@@ -152,18 +167,30 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
                 S2 = S1.cpu().numpy()
                 Y2, Z2 = Y1.cpu().numpy(), Z1.cpu().numpy()
                 right2 = right1.cpu().numpy()
-                # SINGLEPASS
+                #
                 for modality, I, mat, S, Y, Z, right in (
                     ("torch", I1, mat1, S1, Y1, Z1, right1),
                     ("numpy", I2, mat2, S2, Y2, Z2, right2),
                 ):
+                    # singlepass
                     Urec, Srec, Vhrec = singlepass(Y, Z, right)
                     try:
                         svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                     except AssertionError as ae:
                         errmsg = f"Singlepass {modality} error!"
                         raise AssertionError(errmsg) from ae
-                # OVERSAMPLED
-                breakpoint()
-
-                # NYSTROM
+                    # nystrom - UV
+                    Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
+                    try:
+                        uv_test_helper(mat, Urec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Nystrom-UV {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                    # nystrom - SVD
+                    Urec, Srec, Vhrec = nystrom(Y, Z, right, as_svd=True)
+                    try:
+                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Nystrom-SVD {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                    # oversampled

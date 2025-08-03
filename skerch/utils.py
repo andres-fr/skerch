@@ -270,15 +270,17 @@ def pinv(A):
     return result
 
 
-def lstsq(A, b):
+def lstsq(A, b, rcond=1e-6):
     """Least-squares solver.
 
     :returns: ``x`` such that ``frob(Ax - b)`` is minimized.
     """
     if isinstance(A, torch.Tensor):
-        result = torch.linalg.lstsq(A, b).solution
+        # do not use default gelsy driver: nondeterm results yielding errors
+        # gels is the only only CUDA-compatible and works, so fix that
+        result = torch.linalg.lstsq(A, b, rcond=rcond, driver="gels").solution
     else:
-        result = scipy.linalg.lstsq(A, b)[0]
+        result = scipy.linalg.lstsq(A, b, cond=rcond, lapack_driver="gelsd")[0]
     return result
 
 

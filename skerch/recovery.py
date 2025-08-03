@@ -40,6 +40,7 @@ def singlepass(
     sketch_right,
     sketch_left,
     mop_right,
+    rcond=1e-8,
 ):
     r"""Recovering the SVD of a matrix ``A`` from left and right sketches.
 
@@ -73,9 +74,33 @@ def singlepass(
     """
     Qh = qr(sketch_left.conj().T).conj().T
     B = Qh @ mop_right
-    YBinv = lstsq(B.conj().T, sketch_right.conj().T).conj().T
+    YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
     U, S, Vh = svd(YBinv)
     return U, S, (Vh @ Qh)
+
+
+def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
+    """ """
+    if not as_svd:
+        # the original nystrom recovery, cheaper
+        Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
+        rightRinv = (
+            lstsq(R.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        )
+        result = rightRinv, (Q.conj().T @ sketch_left)  # U, Vh
+    else:
+        # return in SVD form, more expensive
+        P, S = qr(sketch_right, in_place_q=False, return_R=True)
+        Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
+        rightRinv = lstsq(R.conj().T, S.conj().T, rcond=rcond).conj().T
+        U, S, Vh = svd(rightRinv @ (Q.conj().T @ sketch_left))
+        result = (P @ U), S, Vh
+    return result
+
+
+def oversampled():
+    """ """
+    pass
 
 
 # ##############################################################################

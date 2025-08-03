@@ -324,6 +324,13 @@ def test_qr(rng_seeds, torch_devices, dtypes_tols):
                 assert np.allclose(
                     Iarr, Q2.conj().T @ Q2, atol=tol
                 ), "Numpy Q not orthogonal?"
+                # test R is upper triangular
+                assert torch.allclose(
+                    R1, R1.triu(), atol=tol
+                ), "Torch R not upper triangular?"
+                assert np.allclose(
+                    R2, np.triu(R2), atol=tol
+                ), "Numpy R not upper triangular?"
                 # test correctness of in-place
                 Q1b = qr(tnsr, in_place_q=True, return_R=False)
                 Q2b = qr(arr, in_place_q=True, return_R=False)
