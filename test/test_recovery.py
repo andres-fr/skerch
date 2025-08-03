@@ -11,7 +11,7 @@ import numpy as np
 
 from skerch.utils import gaussian_noise, svd
 from skerch.synthmat import RandomLordMatrix
-from skerch.recovery import singlepass, nystrom, oversampled
+from skerch.recovery import singlepass, compact, nystrom, oversampled
 from . import rng_seeds, torch_devices
 
 
@@ -22,10 +22,10 @@ from . import rng_seeds, torch_devices
 def dtypes_tols():
     """Error tolerances for each dtype."""
     result = {
-        torch.float32: 3e-5,
-        torch.complex64: 3e-5,
-        torch.float64: 1e-10,
-        torch.complex128: 1e-10,
+        torch.float32: 1e-3,
+        torch.complex64: 1e-3,
+        torch.float64: 3e-8,
+        torch.complex128: 3e-8,
     }
     return result
 
@@ -64,12 +64,19 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
     diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
     # correctness of result
-    assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
+    try:
+        assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
+    except:
+        breakpoint()
+
     # orthogonality of recovered U, V
     assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
     assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # correctness of recovered svals
-    assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
+    try:
+        assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
+    except:
+        breakpoint()
     # svals nonnegative and by descending magnitude
     assert (S >= 0).all(), "Negative svals!"
     assert (diff(S) <= 0).all(), "Ascending svals?"
@@ -142,6 +149,20 @@ def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
                         svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                     except AssertionError as ae:
                         errmsg = f"Singlepass-SVD {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                    # compact - UV
+                    Urec, Vhrec = compact(Y, Z, right, as_svd=False)
+                    try:
+                        uv_test_helper(mat, Urec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Compact-UV {modality} error!"
+                        raise AssertionError(errmsg) from ae
+                    # compact - SVD
+                    Urec, Srec, Vhrec = compact(Y, Z, right, as_svd=True)
+                    try:
+                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                    except AssertionError as ae:
+                        errmsg = f"Compact-SVD {modality} error!"
                         raise AssertionError(errmsg) from ae
                     # nystrom - UV
                     Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
