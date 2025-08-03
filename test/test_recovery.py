@@ -30,54 +30,6 @@ def dtypes_tols():
     return result
 
 
-@pytest.fixture
-def parallel_modes():
-    result = (None, "mp")
-    return result
-
-
-@pytest.fixture
-def complex_dtypes_tols():
-    """Error tolerances for each complex dtype."""
-    result = {
-        torch.complex64: 1e-5,
-        torch.complex128: 1e-10,
-    }
-    return result
-
-
-@pytest.fixture
-def iid_noise_linop_types():
-    """Class names for all noise linops to be tested.
-
-    :returns: Collection of pairs ``(lop_type, is_complex_only)``
-    """
-    result = {
-        (GaussianNoiseLinOp, False),
-        (RademacherNoiseLinOp, False),
-        (PhaseNoiseLinOp, True),
-    }
-    return result
-
-
-@pytest.fixture
-def iid_hw_and_autocorr_tolerances():
-    """Error tolerances for each complex dtype."""
-    hw = (20, 20)
-    delta_at_least = 0.7
-    nondelta_at_most = 0.5
-    return hw, delta_at_least, nondelta_at_most
-
-
-@pytest.fixture
-def ssrft_hw_and_autocorr_tolerances():
-    """Error tolerances for each complex dtype."""
-    hw = (30, 10)
-    delta_at_least = 0.7
-    nondelta_at_most = 0.5
-    return hw, delta_at_least, nondelta_at_most
-
-
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
