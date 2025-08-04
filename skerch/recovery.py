@@ -5,14 +5,10 @@
 """
 
 TODO:
-* Implement 3 recovery methods
-  - test correctness and formal
-* Implement all sketched algorithms as meas-recovery
-* HDF5?
-
-
-* check that all 3 are close enough?? how?
-* check that they work on general matrices
+* how to handle truncation?
+* IMPLEMENT INNER MEASUREMENT FN, ALSO PARALLELIZABLE
+  - and extend them to hdf5 eventually (no hdf5 in the recovery API)
+* Implement recoveries for symmetric matrices
 
 
 
@@ -34,7 +30,7 @@ from .utils import qr, svd, lstsq, eigh
 
 
 # ##############################################################################
-# # RECOVERY ALGORITHMS
+# # RECOVERY FOR GENERAL MATRICES
 # ##############################################################################
 def singlepass(
     sketch_right,
@@ -137,45 +133,32 @@ def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
     return result
 
 
-def oversampled():
+def oversampled(
+    sketch_right,
+    sketch_left,
+    sketch_inner,
+    lilop,
+    rilop,
+    as_svd=True,
+):
     """ """
-    pass
+    P = qr(sketch_right, in_place_q=False, return_R=False)
+    Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
+    core = lstsq(lilop @ P, sketch_inner)
+    core = lstsq((rilop.T @ Qh.T), core.T).T
+    if as_svd:
+        U, S, Vh = svd(core)
+        result = (P @ U), S, (Vh @ Qh)
+    else:
+        result = P, core @ Qh
+    return result
 
 
 # ##############################################################################
 # # OVERSAMPLED
 # ##############################################################################
-def oversampled_recovery(
-    lop,
-    num_meas,
-    sketch1,
-    sketch2,
-    trunc_ratio=0.99,
-    trunc_overhead=5,
-    li_seed=123456,
-    ri_seed=123457,
-):
-    """
-    lop, diag, inner_dim, sketch_right, sketch_left, seed
-    """
-    h, w = lop.shape
-    device, dtype = sketch1.device, sketch1.dtype
-    # perform core measurements
-    li_lop = RademacherIidLinOp((num_meas, h), li_seed, partition="row")
-    ri_lop = RademacherIidLinOp((num_meas, w), ri_seed, partition="row")
-    meas = torch.empty((num_meas, num_meas), dtype=dtype, device=device)
-    for i in range(num_meas):
-        meas[i, :] = ri_lop @ (li_lop.sample(h, i, device).to(dtype) @ lop)
-    # Solve core op to yield initial approximation
-    sketch1 = torch.linalg.qr(sketch1)[0]
-    sketch2 = torch.linalg.qr(sketch2)[0]
-    u, Sigma, vt = solve_core_ssvd(sketch1, sketch2, meas, li_lop, ri_lop)
-    idx = torch.searchsorted(
-        pca_scree(Sigma, normalized=True), trunc_ratio
-    ).item()
-    idx += trunc_overhead
-    u, Sigma, vt = u[:, :idx], Sigma[:idx], vt[:idx]
-    # collapse result and return
-    U = sketch1 @ u
-    V = sketch2 @ vt.T
-    return U, Sigma, V
+
+
+# ##############################################################################
+# # RECOVERY FOR SYMMETRIC MATRICES
+# ##############################################################################

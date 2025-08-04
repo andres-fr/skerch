@@ -30,6 +30,17 @@ def dtypes_tols():
     return result
 
 
+@pytest.fixture
+def formal_recovery_shapes():
+    """Tuples in the form ``((height, width), rank, outermeas, innermeas)."""
+    result = [
+        ((50, 50), 5, 25, 35),
+        ((40, 50), 5, 25, 35),
+        ((50, 40), 5, 25, 35),
+    ]
+    return result
+
+
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
@@ -92,90 +103,137 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
 # ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
-def test_recovery_formal(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for recovery (formal and correctness).
+def test_recovery_general(
+    rng_seeds, torch_devices, dtypes_tols, formal_recovery_shapes
+):
+    """Test case for recovery of general matrices (formal and correctness).
 
     For torch/numpy inputs, and for all recovery methods, runs
     :func:`svd_test_helper`. This tests that provided outputs are correct,
     have the expected properties and are in the matching device/dtype.
     """
-    hw, rank, meas = (50, 50), 5, 25
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                # torch identity, low-rank matrix and sketches
-                I1 = torch.eye(meas, dtype=dtype, device=device)
-                mat1, _ = RandomLordMatrix.exp(
-                    hw,
-                    rank,
-                    decay=100,
-                    diag_ratio=0.0,
-                    symmetric=False,
-                    psd=False,
-                    seed=seed,
-                    dtype=dtype,
-                    device=device,
-                )
-                U1, S1, Vh1 = svd(mat1)
-                right1 = gaussian_noise(
-                    (hw[1], meas), seed=seed + 100, device=device, dtype=dtype
-                )
-                left1 = gaussian_noise(
-                    (meas, hw[0]), seed=seed + 101, device=device, dtype=dtype
-                )
-                Y1 = mat1 @ right1  # tall
-                Z1 = left1 @ mat1  # fat
-                # numpy corresponding objects
-                I2 = I1.cpu().numpy()
-                mat2 = mat1.cpu().numpy()
-                S2 = S1.cpu().numpy()
-                Y2, Z2 = Y1.cpu().numpy(), Z1.cpu().numpy()
-                right2 = right1.cpu().numpy()
-                #
-                for modality, I, mat, S, Y, Z, right in (
-                    ("torch", I1, mat1, S1, Y1, Z1, right1),
-                    ("numpy", I2, mat2, S2, Y2, Z2, right2),
-                ):
-                    # singlepass - UV
-                    Urec, Vhrec = singlepass(Y, Z, right, as_svd=False)
-                    try:
-                        uv_test_helper(mat, Urec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Singlepass-UV {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # singlepass - SVD
-                    Urec, Srec, Vhrec = singlepass(Y, Z, right, as_svd=True)
-                    try:
-                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Singlepass-SVD {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # compact - UV
-                    Urec, Vhrec = compact(Y, Z, right, as_svd=False)
-                    try:
-                        uv_test_helper(mat, Urec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Compact-UV {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # compact - SVD
-                    Urec, Srec, Vhrec = compact(Y, Z, right, as_svd=True)
-                    try:
-                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Compact-SVD {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # nystrom - UV
-                    Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
-                    try:
-                        uv_test_helper(mat, Urec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Nystrom-UV {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # nystrom - SVD
-                    Urec, Srec, Vhrec = nystrom(Y, Z, right, as_svd=True)
-                    try:
-                        svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
-                    except AssertionError as ae:
-                        errmsg = f"Nystrom-SVD {modality} error!"
-                        raise AssertionError(errmsg) from ae
-                    # oversampled
+                for hw, rank, outermeas, innermeas in formal_recovery_shapes:
+                    # torch: low-rank matrix, svals and identity
+                    I1 = torch.eye(outermeas, dtype=dtype, device=device)
+                    mat1, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=100,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    _, S1, _ = svd(mat1)
+                    # torch: outer/inner, left/right random measurement linops
+                    rlop1 = gaussian_noise(
+                        (hw[1], outermeas),
+                        seed=seed + 100,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    llop1 = gaussian_noise(
+                        (outermeas, hw[0]),
+                        seed=seed + 101,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    rilop1 = gaussian_noise(
+                        (hw[1], innermeas),
+                        seed=seed + 102,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    lilop1 = gaussian_noise(
+                        (innermeas, hw[0]),
+                        seed=seed + 103,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    # torch: outer and core random measurements
+                    Y1 = mat1 @ rlop1  # tall
+                    Z1 = llop1 @ mat1  # fat
+                    C1 = lilop1 @ (mat1 @ rilop1)  # core
+                    # numpy: all corresponding objects
+                    I2 = I1.cpu().numpy()
+                    mat2 = mat1.cpu().numpy()
+                    S2 = S1.cpu().numpy()
+                    Y2, Z2 = Y1.cpu().numpy(), Z1.cpu().numpy()
+                    C2 = C1.cpu().numpy()
+                    rlop2 = rlop1.cpu().numpy()
+                    rilop2 = rilop1.cpu().numpy()
+                    lilop2 = lilop1.cpu().numpy()
+                    # LOOP OVER CONFIGS
+                    conf1 = (I1, mat1, S1, Y1, Z1, C1, rlop1, rilop1, lilop1)
+                    conf2 = (I2, mat2, S2, Y2, Z2, C2, rlop2, rilop2, lilop2)
+                    for modality, I, mat, S, Y, Z, C, right, rilop, lilop in (
+                        ("torch", *conf1),
+                        ("numpy", *conf2),
+                    ):
+                        # singlepass - UV
+                        Urec, Vhrec = singlepass(Y, Z, right, as_svd=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Singlepass-UV {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # singlepass - SVD
+                        Urec, Srec, Vhrec = singlepass(
+                            Y, Z, right, as_svd=True
+                        )
+                        try:
+                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Singlepass-SVD {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # compact - UV
+                        Urec, Vhrec = compact(Y, Z, right, as_svd=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Compact-UV {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # compact - SVD
+                        Urec, Srec, Vhrec = compact(Y, Z, right, as_svd=True)
+                        try:
+                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Compact-SVD {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # nystrom - UV
+                        Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Nystrom-UV {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # nystrom - SVD
+                        Urec, Srec, Vhrec = nystrom(Y, Z, right, as_svd=True)
+                        try:
+                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Nystrom-SVD {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # oversampled - UV
+                        Urec, Vhrec = oversampled(
+                            Y, Z, C, lilop, rilop, as_svd=False
+                        )
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Oversampled-UV {modality} error!"
+                            raise AssertionError(errmsg) from ae
+                        # oversampled - SVD
+                        Urec, Srec, Vhrec = oversampled(
+                            Y, Z, C, lilop, rilop, as_svd=True
+                        )
+                        try:
+                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Oversampled-SVD {modality} error!"
+                            raise AssertionError(errmsg) from ae
