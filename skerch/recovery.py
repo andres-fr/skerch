@@ -5,10 +5,30 @@
 """
 
 TODO:
-* how to handle truncation?
-* IMPLEMENT INNER MEASUREMENT FN, ALSO PARALLELIZABLE
-  - and extend them to hdf5 eventually (no hdf5 in the recovery API)
+* implement inner measurement fn, also parallelizable
 * Implement recoveries for symmetric matrices
+  - how to handle truncation?
+* extend measurement API to HDF5
+  - add HDF5 bells and whistles
+
+at this point, we will have:
+- nice lord synthmats
+- all linops and linop support we need
+- nice measurement API working on parallel single core or HDF5 distributed
+- all recovery methods we could care about, for general and symmetric
+
+Remaining:
+* add all in-core algorithms
+* a-priori/posteriori stuff
+* out-of-core wrappers for QR, SVD, LSTSQ
+
+The idea is to
+1. Write all in-core algorithms, modularly. code should look very compact
+  - Ensure building blocks allow for flawless adaption to HDF5. minimal code
+2. Incorporate the priori/posteriori stuff
+3. Write integration tests:
+  a) Compare all
+
 
 
 
@@ -19,9 +39,12 @@ CHANGELOG:
   - New core functionality: Transposed, Signed Sum, Banded, ByVector
   - New measurement linops: Rademacher, Gaussian, Phase, SSRFT
 * Sketching API:
-  - Modular measurement API supporting MP parallelization
-  - Modular recovery methods (singlepass, oversampled, Nystrom)
+  - Modular measurement API supporting multiprocessing and HDF5
+  - Modular recovery methods (singlepass, compact oversampled, Nystrom) for
+    general and symmetric cases
   - Algorithms: XDiag/DiagPP, SSVD, Sketchlord, Triangular
+* A-posteriori error verification
+* A-priori hyperparameter selection
 """
 
 
@@ -30,7 +53,7 @@ from .utils import qr, svd, lstsq, eigh
 
 
 # ##############################################################################
-# # RECOVERY FOR GENERAL MATRICES
+# # RECOVERY FOR GENERAL MATRICES (UV/SVD)
 # ##############################################################################
 def singlepass(
     sketch_right,
@@ -155,10 +178,5 @@ def oversampled(
 
 
 # ##############################################################################
-# # OVERSAMPLED
-# ##############################################################################
-
-
-# ##############################################################################
-# # RECOVERY FOR SYMMETRIC MATRICES
+# # RECOVERY FOR SYMMETRIC MATRICES (EIGH)
 # ##############################################################################

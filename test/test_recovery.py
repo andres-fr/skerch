@@ -108,7 +108,10 @@ def test_recovery_general(
 ):
     """Test case for recovery of general matrices (formal and correctness).
 
-    For torch/numpy inputs, and for all recovery methods, runs
+    For torch/numpy inputs, and for all recovery methods (in UV/SVD mode),
+    tests that:
+
+    *
     :func:`svd_test_helper`. This tests that provided outputs are correct,
     have the expected properties and are in the matching device/dtype.
     """

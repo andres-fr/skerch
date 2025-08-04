@@ -21,6 +21,7 @@ from skerch.linops import (
 )
 
 from skerch.measurements import (
+    lop_measurement,
     perform_measurements,
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
@@ -117,20 +118,6 @@ class BasicMatrixLinOp:
         return x @ self.matrix
 
 
-def get_meas_vec(idx, meas_lop, device=None, dtype=None, conj=False):
-    """ """
-    if isinstance(meas_lop, torch.Tensor):
-        result = meas_lop[:, idx]
-    elif isinstance(meas_lop, SsrftNoiseLinOp):
-        if device is None or dtype is None:
-            raise ValueError("SsrftNoiseLinop requires device and dtype!")
-        result = meas_lop.get_vector(idx, device, dtype, by_row=False)
-    else:
-        result = meas_lop.get_vector(idx, device)
-    #
-    return result.conj() if conj else result
-
-
 # ##############################################################################
 # # PERFORM MEASUREMENTS
 # ##############################################################################
@@ -145,45 +132,41 @@ def test_perform_measurements_formal():
     m1, m2 = torch.ones((5, 5)), torch.ones((5, 4))
     idxs = list(range(4))
 
-    def meas_fn(idx):
-        return m2[:, idx]
+    def meas_fn(idx, adjoint=False):
+        return idx, m2.conj() @ m1 if adjoint else m1 @ m2[:, idx]
 
     # no parallel raises warning
     with pytest.warns(RuntimeWarning):
         perform_measurements(
-            m1,
             meas_fn,
             idxs,
             adjoint=False,
             parallel_mode=None,
-            as_compact_matrix=False,
+            compact=False,
         )
     # unknown parallel raises error
     with pytest.raises(ValueError):
         perform_measurements(
-            m1,
             meas_fn,
             idxs,
             adjoint=False,
             parallel_mode="...",
-            as_compact_matrix=False,
+            compact=False,
         )
     # correct behavior of as_compact_matrix
     meas_dict = perform_measurements(
-        m1,
         meas_fn,
         idxs,
         adjoint=False,
         parallel_mode=None,
-        as_compact_matrix=False,
+        compact=False,
     )
     meas_idxs, meas_mat = perform_measurements(
-        m1,
         meas_fn,
         idxs,
         adjoint=False,
         parallel_mode=None,
-        as_compact_matrix=True,
+        compact=True,
     )
     #
     assert meas_idxs == list(range(m2.shape[1])), "Incorrect meas_idxs?"
@@ -271,34 +254,25 @@ def test_perform_measurements_correctness(
                             continue
                         # indirect computation of measurements
                         meas_fn = partial(
-                            get_meas_vec,
+                            lop_measurement,
+                            lop=lop,
                             meas_lop=mop,
                             device=device,
                             dtype=dtype,
-                            conj=False,
                         )
                         _, z1 = perform_measurements(
-                            lop,
                             meas_fn,
                             range(mop.shape[1]),
                             adjoint=False,
                             parallel_mode=parall,
-                            as_compact_matrix=True,
-                        )
-                        meas_fn = partial(
-                            get_meas_vec,
-                            meas_lop=mop,
-                            device=device,
-                            dtype=dtype,
-                            conj=True,
+                            compact=True,
                         )
                         _, z2 = perform_measurements(
-                            lop,
                             meas_fn,
                             range(mop.shape[1]),
                             adjoint=True,
                             parallel_mode=parall,
-                            as_compact_matrix=True,
+                            compact=True,
                         )
                         # test that perform_measurements yields same as direct
                         assert torch.allclose(
@@ -313,52 +287,43 @@ def test_perform_measurements_correctness(
                 meas_hw, seed=seed + 1, dtype=dtype, device="cpu"
             )
             meas_fn = partial(
-                get_meas_vec,
+                lop_measurement,
+                lop=mat1,
                 meas_lop=mat2,
                 device=mat2.device,
                 dtype=mat2.dtype,
-                conj=False,
             )
             _, meas1a = perform_measurements(
-                mat1,
                 meas_fn,
                 range(mat2.shape[1]),
                 adjoint=False,
                 parallel_mode=None,
-                as_compact_matrix=True,
+                compact=True,
             )
+
             _, meas1b = perform_measurements(
-                mat1,
                 meas_fn,
                 range(mat2.shape[1]),
                 adjoint=False,
                 parallel_mode="mp",
-                as_compact_matrix=True,
+                compact=True,
             )
             assert (meas1a == meas1b).all(), "Parallel mode alters output?"
             #
-            meas_fn = partial(
-                get_meas_vec,
-                meas_lop=mat2,
-                device=mat2.device,
-                dtype=mat2.dtype,
-                conj=True,
-            )
             _, meas2a = perform_measurements(
-                mat1,
                 meas_fn,
                 range(mat2.shape[1]),
                 adjoint=True,
                 parallel_mode=None,
-                as_compact_matrix=True,
+                compact=True,
             )
+
             _, meas2b = perform_measurements(
-                mat1,
                 meas_fn,
                 range(mat2.shape[1]),
                 adjoint=True,
                 parallel_mode="mp",
-                as_compact_matrix=True,
+                compact=True,
             )
             assert (
                 meas2a == meas2b
@@ -850,57 +815,3 @@ def test_ssrft_correctness(
                 )
                 assert torch.allclose(v1, w1, atol=tol), "issrft(ssrft) != I?"
                 assert torch.allclose(v2, w2, atol=tol), "ssrft(issrft) != I?"
-
-
-# def test_typed_ssrft_linop(rng_seeds, torch_devices, dtypes_tols):
-#     """Test case for extra functionality provided by Typed SSRFT.
-
-#     Specifically:
-#     * Repr creates correct strings
-#     * By row/column results in the same matrix
-#     * Produced matrix is in the requested device and dtype
-#     """
-#     # correct repr string
-#     lop = TypedSsrftNoiseLinOp(
-#         (3, 3), 0, torch.float32, by_row=False, norm="ortho"
-#     )
-#     assert (
-#         str(lop)
-#         == "<TypedSsrftNoiseLinOp(3x3, seed=0, dtype=torch.float32, "
-#         + "by_row=False)>"
-#     ), "Unexpected repr for Typed SSRFT noise linop!"
-#     #
-#     hw = (5, 5)
-#     for seed in rng_seeds:
-#         for dtype, tol in dtypes_tols.items():
-#             lop1 = TypedSsrftNoiseLinOp(
-#                 hw, seed, dtype, by_row=True, norm="ortho"
-#             )
-#             lop2 = TypedSsrftNoiseLinOp(
-#                 hw, seed, dtype, by_row=False, norm="ortho"
-#             )
-#             for device in torch_devices:
-#                 # convert to matrix using by row or by column
-#                 mat1 = torch.zeros(hw, dtype=dtype, device=device)
-#                 mat2 = torch.zeros_like(mat1)
-#                 for idx in range(hw[0]):
-#                     mat1[idx, :] = lop1.get_vector(idx, device)
-#                 for idx in range(hw[1]):
-#                     mat2[:, idx] = lop2.get_vector(idx, device)
-#                 # check that row/col matrices are same
-#                 assert torch.allclose(
-#                     mat1, mat2, atol=tol
-#                 ), "Inconsistent get_vector by row/col?"
-#                 # check correct dtype and device
-#                 assert (
-#                     lop1.get_vector(idx, device).dtype == dtype
-#                 ), "Incorrect row dtype?"
-#                 assert (
-#                     lop2.get_vector(idx, device).dtype == dtype
-#                 ), "Incorrect col dtype?"
-#                 assert (
-#                     lop1.get_vector(idx, device).device.type == device
-#                 ), "Incorrect row device?"
-#                 assert (
-#                     lop2.get_vector(idx, device).device.type == device
-#                 ), "Incorrect col device?"
