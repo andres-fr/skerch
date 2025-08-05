@@ -9,9 +9,10 @@ import pytest
 import torch
 import numpy as np
 
-from skerch.utils import gaussian_noise, svd
+from skerch.utils import gaussian_noise, svd, eigh
 from skerch.synthmat import RandomLordMatrix
 from skerch.recovery import singlepass, compact, nystrom, oversampled
+from skerch.recovery import singlepass_h, compact_h, nystrom_h, oversampled_h
 from . import rng_seeds, torch_devices
 
 
@@ -31,12 +32,21 @@ def dtypes_tols():
 
 
 @pytest.fixture
-def formal_recovery_shapes():
+def general_recovery_shapes():
     """Tuples in the form ``((height, width), rank, outermeas, innermeas)."""
     result = [
         ((50, 50), 5, 25, 35),
         ((40, 50), 5, 25, 35),
         ((50, 40), 5, 25, 35),
+    ]
+    return result
+
+
+@pytest.fixture
+def hermitian_recovery_shapes():
+    """Tuples in the form ``(heigth, rank, outermeas, innermeas)."""
+    result = [
+        (50, 5, 25, 35),
     ]
     return result
 
@@ -75,19 +85,12 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
     diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
     # correctness of result
-    try:
-        assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
-    except:
-        breakpoint()
-
+    assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered U, V
     assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
     assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # correctness of recovered svals
-    try:
-        assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
-    except:
-        breakpoint()
+    assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
     # svals nonnegative and by descending magnitude
     assert (S >= 0).all(), "Negative svals!"
     assert (diff(S) <= 0).all(), "Ascending svals?"
@@ -100,11 +103,41 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
 
 
+def eigh_test_helper(mat, ews, I, ews_rec, evs_rec, atol):
+    """Hermitian eigendecomposition test helper.
+
+    Given the produced EIGH of ``mat``, tests that:
+
+    * The EIGH is actually close to the matrix
+    * The recovered eigvals are close to true ones
+    * Eigenvectors are orthonormal
+    * The devices and dtypes all match
+    """
+    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
+    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
+    V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
+    # correctness of result
+    assert allclose(mat, (V * Lbd) @ Vh, atol=atol), "Incorrect recovery!"
+    # orthogonality of recovered V
+    assert allclose(I, Vh @ V, atol=atol), "Eigvecs not orthogonal?"
+    # correctness of recovered eigvals
+    sorted_Lbd = Lbd[Lbd.argsort()]
+    sorted_ews = ews[ews[: len(Lbd)].argsort()]
+    assert allclose(sorted_ews, sorted_Lbd, atol=atol), "Incorrect eigvals!"
+    # Eigvals by descending magnitude
+    assert (diff(abs(Lbd)) <= 0).all(), "Ascending eigval magnitudes?"
+    # matching device and type
+    assert V.device == mat.device, "Incorrect eigvecs device!"
+    assert Lbd.device == mat.device, "Incorrect eigvals device!"
+    assert V.dtype == mat.dtype, "Incorrect eigvecs dtype!"
+    assert Lbd.dtype == mat.real.dtype, "Incorrect eigvals dtype!"
+
+
 # ##############################################################################
-# # PERFORM MEASUREMENTS
+# # RECOVERY FOR GENERAL MATRICES
 # ##############################################################################
 def test_recovery_general(
-    rng_seeds, torch_devices, dtypes_tols, formal_recovery_shapes
+    rng_seeds, torch_devices, dtypes_tols, general_recovery_shapes
 ):
     """Test case for recovery of general matrices (formal and correctness).
 
@@ -118,7 +151,7 @@ def test_recovery_general(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                for hw, rank, outermeas, innermeas in formal_recovery_shapes:
+                for hw, rank, outermeas, innermeas in general_recovery_shapes:
                     # torch: low-rank matrix, svals and identity
                     I1 = torch.eye(outermeas, dtype=dtype, device=device)
                     mat1, _ = RandomLordMatrix.exp(
@@ -174,7 +207,7 @@ def test_recovery_general(
                     # LOOP OVER CONFIGS
                     conf1 = (I1, mat1, S1, Y1, Z1, C1, rlop1, rilop1, lilop1)
                     conf2 = (I2, mat2, S2, Y2, Z2, C2, rlop2, rilop2, lilop2)
-                    for modality, I, mat, S, Y, Z, C, right, rilop, lilop in (
+                    for mode, I, mat, S, Y, Z, C, right, rilop, lilop in (
                         ("torch", *conf1),
                         ("numpy", *conf2),
                     ):
@@ -183,7 +216,7 @@ def test_recovery_general(
                         try:
                             uv_test_helper(mat, Urec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Singlepass-UV {modality} error!"
+                            errmsg = f"Singlepass-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass - SVD
                         Urec, Srec, Vhrec = singlepass(
@@ -192,35 +225,35 @@ def test_recovery_general(
                         try:
                             svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Singlepass-SVD {modality} error!"
+                            errmsg = f"Singlepass-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # compact - UV
                         Urec, Vhrec = compact(Y, Z, right, as_svd=False)
                         try:
                             uv_test_helper(mat, Urec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Compact-UV {modality} error!"
+                            errmsg = f"Compact-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # compact - SVD
                         Urec, Srec, Vhrec = compact(Y, Z, right, as_svd=True)
                         try:
                             svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Compact-SVD {modality} error!"
+                            errmsg = f"Compact-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # nystrom - UV
                         Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
                         try:
                             uv_test_helper(mat, Urec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Nystrom-UV {modality} error!"
+                            errmsg = f"Nystrom-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # nystrom - SVD
                         Urec, Srec, Vhrec = nystrom(Y, Z, right, as_svd=True)
                         try:
                             svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Nystrom-SVD {modality} error!"
+                            errmsg = f"Nystrom-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # oversampled - UV
                         Urec, Vhrec = oversampled(
@@ -229,7 +262,7 @@ def test_recovery_general(
                         try:
                             uv_test_helper(mat, Urec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Oversampled-UV {modality} error!"
+                            errmsg = f"Oversampled-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # oversampled - SVD
                         Urec, Srec, Vhrec = oversampled(
@@ -238,5 +271,99 @@ def test_recovery_general(
                         try:
                             svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Oversampled-SVD {modality} error!"
+                            errmsg = f"Oversampled-SVD {mode} error!"
+                            raise AssertionError(errmsg) from ae
+
+
+# ##############################################################################
+# # RECOVERY FOR HERMITIAN MATRICES
+# ##############################################################################
+def test_recovery_hermitian(
+    rng_seeds, torch_devices, dtypes_tols, hermitian_recovery_shapes
+):
+    """Test case for recovery of Hermitian matrices (formal and correctness).
+
+    For torch/numpy inputs, and for all recovery methods (in UV/SVD mode),
+    tests that:
+
+    *
+    :func:`svd_test_helper`. This tests that provided outputs are correct,
+    have the expected properties and are in the matching device/dtype.
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for (
+                    dims,
+                    rank,
+                    outermeas,
+                    innermeas,
+                ) in hermitian_recovery_shapes:
+                    hw = (dims, dims)
+                    # torch: low-rank matrix, svals and identity
+                    I1 = torch.eye(outermeas, dtype=dtype, device=device)
+                    mat1, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=100,
+                        diag_ratio=0.0,
+                        symmetric=True,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    ews1, _ = eigh(mat1)
+                    # torch: outer/inner, left/right random measurement linops
+                    rlop1 = gaussian_noise(
+                        (hw[1], outermeas),
+                        seed=seed + 100,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    rilop1 = gaussian_noise(
+                        (hw[1], innermeas),
+                        seed=seed + 102,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    lilop1 = gaussian_noise(
+                        (innermeas, hw[0]),
+                        seed=seed + 103,
+                        device=device,
+                        dtype=dtype,
+                    )
+                    # torch: outer and core random measurements
+                    Y1 = mat1 @ rlop1  # tall
+                    C1 = lilop1 @ (mat1 @ rilop1)  # core
+                    # numpy: all corresponding objects
+                    I2 = I1.cpu().numpy()
+                    mat2 = mat1.cpu().numpy()
+                    ews2 = ews1.cpu().numpy()
+                    Y2, C2 = Y1.cpu().numpy(), C1.cpu().numpy()
+                    rlop2 = rlop1.cpu().numpy()
+                    rilop2 = rilop1.cpu().numpy()
+                    lilop2 = lilop1.cpu().numpy()
+                    # LOOP OVER CONFIGS
+                    conf1 = (I1, mat1, ews1, Y1, C1, rlop1, rilop1, lilop1)
+                    conf2 = (I2, mat2, ews2, Y2, C2, rlop2, rilop2, lilop2)
+                    for mode, I, mat, ews, Y, C, right, rilop, lilop in (
+                        ("torch", *conf1),
+                        ("numpy", *conf2),
+                    ):
+                        # singlepass_h - UV
+                        Urec, Vhrec = singlepass_h(Y, right, as_eigh=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Singlepass_h-UV {mode} error!"
+                            raise AssertionError(errmsg) from ae
+                        # singlepass_h - EIGH
+                        ews_rec, evs_rec = singlepass_h(Y, right, as_eigh=True)
+                        try:
+                            eigh_test_helper(
+                                mat, ews, I, ews_rec, evs_rec, tol
+                            )
+                        except AssertionError as ae:
+                            errmsg = f"Singlepass_h-EIGH {mode} error!"
                             raise AssertionError(errmsg) from ae

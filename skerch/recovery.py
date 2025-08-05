@@ -5,7 +5,6 @@
 """
 
 TODO:
-* implement inner measurement fn, also parallelizable
 * Implement recoveries for symmetric matrices
   - how to handle truncation?
 * extend measurement API to HDF5
@@ -179,3 +178,30 @@ def oversampled(
 # ##############################################################################
 # # RECOVERY FOR SYMMETRIC MATRICES (EIGH)
 # ##############################################################################
+def singlepass_h(
+    sketch_right,
+    mop_right,
+    rcond=1e-8,
+    as_eigh=True,
+):
+    r""" """
+    Q = qr(sketch_right, in_place_q=False, return_R=False)
+    C = lstsq((Q.conj().T @ mop_right).conj().T, sketch_right.conj().T @ Q)
+    if as_eigh:
+        ews, Z = eigh(C)
+        result = ews, Q @ Z
+    else:
+        result = Q, C @ Q.conj().T
+    return result
+
+
+def compact_h():
+    pass
+
+
+def nystrom_h():
+    pass
+
+
+def oversampled_h():
+    pass
