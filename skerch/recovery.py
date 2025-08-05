@@ -115,7 +115,10 @@ def compact(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
     """
     Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
     B = Qh @ mop_right
-    if as_svd:
+    if not as_svd:
+        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        result = YBinv, Qh
+    else:
         P, R = qr(sketch_right, in_place_q=False, return_R=True)
         RBinv = lstsq(B.conj().T, R.conj().T, rcond=rcond).conj().T
 
@@ -131,17 +134,14 @@ def compact(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
             breakpoint()
         U = (P @ Z) * D[0]
         result = U, S, Vh
-    else:
-        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-        result = YBinv, Qh
     return result
 
 
 def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
     """ """
+    Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
     if not as_svd:
         # the original nystrom recovery, cheaper
-        Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
         rightRinv = (
             lstsq(R.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
         )
@@ -149,7 +149,6 @@ def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
     else:
         # return in SVD form, more expensive
         P, S = qr(sketch_right, in_place_q=False, return_R=True)
-        Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
         rightRinv = lstsq(R.conj().T, S.conj().T, rcond=rcond).conj().T
         U, S, Vh = svd(rightRinv @ (Q.conj().T @ sketch_left))
         result = (P @ U), S, Vh
