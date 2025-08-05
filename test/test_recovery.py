@@ -367,3 +367,26 @@ def test_recovery_hermitian(
                         except AssertionError as ae:
                             errmsg = f"Singlepass_h-EIGH {mode} error!"
                             raise AssertionError(errmsg) from ae
+                        # compact_h - EIGH
+                        print(mat)
+                        # ews_rec, evs_rec = compact_h(Y, right, as_eigh=True)
+                        import matplotlib.pyplot as plt
+                        from skerch.utils import qr, svd, lstsq
+
+                        WWW, VVV = eigh(mat)
+                        WWW, VVV = WWW[:25], VVV[:, :25]
+                        Q, R = qr(Y, in_place_q=False, return_R=True)
+                        B = Q.conj().T @ right
+                        RBinv = lstsq(B.conj().T, R.conj().T).conj().T
+                        Z, S2, _ = svd(RBinv.conj().T @ RBinv)
+                        # torch.dist(Q.H @ mat.H @ mat @ Q, )
+
+                        # plt.clf(); plt.imshow(evs_rec.H @ mat @ evs_rec); plt.show()
+                        breakpoint()
+                        try:
+                            eigh_test_helper(
+                                mat, ews, I, ews_rec, evs_rec, tol
+                            )
+                        except AssertionError as ae:
+                            errmsg = f"Compact_h-EIGH {mode} error!"
+                            raise AssertionError(errmsg) from ae

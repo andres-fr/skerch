@@ -125,13 +125,11 @@ def compact(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
         Z, S2, _ = svd(RBinv.conj().T @ RBinv)
         S = S2**0.5
         Vh = Z.conj().T @ Qh
-        #
+        # stabilized recovery of U: create a fully orthogonal, compact Z
+        # via QR (we need to rectify the sign-flips from R)
         Z, D = qr(RBinv @ Z, return_R=True)
-        try:
-            D[0] = 2 * (D[range(len(D)), range(len(D))].real > 0) - 1
-        except:
-            breakpoint()
-        U = (P @ Z) * D[0]
+        D[0] = 2 * (D[range(len(D)), range(len(D))].real > 0) - 1
+        U = P @ (Z * D[0])
         result = U, S, Vh
     return result
 
@@ -195,8 +193,42 @@ def singlepass_h(
     return result
 
 
-def compact_h():
-    pass
+def compact_h(
+    sketch_right,
+    mop_right,
+    rcond=1e-8,
+    as_eigh=True,
+):
+    """ """
+    Q, R = qr(sketch_right, in_place_q=False, return_R=True)
+    B = Q.conj().T @ mop_right
+    if not as_eigh:
+        Q = qr(sketch_right, in_place_q=False, return_R=False)
+        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        result = YBinv, Qh
+    else:
+        RBinv = lstsq(B.conj().T, R.conj().T, rcond=rcond).conj().T
+        Z, S2, _ = svd(RBinv.conj().T @ RBinv)
+        breakpoint()
+        V = Q @ Z
+        result = S2, V
+
+        # esto es correctamente mat.H @ mat.
+
+        # breakpoint()
+        # # BRinv = lstsq(R.conj().T, B.conj().T, rcond=rcond).conj().T
+
+        # S = S2**0.5
+        # Vh = Z.conj().T @ Qh
+        # #
+        # Z, D = qr(RBinv @ Z, return_R=True)
+        # try:
+        #     D[0] = 2 * (D[range(len(D)), range(len(D))].real > 0) - 1
+        # except:
+        #     breakpoint()
+        # U = (P @ Z) * D[0]
+        # result = U, S, Vh
+    return result
 
 
 def nystrom_h():
