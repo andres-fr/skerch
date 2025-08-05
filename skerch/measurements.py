@@ -5,7 +5,7 @@
 """
 """
 
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
 from functools import partial
 
 from collections import defaultdict
@@ -28,7 +28,7 @@ from .utils import (
 
 
 # ##############################################################################
-# # HELPERS
+# # CONVENIENCE WRAPPERS
 # ##############################################################################
 def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
     """ """
@@ -41,7 +41,7 @@ def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
     else:
         measvec = meas_lop.get_vector(idx, device)
     #
-    result = measvec.conj() @ lop if adjoint else lop @ measvec
+    result = (measvec.conj() @ lop) if adjoint else (lop @ measvec)
     return idx, result
 
 
@@ -51,18 +51,23 @@ def perform_measurements(
     adjoint=False,
     parallel_mode=None,
     compact=False,
+    max_mp_workers=None,
 ):
     """ """
     result = {}
     meas_fn = partial(meas_fn, adjoint=adjoint)
     #
     if parallel_mode is None:
-        warnings.warn("CPU measurements can be parallelized", RuntimeWarning)
+        warnings.warn(
+            "CPU measurements could be parallelized with parallel_mode=mp",
+            RuntimeWarning,
+        )
         for idx in meas_idxs:
             result[idx] = meas_fn(idx)[1]
     #
     elif parallel_mode == "mp":
-        with ProcessPoolExecutor() as pool:
+        # keep an eye on this, could hang
+        with ProcessPoolExecutor(max_workers=max_mp_workers) as pool:
             result = dict(pool.map(meas_fn, meas_idxs))
     #
     else:
@@ -70,9 +75,9 @@ def perform_measurements(
     #
     if compact:
         sorted_idxs = sorted(result)
-        result = torch.stack([result[idx] for idx in sorted_idxs])
-        if not adjoint:
-            result = result.T
+        result = torch.stack(
+            [result[idx] for idx in sorted_idxs], dim=0 if adjoint else 1
+        )
         result = (sorted_idxs, result)
     return result
 

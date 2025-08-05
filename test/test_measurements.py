@@ -15,10 +15,7 @@ import pytest
 import torch
 from functools import partial
 
-from skerch.linops import (
-    linop_to_matrix,
-    TransposedLinOp,
-)
+from skerch.linops import linop_to_matrix, TransposedLinOp, CompositeLinOp
 
 from skerch.measurements import (
     lop_measurement,
@@ -32,7 +29,12 @@ from skerch.measurements import (
 
 from skerch.utils import gaussian_noise, BadShapeError, BadSeedError
 
-from . import rng_seeds, torch_devices, autocorrelation_test_helper
+from . import (
+    rng_seeds,
+    torch_devices,
+    autocorrelation_test_helper,
+    max_mp_workers,
+)
 
 
 # ##############################################################################
@@ -195,6 +197,7 @@ def test_perform_measurements_correctness(
     dtypes_tols,
     iid_noise_linop_types,
     parallel_modes,
+    max_mp_workers,
 ):
     """Test case for correctness of perform_measurements:
 
@@ -248,11 +251,12 @@ def test_perform_measurements_correctness(
                     # direct computation of measurements
                     y1 = mat @ mm
                     y2 = mm.H @ mat
+                    y3 = mm.H @ y1
                     for parall in parallel_modes:
                         # mp only works on CPU
                         if parall == "mp" and device != "cpu":
                             continue
-                        # indirect computation of measurements
+                        # indirect computation of measurements:
                         meas_fn = partial(
                             lop_measurement,
                             lop=lop,
@@ -266,6 +270,7 @@ def test_perform_measurements_correctness(
                             adjoint=False,
                             parallel_mode=parall,
                             compact=True,
+                            max_mp_workers=max_mp_workers,
                         )
                         _, z2 = perform_measurements(
                             meas_fn,
@@ -273,6 +278,7 @@ def test_perform_measurements_correctness(
                             adjoint=True,
                             parallel_mode=parall,
                             compact=True,
+                            max_mp_workers=max_mp_workers,
                         )
                         # test that perform_measurements yields same as direct
                         assert torch.allclose(
@@ -281,6 +287,50 @@ def test_perform_measurements_correctness(
                         assert torch.allclose(
                             y2, z2, atol=tol
                         ), "Wrong perform_measurements (adj)?"
+                        # added test for inner measurements:
+                        # (mop.H @ lop) @ mop
+                        mopTlop = CompositeLinOp(
+                            [("mop.H", TransposedLinOp(mop)), ("lop", lop)]
+                        )
+                        meas_fn = partial(
+                            lop_measurement,
+                            lop=mopTlop,
+                            meas_lop=mop,
+                            device=device,
+                            dtype=dtype,
+                        )
+                        _, z3 = perform_measurements(
+                            meas_fn,
+                            range(mop.shape[1]),
+                            adjoint=False,
+                            parallel_mode=parall,
+                            compact=True,
+                            max_mp_workers=max_mp_workers,
+                        )
+                        assert torch.allclose(
+                            y3, z3, atol=tol
+                        ), "Wrong inner perform_measurements (fwd)?"
+                        # mop.H @ (lop @ mop)
+                        lopmop = CompositeLinOp([("lop", lop), ("mop", mop)])
+                        meas_fn = partial(
+                            lop_measurement,
+                            lop=lopmop,
+                            meas_lop=mop,
+                            device=device,
+                            dtype=dtype,
+                        )
+                        _, z4 = perform_measurements(
+                            meas_fn,
+                            range(mop.shape[1]),
+                            adjoint=True,
+                            parallel_mode=parall,
+                            compact=True,
+                            max_mp_workers=max_mp_workers,
+                        )
+                        assert torch.allclose(
+                            y3, z4, atol=tol
+                        ), "Wrong inner perform_measurements (adj)?"
+
             # on CPU, test that all different parallel modes yield same result
             mat1 = gaussian_noise(hw, seed=seed, dtype=dtype, device="cpu")
             mat2 = gaussian_noise(
@@ -307,6 +357,7 @@ def test_perform_measurements_correctness(
                 adjoint=False,
                 parallel_mode="mp",
                 compact=True,
+                max_mp_workers=max_mp_workers,
             )
             assert (meas1a == meas1b).all(), "Parallel mode alters output?"
             #
@@ -324,6 +375,7 @@ def test_perform_measurements_correctness(
                 adjoint=True,
                 parallel_mode="mp",
                 compact=True,
+                max_mp_workers=max_mp_workers,
             )
             assert (
                 meas2a == meas2b

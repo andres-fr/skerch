@@ -260,19 +260,25 @@ class TransposedLinOp:
         """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
         # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
         x_vec = len(x.shape) == 1
-        x = x.conj() if x_vec else x.H
-        x = x @ self.lop
-        x = x.conj() if x_vec else x.H
-        return x
+        result = (x.conj().T @ self.lop).T
+        # result.conj() did not work with multiprocessing (bug?)
+        try:
+            result.imag *= -1
+        except RuntimeError:
+            pass
+        return result
 
     def __rmatmul__(self, x):
         """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
         # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
         x_vec = len(x.shape) == 1
-        x = x.conj() if x_vec else x.H
-        x = self.lop @ x
-        x = x.conj() if x_vec else x.H
-        return x
+        result = (self.lop @ x.conj().T).T
+        # result.conj() did not work with multiprocessing (bug?)
+        try:
+            result.imag *= -1
+        except RuntimeError:
+            pass
+        return result
 
     def t(self):
         """Undo transposition"""
