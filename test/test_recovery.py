@@ -11,8 +11,8 @@ import numpy as np
 
 from skerch.utils import gaussian_noise, svd, eigh
 from skerch.synthmat import RandomLordMatrix
-from skerch.recovery import singlepass, compact, nystrom, oversampled
-from skerch.recovery import singlepass_h, compact_h, nystrom_h, oversampled_h
+from skerch.recovery import singlepass, nystrom, oversampled
+from skerch.recovery import singlepass_h, nystrom_h, oversampled_h
 from . import rng_seeds, torch_devices
 
 
@@ -101,6 +101,24 @@ def svd_test_helper(mat, svals, I, U, S, Vh, atol):
     assert U.dtype == mat.dtype, "Incorrect U dtype!"
     assert S.dtype == mat.real.dtype, "Incorrect S dtype!"
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
+
+
+def qc_test_helper(mat, I, core_rec, q_rec, atol):
+    """ """
+    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
+    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
+    C, Q, Qh = core_rec, q_rec, q_rec.conj().T
+    # correctness of result
+    assert allclose(mat, Q @ C @ Qh, atol=atol), "Incorrect recovery!"
+    # orthogonality of recovered Q
+    assert allclose(I, Qh @ Q, atol=atol), "Eigvecs not orthogonal?"
+    # simmetry of recovered core
+    assert allclose(C, C.conj().T, atol=atol), "Core not hermitian?"
+    # matching device and type
+    assert Q.device == mat.device, "Incorrect Q device!"
+    assert C.device == mat.device, "Incorrect core device!"
+    assert Q.dtype == mat.dtype, "Incorrect Q dtype!"
+    assert C.dtype == mat.dtype, "Incorrect core dtype!"
 
 
 def eigh_test_helper(mat, ews, I, ews_rec, evs_rec, atol):
@@ -227,20 +245,6 @@ def test_recovery_general(
                         except AssertionError as ae:
                             errmsg = f"Singlepass-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
-                        # compact - UV
-                        Urec, Vhrec = compact(Y, Z, right, as_svd=False)
-                        try:
-                            uv_test_helper(mat, Urec, Vhrec, tol)
-                        except AssertionError as ae:
-                            errmsg = f"Compact-UV {mode} error!"
-                            raise AssertionError(errmsg) from ae
-                        # compact - SVD
-                        Urec, Srec, Vhrec = compact(Y, Z, right, as_svd=True)
-                        try:
-                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
-                        except AssertionError as ae:
-                            errmsg = f"Compact-SVD {mode} error!"
-                            raise AssertionError(errmsg) from ae
                         # nystrom - UV
                         Urec, Vhrec = nystrom(Y, Z, right, as_svd=False)
                         try:
@@ -351,12 +355,12 @@ def test_recovery_hermitian(
                         ("torch", *conf1),
                         ("numpy", *conf2),
                     ):
-                        # singlepass_h - UV
-                        Urec, Vhrec = singlepass_h(Y, right, as_eigh=False)
+                        # singlepass_h - QCQh
+                        Crec, Qrec = singlepass_h(Y, right, as_eigh=False)
                         try:
-                            uv_test_helper(mat, Urec, Vhrec, tol)
+                            qc_test_helper(mat, I, Crec, Qrec, tol)
                         except AssertionError as ae:
-                            errmsg = f"Singlepass_h-UV {mode} error!"
+                            errmsg = f"Singlepass_h-QCQh {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass_h - EIGH
                         ews_rec, evs_rec = singlepass_h(Y, right, as_eigh=True)
@@ -366,27 +370,4 @@ def test_recovery_hermitian(
                             )
                         except AssertionError as ae:
                             errmsg = f"Singlepass_h-EIGH {mode} error!"
-                            raise AssertionError(errmsg) from ae
-                        # compact_h - EIGH
-                        print(mat)
-                        # ews_rec, evs_rec = compact_h(Y, right, as_eigh=True)
-                        import matplotlib.pyplot as plt
-                        from skerch.utils import qr, svd, lstsq
-
-                        WWW, VVV = eigh(mat)
-                        WWW, VVV = WWW[:25], VVV[:, :25]
-                        Q, R = qr(Y, in_place_q=False, return_R=True)
-                        B = Q.conj().T @ right
-                        RBinv = lstsq(B.conj().T, R.conj().T).conj().T
-                        Z, S2, _ = svd(RBinv.conj().T @ RBinv)
-                        # torch.dist(Q.H @ mat.H @ mat @ Q, )
-
-                        # plt.clf(); plt.imshow(evs_rec.H @ mat @ evs_rec); plt.show()
-                        breakpoint()
-                        try:
-                            eigh_test_helper(
-                                mat, ews, I, ews_rec, evs_rec, tol
-                            )
-                        except AssertionError as ae:
-                            errmsg = f"Compact_h-EIGH {mode} error!"
                             raise AssertionError(errmsg) from ae

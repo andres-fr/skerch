@@ -9,7 +9,7 @@ TODO:
   - how to handle truncation?
 * extend measurement API to HDF5
   - add HDF5 bells and whistles
-
+  - gonna need to test recovery when mop are linops (we are doing .H and stuff)
 at this point, we will have:
 - nice lord synthmats
 - all linops and linop support we need
@@ -94,43 +94,14 @@ def singlepass(
     Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
     B = Qh @ mop_right
     if as_svd:
-        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-        U, S, Vh = svd(YBinv)
-        result = U, S, (Vh @ Qh)
+        P, S = qr(sketch_right, in_place_q=False, return_R=True)
+        core = lstsq(B.conj().T, S.conj().T).conj().T
+        U, S, Vh = svd(core)
+        result = (P @ U), S, (Vh @ Qh)
+
     else:
         YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
         result = YBinv, Qh
-    return result
-
-
-def compact(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
-    """Recovering the SVD of a matrix ``L`` from left and right sketches.
-
-    This function is an extension of :func:`singlepass`, using a more compact
-    procedure when ``as_svd`` is true. In that case, this method has one more
-    *thin* QR decomposition than single-pass, but all other numerical
-    linear algebra routines are compact, which may result in substantial
-    speedup depending on problem dimensionality.
-    """
-    Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
-    B = Qh @ mop_right
-    if not as_svd:
-        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-        result = YBinv, Qh
-    else:
-        P, R = qr(sketch_right, in_place_q=False, return_R=True)
-        RBinv = lstsq(B.conj().T, R.conj().T, rcond=rcond).conj().T
-
-        BRinv = lstsq(R.conj().T, B.conj().T, rcond=rcond).conj().T
-        Z, S2, _ = svd(RBinv.conj().T @ RBinv)
-        S = S2**0.5
-        Vh = Z.conj().T @ Qh
-        # stabilized recovery of U: create a fully orthogonal, compact Z
-        # via QR (we need to rectify the sign-flips from R)
-        Z, D = qr(RBinv @ Z, return_R=True)
-        D[0] = 2 * (D[range(len(D)), range(len(D))].real > 0) - 1
-        U = P @ (Z * D[0])
-        result = U, S, Vh
     return result
 
 
@@ -184,50 +155,13 @@ def singlepass_h(
 ):
     r""" """
     Q = qr(sketch_right, in_place_q=False, return_R=False)
-    C = lstsq((Q.conj().T @ mop_right).conj().T, sketch_right.conj().T @ Q)
+    B = Q.conj().T @ mop_right
+    core = lstsq(B.conj().T, sketch_right.conj().T @ Q).conj().T
     if as_eigh:
-        ews, Z = eigh(C)
+        ews, Z = eigh(core)
         result = ews, Q @ Z
     else:
-        result = Q, C @ Q.conj().T
-    return result
-
-
-def compact_h(
-    sketch_right,
-    mop_right,
-    rcond=1e-8,
-    as_eigh=True,
-):
-    """ """
-    Q, R = qr(sketch_right, in_place_q=False, return_R=True)
-    B = Q.conj().T @ mop_right
-    if not as_eigh:
-        Q = qr(sketch_right, in_place_q=False, return_R=False)
-        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-        result = YBinv, Qh
-    else:
-        RBinv = lstsq(B.conj().T, R.conj().T, rcond=rcond).conj().T
-        Z, S2, _ = svd(RBinv.conj().T @ RBinv)
-        breakpoint()
-        V = Q @ Z
-        result = S2, V
-
-        # esto es correctamente mat.H @ mat.
-
-        # breakpoint()
-        # # BRinv = lstsq(R.conj().T, B.conj().T, rcond=rcond).conj().T
-
-        # S = S2**0.5
-        # Vh = Z.conj().T @ Qh
-        # #
-        # Z, D = qr(RBinv @ Z, return_R=True)
-        # try:
-        #     D[0] = 2 * (D[range(len(D)), range(len(D))].real > 0) - 1
-        # except:
-        #     breakpoint()
-        # U = (P @ Z) * D[0]
-        # result = U, S, Vh
+        result = core, Q
     return result
 
 
