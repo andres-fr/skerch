@@ -157,16 +157,51 @@ def singlepass_h(
     Q = qr(sketch_right, in_place_q=False, return_R=False)
     B = Q.conj().T @ mop_right
     core = lstsq(B.conj().T, sketch_right.conj().T @ Q).conj().T
-    if as_eigh:
+    if not as_eigh:
+        result = core, Q
+    else:
         ews, Z = eigh(core)
         result = ews, Q @ Z
-    else:
-        result = core, Q
     return result
 
 
-def nystrom_h():
-    pass
+def nystrom_h(
+    sketch_right,
+    mop_right,
+    rcond=1e-8,
+    as_eigh=True,
+):
+    """ """
+    Q, R = qr(sketch_right @ mop_right, in_place_q=False, return_R=True)
+
+    breakpoint()
+    B = Q.conj().T @ mop_right
+    core = lstsq(B.conj().T, sketch_right.conj().T @ Q).conj().T
+
+    if not as_eigh:
+        result = NotImplemented
+    else:
+        result = NotImplemented
+    return result
+    breakpoint()
+
+
+# def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-8, as_svd=True):
+#     """ """
+#     Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
+#     if not as_svd:
+#         # the original nystrom recovery, cheaper
+#         rightRinv = (
+#             lstsq(R.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+#         )
+#         result = rightRinv, (Q.conj().T @ sketch_left)  # U, Vh
+#     else:
+#         # return in SVD form, more expensive
+#         P, S = qr(sketch_right, in_place_q=False, return_R=True)
+#         rightRinv = lstsq(R.conj().T, S.conj().T, rcond=rcond).conj().T
+#         U, S, Vh = svd(rightRinv @ (Q.conj().T @ sketch_left))
+#         result = (P @ U), S, Vh
+#     return result
 
 
 def oversampled_h():

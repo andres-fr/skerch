@@ -13,7 +13,7 @@ from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
 from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
-from skerch.utils import qr, pinv, lstsq, svd, eigh
+from skerch.utils import qr, pinv, lstsq, svd, eigh, htr
 
 from . import rng_seeds, torch_devices, autocorrelation_test_helper
 
@@ -529,3 +529,79 @@ def test_eigh(rng_seeds, torch_devices, dtypes_tols):
                     assert (
                         ews2.dtype == arr.real.dtype
                     ), "Incorrect numpy ew dtype?"
+
+
+def test_htr(rng_seeds, torch_devices, dtypes_tols):
+    """Test case for Hermitian eigdecomp wrapper (formal and correctness)
+
+    * Works for torch and numpy
+    * Works for vectors and matrices with no warning
+    * force_copy returns a brand new copy
+    """
+    h, w = (10, 2)
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                m1 = gaussian_noise((h, w), 0, 1, seed, dtype, device)
+                v1 = gaussian_noise(h, 0, 1, seed + 1, dtype, device)
+                m2 = m1.cpu().numpy()
+                v2 = v1.cpu().numpy()
+                # copy transpositions
+                m1H = htr(m1, in_place=False)
+                v1H = htr(v1, in_place=False)
+                m2H = htr(m2, in_place=False)
+                v2H = htr(v2, in_place=False)
+                # correctness
+                assert (
+                    m1.H == m1H
+                ).all(), "Incorrect torch mat transp! (inplace=False)"
+                assert (
+                    v1.conj() == v1H
+                ).all(), "Incorrect torch vec transp! (inplace=False)"
+                assert (
+                    m2.conj().T == m2H
+                ).all(), "Incorrect np mat transp! (inplace=False)"
+                assert (
+                    v2.conj() == v2H
+                ).all(), "Incorrect np vec transp! (inplace=False)"
+                # check that a new copy was returned: modify the returned H and
+                # check it is different to original
+                m1H += 1
+                v1H += 1
+                m2H += 1
+                v2H += 1
+                assert (m1.conj().T != m1H).all(), "Forcecopy torch mat error?"
+                assert (v1.conj() != v1H).all(), "Forcecopy torch vec error?"
+                assert (m2.conj().T != m2H).all(), "Forcecopy np mat error?"
+                assert (v2.conj() != v2H).all(), "Forcecopy np vec error?"
+                # in-place transpositions
+                m1b = htr(m1, in_place=True)
+                v1b = htr(v1, in_place=True)
+                m2b = htr(m2, in_place=True)
+                v2b = htr(v2, in_place=True)
+                # correctness: ori.T = ori_T_conj because conj was inplace
+                try:
+                    assert (
+                        m1.T == m1b
+                    ).all(), "Incorrect torch mat transp! (inplace=True)"
+                except:
+                    breakpoint()
+                assert (
+                    v1 == v1b
+                ).all(), "Incorrect torch vec transp! (inplace=True)"
+                assert (
+                    m2.T == m2b
+                ).all(), "Incorrect np mat transp! (inplace=True)"
+                assert (
+                    v2 == v2b
+                ).all(), "Incorrect np vec transp! (inplace=True)"
+                # check that just a view was returned: modify the returned H
+                # and correctness tests still hold
+                m1b += 1
+                v1b += 1
+                m2b += 1
+                v2b += 1
+                assert (m1.T == m1b).all(), "View torch mat error?"
+                assert (v1 == v1b).all(), "View torch vec error?"
+                assert (m2.T == m2b).all(), "View np mat error?"
+                assert (v2 == v2b).all(), "View np vec error?"

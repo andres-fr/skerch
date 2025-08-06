@@ -6,6 +6,7 @@
 
 
 import torch
+import numpy as np
 import scipy
 
 # ##############################################################################
@@ -315,3 +316,48 @@ def eigh(A, by_descending_magnitude=True):
     # sort eigenpairs and return
     ews, evs = ews[idxs], evs[:, idxs]
     return ews, evs
+
+
+def htr(x, in_place=False):
+    """Hermitian transposition.
+
+    This convenience wrapper exists for several reasons:
+    * While torch supports `.H`, numpy does not.
+    * In multiprocessing settings, `.conj()` seems to sometimes not work,
+      which is likely related to in_place/view/copy behaviour.
+    * Transposition of vectors via `.T` throws a warning since it is a no-op.
+
+    This function avoids all three issues, by returning the input as a
+    conjugate, and also transposed if it is a matrix.
+
+    :param x: Numpy or Torch object, expected to be a vector or matrix
+      (undefined behaviour otherwise).
+    :param in_place: If True, the imaginary entries are flipped in-place.
+      Otherwise, a new copy of the input is always returned. No in-between
+      View behaviour is possible (thus this function may be suboptimal
+      in some circumstances, but avoids multiprocessing issues).
+    :returns: The Hermitian transpose of ``x`` (if matrix), or the compex
+      conjugate if vector. Undefined otherwise.
+    """
+    x = x.transpose(0, -1) if isinstance(x, torch.Tensor) else x.T
+    if isinstance(x, torch.Tensor):
+        if not in_place:
+            x = x.clone()
+        #
+        try:  # conj() seems buggy in multiprocessing contexts
+            x.imag *= -1
+        except RuntimeError:
+            pass  # x is not complex, ignore
+    # numpy array-like
+    else:
+        # conj() here works, but often returns a copy
+        if not in_place:
+            xconj = x.conj()
+            x = xconj.copy() if np.shares_memory(x, xconj) else xconj
+        else:
+            try:
+                x.imag *= -1
+            except ValueError:
+                pass  # x is not complex, ignore
+    #
+    return x

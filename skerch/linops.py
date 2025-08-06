@@ -15,7 +15,7 @@ default linear operators (composite, diagonal...).
 
 import torch
 
-from .utils import BadShapeError
+from .utils import BadShapeError, htr
 
 
 # ##############################################################################
@@ -259,25 +259,33 @@ class TransposedLinOp:
     def __matmul__(self, x):
         """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
         # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
-        x_vec = len(x.shape) == 1
-        result = (x.conj().T @ self.lop).T
-        # result.conj() did not work with multiprocessing (bug?)
-        try:
-            result.imag *= -1
-        except RuntimeError:
-            pass
+        # x_vec = len(x.shape) == 1
+        # result = (x.conj().T @ self.lop).T
+        # # result.conj() did not work with multiprocessing (bug?)
+        # try:
+        #     result.imag *= -1
+        # except RuntimeError:
+        #     pass
+
+        # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
+        # in-place conjugation did not work with multiprocessing (bug?)
+        result = htr((htr(x, in_place=False) @ self.lop), in_place=False)
         return result
 
     def __rmatmul__(self, x):
         """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
         # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
-        x_vec = len(x.shape) == 1
-        result = (self.lop @ x.conj().T).T
-        # result.conj() did not work with multiprocessing (bug?)
-        try:
-            result.imag *= -1
-        except RuntimeError:
-            pass
+        # x_vec = len(x.shape) == 1
+        # result = (self.lop @ x.conj().T).T
+        # # result.conj() did not work with multiprocessing (bug?)
+        # try:
+        #     result.imag *= -1
+        # except RuntimeError:
+        #     pass
+
+        # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
+        # in-place conjugation did not work with multiprocessing (bug?)
+        result = htr(self.lop @ htr(x, in_place=False), in_place=False)
         return result
 
     def t(self):

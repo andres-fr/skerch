@@ -5,7 +5,7 @@
 """
 """
 
-from concurrent.futures import ProcessPoolExecutor, as_completed, TimeoutError
+from concurrent.futures import ProcessPoolExecutor
 from functools import partial
 
 from collections import defaultdict
