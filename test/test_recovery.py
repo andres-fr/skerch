@@ -387,3 +387,23 @@ def test_recovery_hermitian(
                         except AssertionError as ae:
                             errmsg = f"Nystrom_h-EIGH {mode} error!"
                             raise AssertionError(errmsg) from ae
+                        # oversampled_h - QCQh
+                        Crec, Qrec = oversampled_h(
+                            Y, C, lilop, rilop, as_eigh=False
+                        )
+                        try:
+                            qc_test_helper(mat, I, Crec, Qrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Oversampled_h-QCQh {mode} error!"
+                            raise AssertionError(errmsg) from ae
+                        # oversampled_h - EIGH
+                        ews_rec, evs_rec = oversampled_h(
+                            Y, C, lilop, rilop, as_eigh=True
+                        )
+                        try:
+                            eigh_test_helper(
+                                mat, ews, I, ews_rec, evs_rec, tol
+                            )
+                        except AssertionError as ae:
+                            errmsg = f"Oversampled_h-EIGH {mode} error!"
+                            raise AssertionError(errmsg) from ae

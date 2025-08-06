@@ -4,6 +4,11 @@
 
 """
 
+        BUG!!!
+
+        double conj, and also there is a core.T without conj??????
+        perhaps related, double-conj cancelled?
+
 TODO:
 * Implement recoveries for symmetric matrices
   - how to handle truncation?
@@ -176,7 +181,6 @@ def nystrom_h(
 ):
     """ """
     if not as_eigh:
-        # Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
         coreInvSt = lstsq(
             sketch_right.conj().T @ mop_right,
             sketch_right.conj().T,
@@ -193,5 +197,20 @@ def nystrom_h(
     return result
 
 
-def oversampled_h():
-    pass
+def oversampled_h(
+    sketch_right,
+    sketch_inner,
+    lilop,
+    rilop,
+    as_eigh=True,
+):
+    """ """
+    P = qr(sketch_right, in_place_q=False, return_R=False)
+    core = lstsq(lilop @ P, sketch_inner)
+    core = lstsq((rilop.conj().T @ P), core.conj().T).conj().T
+    if not as_eigh:
+        result = core, P
+    else:
+        ews, Z = eigh(core)
+        result = ews, P @ Z
+    return result
