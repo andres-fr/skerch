@@ -278,8 +278,8 @@ def lstsq(A, b, rcond=1e-6):
     """
     if isinstance(A, torch.Tensor):
         # do not use default gelsy driver: nondeterm results yielding errors
-        # gels is the only only CUDA-compatible and works, so fix that
-        result = torch.linalg.lstsq(A, b, rcond=rcond, driver="gels").solution
+        driver = "gels" if b.device.type == "cuda" else "gelsd"
+        result = torch.linalg.lstsq(A, b, rcond=rcond, driver=driver).solution
     else:
         result = scipy.linalg.lstsq(A, b, cond=rcond, lapack_driver="gelsd")[0]
     return result
@@ -319,7 +319,7 @@ def eigh(A, by_descending_magnitude=True):
 
 
 def htr(x, in_place=False):
-    """Hermitian transposition.
+    """Hermitian transposition wrapper.
 
     This convenience wrapper exists for several reasons:
     * While torch supports `.H`, numpy does not.
