@@ -175,38 +175,22 @@ def nystrom_h(
     as_eigh=True,
 ):
     """ """
-    Q, R = qr(sketch_right @ mop_right, in_place_q=False, return_R=True)
-
-    B = Q.conj().T @ mop_right
-    core = htr(lstsq(B.conj().T, sketch_right.conj().T @ Q), inplace=True)
-
     if not as_eigh:
-        result = NotImplemented
+        # Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
+        coreInvSt = lstsq(
+            sketch_right.conj().T @ mop_right,
+            sketch_right.conj().T,
+            rcond=rcond,
+        )
+        result = sketch_right, coreInvSt
     else:
-        result = NotImplemented
+        P, S = qr(sketch_right, in_place_q=False, return_R=True)
+        coreInvSt = lstsq(
+            sketch_right.conj().T @ mop_right, S.conj().T, rcond=rcond
+        )
+        ews, Z = eigh(S @ coreInvSt)
+        result = ews, P @ Z
     return result
-    breakpoint()
-
-
-# def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-6, as_svd=True):
-#     """ """
-#     if not as_svd:
-#         # the original nystrom recovery, cheaper
-#         Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
-#         rightRinv = (
-#             lstsq(R.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-#         )
-#         result = rightRinv, (Q.conj().T @ sketch_left)  # U, Vh
-#     else:
-#         # return in SVD form, more expensive
-#         # orthogonalization of sketches is needed
-#         P1, S1 = qr(sketch_right, in_place_q=False, return_R=True)
-#         P2, S2 = qr(sketch_left.conj().T, in_place_q=False, return_R=True)
-#         # now invert the Nystrom core upon S2 and compute a small SVD with S1
-#         coreInvS2t = lstsq(sketch_left @ mop_right, S2.conj().T, rcond=rcond)
-#         U, S, Vh = svd(S1 @ coreInvS2t)
-#         result = (P1 @ U), S, (Vh @ P2.conj().T)
-#     return result
 
 
 def oversampled_h():

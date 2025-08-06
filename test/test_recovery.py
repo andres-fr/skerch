@@ -371,3 +371,19 @@ def test_recovery_hermitian(
                         except AssertionError as ae:
                             errmsg = f"Singlepass_h-EIGH {mode} error!"
                             raise AssertionError(errmsg) from ae
+                        # nystrom_h - UV
+                        Urec, Vhrec = nystrom_h(Y, right, as_eigh=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"Nystrom_h-UV {mode} error!"
+                            raise AssertionError(errmsg) from ae
+                        # nystrom_h - EIGH
+                        ews_rec, evs_rec = nystrom_h(Y, right, as_eigh=True)
+                        try:
+                            eigh_test_helper(
+                                mat, ews, I, ews_rec, evs_rec, tol
+                            )
+                        except AssertionError as ae:
+                            errmsg = f"Nystrom_h-EIGH {mode} error!"
+                            raise AssertionError(errmsg) from ae
