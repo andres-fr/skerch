@@ -43,15 +43,66 @@ def ssvd_recovery_shapes(request):
     return result
 
 
+@pytest.fixture
+def noise_types():
+    """ """
+    result = ["rademacher", "gaussian", "phase", "ssrft"]
+    return result
+
+
+# ##############################################################################
+# # HELPERS
+# ##############################################################################
+class BasicMatrixLinOp:
+    """Intentionally simple linop, only supporting ``shape`` and @."""
+
+    def __init__(self, matrix):
+        """ """
+        self.matrix = matrix
+        self.shape = matrix.shape
+
+    def __matmul__(self, x):
+        """ """
+        return self.matrix @ x
+
+    def __rmatmul__(self, x):
+        """ """
+        return x @ self.matrix
+
+
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
 def test_ssvd_correctness(
-    rng_seeds, torch_devices, dtypes_tols, ssvd_recovery_shapes
+    rng_seeds, torch_devices, dtypes_tols, ssvd_recovery_shapes, noise_types
 ):
     """ """
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
                 for hw, rank, outermeas, innermeas in ssvd_recovery_shapes:
-                    breakpoint()
+                    mat, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=100,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    lop = BasicMatrixLinOp(mat)
+                    #
+                    for noise_type in noise_types:
+                        # singlepass recovery
+                        U, S, Vh = ssvd(
+                            lop,
+                            device,
+                            dtype,
+                            outermeas,
+                            seed + 1,
+                            noise_type,
+                            "singlepass",
+                        )
+                        breakpoint()
