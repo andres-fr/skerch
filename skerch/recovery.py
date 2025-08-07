@@ -2,54 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""
-
-        BUG!!!
-
-        double conj, and also there is a core.T without conj??????
-        perhaps related, double-conj cancelled?
-
-TODO:
-* Implement recoveries for symmetric matrices
-  - how to handle truncation?
-* extend measurement API to HDF5
-  - add HDF5 bells and whistles
-  - gonna need to test recovery when mop are linops (we are doing .H and stuff)
-at this point, we will have:
-- nice lord synthmats
-- all linops and linop support we need
-- nice measurement API working on parallel single core or HDF5 distributed
-- all recovery methods we could care about, for general and symmetric
-
-Remaining:
-* add all in-core algorithms
-* a-priori/posteriori stuff
-* out-of-core wrappers for QR, SVD, LSTSQ
-
-The idea is to
-1. Write all in-core algorithms, modularly. code should look very compact
-  - Ensure building blocks allow for flawless adaption to HDF5. minimal code
-2. Incorporate the priori/posteriori stuff
-3. Write integration tests:
-  a) Compare all
-
-
-
-
-CHANGELOG:
-* support for complex datatypes
-* Support for (approximately) low-rank plus diagonal synthetic matrices
-* Linop API:
-  - New core functionality: Transposed, Signed Sum, Banded, ByVector
-  - New measurement linops: Rademacher, Gaussian, Phase, SSRFT
-* Sketching API:
-  - Modular measurement API supporting multiprocessing and HDF5
-  - Modular recovery methods (singlepass, compact oversampled, Nystrom) for
-    general and symmetric cases
-  - Algorithms: XDiag/DiagPP, SSVD, Sketchlord, Triangular
-* A-posteriori error verification
-* A-priori hyperparameter selection
-"""
+""" """
 
 
 import torch
@@ -96,16 +49,18 @@ def singlepass(
 
     Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
     """
-    Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
+    # note we use .T instead of .conj().T: using conj+T several times is
+    # equivalent to just using T, but more expensive (conj may return copy)
+    Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
     B = Qh @ mop_right
     if as_svd:
         P, S = qr(sketch_right, in_place_q=False, return_R=True)
-        core = lstsq(B.conj().T, S.conj().T).conj().T
+        core = lstsq(B.T, S.T).T
         U, S, Vh = svd(core)
         result = (P @ U), S, (Vh @ Qh)
 
     else:
-        YBinv = lstsq(B.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
+        YBinv = lstsq(B.T, sketch_right.T, rcond=rcond).T
         result = YBinv, Qh
     return result
 
@@ -115,9 +70,7 @@ def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-6, as_svd=True):
     if not as_svd:
         # the original nystrom recovery, cheaper
         Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
-        rightRinv = (
-            lstsq(R.conj().T, sketch_right.conj().T, rcond=rcond).conj().T
-        )
+        rightRinv = lstsq(R.T, sketch_right.T, rcond=rcond).T
         result = rightRinv, (Q.conj().T @ sketch_left)  # U, Vh
     else:
         # return in SVD form, more expensive
@@ -140,10 +93,12 @@ def oversampled(
     as_svd=True,
 ):
     """ """
+    # note we use .T instead of .conj().T: using conj+T several times is
+    # equivalent to just using T, but more expensive (conj may return copy)
     P = qr(sketch_right, in_place_q=False, return_R=False)
-    Qh = qr(sketch_left.conj().T, in_place_q=False, return_R=False).conj().T
+    Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
     core = lstsq(lilop @ P, sketch_inner)
-    core = lstsq((rilop.T @ Qh.T), core.T).T
+    core = lstsq((Qh @ rilop).T, core.T).T
     if as_svd:
         U, S, Vh = svd(core)
         result = (P @ U), S, (Vh @ Qh)
@@ -162,9 +117,12 @@ def singlepass_h(
     as_eigh=True,
 ):
     r""" """
+    # If the placements of the .conj() don't make sense, note that we
+    # leverage symmetries, adding conj in some places and removed from others,
+    # to an equivalent result, but less overal scalar conjugations.
     Q = qr(sketch_right, in_place_q=False, return_R=False)
-    B = Q.conj().T @ mop_right
-    core = lstsq(B.conj().T, sketch_right.conj().T @ Q).conj().T
+    B = Q.T @ mop_right.conj()
+    core = lstsq(B.T, sketch_right.conj().T @ Q).conj().T
     if not as_eigh:
         result = core, Q
     else:
@@ -181,11 +139,11 @@ def nystrom_h(
 ):
     """ """
     if not as_eigh:
+        # same as lstsq(sr.conj().T @ mop, sr.conj().T) but cheaper because
+        # of less total scalar conjugations
         coreInvSt = lstsq(
-            sketch_right.conj().T @ mop_right,
-            sketch_right.conj().T,
-            rcond=rcond,
-        )
+            sketch_right.T @ mop_right.conj(), sketch_right.T, rcond=rcond
+        ).conj()
         result = sketch_right, coreInvSt
     else:
         P, S = qr(sketch_right, in_place_q=False, return_R=True)
@@ -207,7 +165,9 @@ def oversampled_h(
     """ """
     P = qr(sketch_right, in_place_q=False, return_R=False)
     core = lstsq(lilop @ P, sketch_inner)
-    core = lstsq((rilop.conj().T @ P), core.conj().T).conj().T
+    # equivalent to lstsq((rilop.conj().T @ P), core.conj().T).conj().T
+    # but less total scalar conjugations
+    core = lstsq((rilop.T @ P.conj()), core.T).T
     if not as_eigh:
         result = core, P
     else:
