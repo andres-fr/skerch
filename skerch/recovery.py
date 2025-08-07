@@ -116,6 +116,7 @@ def singlepass_h(
     mop_right,
     rcond=1e-6,
     as_eigh=True,
+    by_mag=True,
 ):
     r""" """
     # If the placements of the .conj() don't make sense, note that we
@@ -127,7 +128,7 @@ def singlepass_h(
     if not as_eigh:
         result = core, Q
     else:
-        ews, Z = eigh(core)
+        ews, Z = eigh(core, by_descending_magnitude=by_mag)
         result = ews, Q @ Z
     return result
 
@@ -137,6 +138,7 @@ def nystrom_h(
     mop_right,
     rcond=1e-6,
     as_eigh=True,
+    by_mag=True,
 ):
     """ """
     if not as_eigh:
@@ -151,7 +153,7 @@ def nystrom_h(
         coreInvSt = lstsq(
             sketch_right.conj().T @ mop_right, S.conj().T, rcond=rcond
         )
-        ews, Z = eigh(S @ coreInvSt)
+        ews, Z = eigh(S @ coreInvSt, by_descending_magnitude=by_mag)
         result = ews, P @ Z
     return result
 
@@ -163,6 +165,7 @@ def oversampled_h(
     rilop,
     rcond=1e-6,
     as_eigh=True,
+    by_mag=True,
 ):
     """ """
     P = qr(sketch_right, in_place_q=False, return_R=False)
@@ -173,6 +176,6 @@ def oversampled_h(
     if not as_eigh:
         result = core, P
     else:
-        ews, Z = eigh(core)
+        ews, Z = eigh(core, by_descending_magnitude=by_mag)
         result = ews, P @ Z
     return result

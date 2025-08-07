@@ -61,3 +61,8 @@ def pytest_addoption(parser):
         action="store_true",
         help="If given, test_too_many_files will do nothing (but still run).",
     )
+    parser.addoption(
+        "--mp",
+        action="store_true",
+        help="If given, some measurements will run on CPU multiprocessing.",
+    )

@@ -15,7 +15,8 @@ from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
 from skerch.utils import qr, pinv, lstsq, svd, eigh, htr
 
-from . import rng_seeds, torch_devices, autocorrelation_test_helper
+from . import rng_seeds, torch_devices
+from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
 
 
 # ##############################################################################
@@ -431,43 +432,15 @@ def test_svd(rng_seeds, torch_devices, dtypes_tols):
                 #
                 u1, s1, vh1 = svd(tnsr)
                 u2, s2, vh2 = svd(arr)
-                # u and v are orthogonal
-                assert torch.allclose(
-                    Itnsr, u1.H @ u1, atol=tol
-                ), "Torch U not orthogonal?"
-                assert np.allclose(
-                    Iarr, u2.conj().T @ u2, atol=tol
-                ), "Numpy U not orthogonal?"
-                assert torch.allclose(
-                    Itnsr, vh1 @ vh1.H, atol=tol
-                ), "Torch V not orthogonal?"
-                assert np.allclose(
-                    Iarr, vh2 @ vh2.conj().T, atol=tol
-                ), "Numpy V not orthogonal?"
-                # s are nonnegative vectors in descending order
-                assert s1.shape == (min(hw),), "Torch svals not a vector?"
-                assert s2.shape == (min(hw),), "Numpy svals not a vector?"
-                assert (s1 >= 0).all(), "Negative torch svals?"
-                assert (s2 >= 0).all(), "Negative numpy svals?"
-                assert (s1.diff() <= 0).all(), "Ascending torch svals?"
-                assert (np.diff(s2) <= 0).all(), "Ascending numpy svals?"
-                # correctness
-                assert torch.allclose(
-                    tnsr, (u1 * s1) @ vh1, atol=tol
-                ), "Incorrect torch SVD?"
-                assert np.allclose(
-                    arr, (u2 * s2) @ vh2, atol=tol
-                ), "Incorrect numpy SVD?"
-                # matching device and dtype
-                assert u1.device == tnsr.device, "Incorrect torch U device?"
-                assert u1.dtype == tnsr.dtype, "Incorrect torch U dtype?"
-                assert u2.dtype == arr.dtype, "Incorrect numpy U dtype?"
-                assert s1.device == tnsr.device, "Incorrect torch S device?"
-                assert s1.dtype == tnsr.real.dtype, "Incorrect torch S dtype?"
-                assert s2.dtype == arr.real.dtype, "Incorrect numpy S dtype?"
-                assert vh1.device == tnsr.device, "Incorrect torch V device?"
-                assert vh1.dtype == tnsr.dtype, "Incorrect torch V dtype?"
-                assert vh2.dtype == arr.dtype, "Incorrect numpy V dtype?"
+                #
+                try:
+                    svd_helper(tnsr, Itnsr, u1, s1, vh1, tol)
+                except AssertionError as ae:
+                    raise AssertionError("Error in torch SVD!") from ae
+                try:
+                    svd_helper(arr, Iarr, u2, s2, vh2, tol)
+                except AssertionError as ae:
+                    raise AssertionError("Error in numpy SVD!") from ae
 
 
 def test_eigh(rng_seeds, torch_devices, dtypes_tols):
@@ -490,45 +463,14 @@ def test_eigh(rng_seeds, torch_devices, dtypes_tols):
                 for by_mag in (True, False):
                     ews1, evs1 = eigh(tnsr, by_descending_magnitude=by_mag)
                     ews2, evs2 = eigh(arr, by_descending_magnitude=by_mag)
-                    # eigenbasis is orthogonal
-                    assert torch.allclose(
-                        Itnsr, evs1.H @ evs1, atol=tol
-                    ), "Torch eigenbasis not orthogonal?"
-                    assert np.allclose(
-                        Iarr, evs2.conj().T @ evs2, atol=tol
-                    ), "Numpy eigenbasis not orthogonal?"
-                    # eigenvalues are vectors in descending mag/val
-                    assert ews1.shape == (min(hw),), "Torch ews not a vector?"
-                    assert ews2.shape == (min(hw),), "Numpy ews not a vector?"
-                    sorted1 = abs(ews1) if by_mag else ews1
-                    sorted2 = abs(ews2) if by_mag else ews2
-                    assert (
-                        sorted1.diff() <= 0
-                    ).all(), "Torch eigvals in wrong order? (by_mag={by_mag})"
-                    assert (
-                        np.diff(sorted2) <= 0
-                    ).all(), "Numpy eigvals in wrong order? (by_mag={by_mag})"
-                    # correctness
-                    assert torch.allclose(
-                        tnsr, (evs1 * ews1) @ evs1.H, atol=tol
-                    ), "Incorrect torch EIGH?"
-                    assert np.allclose(
-                        arr, (evs2 * ews2) @ evs2.conj().T, atol=tol
-                    ), "Incorrect numpy EIGH?"
-                    # matching device and type
-                    assert evs1.device == tnsr.device, "Incorrect torch Q dev?"
-                    assert evs1.dtype == tnsr.dtype, "Incorrect torch Q dtype?"
-                    assert evs2.dtype == arr.dtype, "Incorrect numpy Q dtype?"
-                    #
-                    assert (
-                        ews1.device == tnsr.device
-                    ), "Incorrect torch ew dev?"
-                    assert (
-                        ews1.dtype == tnsr.real.dtype
-                    ), "Incorrect torch ew dtype?"
-                    assert (
-                        ews2.dtype == arr.real.dtype
-                    ), "Incorrect numpy ew dtype?"
+                    try:
+                        eigh_helper(tnsr, Itnsr, ews1, evs1, tol, by_mag)
+                    except AssertionError as ae:
+                        raise AssertionError("Error in torch EIGH!") from ae
+                    try:
+                        eigh_helper(arr, Iarr, ews2, evs2, tol, by_mag)
+                    except AssertionError as ae:
+                        raise AssertionError("Error in numpy EIGH!") from ae
 
 
 def test_htr(rng_seeds, torch_devices, dtypes_tols):

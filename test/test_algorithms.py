@@ -12,7 +12,8 @@ import numpy as np
 from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import ssvd
-from . import rng_seeds, torch_devices
+from . import rng_seeds, torch_devices, max_mp_workers
+from . import svd_test_helper, eigh_test_helper
 
 
 # ##############################################################################
@@ -38,6 +39,18 @@ def ssvd_recovery_shapes(request):
         ((20, 30), 5, 15, 20),
         ((30, 20), 5, 15, 20),
         ((200, 150), 20, 35, 40),
+    ]
+    if request.config.getoption("--quick"):
+        result = result[:3]
+    return result
+
+
+@pytest.fixture
+def seigh_recovery_shapes(request):
+    """Tuples in the form ``(dims, rank, outermeas, innermeas)."""
+    result = [
+        (30, 5, 15, 20),
+        (200, 20, 35, 40),
     ]
     if request.config.getoption("--quick"):
         result = result[:3]
@@ -77,12 +90,32 @@ class BasicMatrixLinOp:
 
 
 # ##############################################################################
-# # HELPERS
+# # DISPATCHERS
+# ##############################################################################
+
+
+# ##############################################################################
+# # SSVD
 # ##############################################################################
 def test_ssvd_correctness(
-    rng_seeds, torch_devices, dtypes_tols, ssvd_recovery_shapes, noise_types
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    ssvd_recovery_shapes,
+    noise_types,
+    max_mp_workers,
 ):
-    """ """
+    """Correctness test case for SSVD:
+
+    Runs SSVD on all devices/dtypes/noisemats/recoveries, on a few low-rank
+    linops, and tests that:
+
+    * The SSVD is actually close to the matrix
+    * ``U, V`` have orthonormal columns
+    * Recovered ``S`` is a vector
+    * The recovered ``S`` are nonnegative and in descending order
+    * The devices and dtypes all match
+    """
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
@@ -98,6 +131,7 @@ def test_ssvd_correctness(
                         dtype=dtype,
                         device=device,
                     )
+                    I = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
                     #
                     for noise_type, complex_only in noise_types:
@@ -110,7 +144,12 @@ def test_ssvd_correctness(
                             "nystrom",
                             f"oversampled_{innermeas}",
                         ):
-                            # singlepass recovery
+                            errmsg = (
+                                "SSVD error! "
+                                "{(seed, device, dtype, (hw, rank, outermeas, "
+                                "innermeas), noise_type, recovery_type)})"
+                            )
+                            # run SSVD
                             U, S, Vh = ssvd(
                                 lop,
                                 device,
@@ -119,11 +158,83 @@ def test_ssvd_correctness(
                                 seed + 1,
                                 noise_type,
                                 recovery_type,
-                                max_mp_workers=None,
+                                max_mp_workers=max_mp_workers,
                             )
-                            recovery = (U * S) @ Vh
-                            assert torch.allclose(mat, recovery, atol=tol), (
-                                "Incorrect recovery! "
+                            # test that output is correct and SVD-like
+                            try:
+                                svd_test_helper(mat, I, U, S, Vh, tol)
+                            except AssertionError as ae:
+                                raise AssertionError(errmsg) from ae
+
+
+# ##############################################################################
+# # SEIGH
+# ##############################################################################
+def test_seigh_correctness(
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    seigh_recovery_shapes,
+    noise_types,
+    max_mp_workers,
+):
+    """Correctness test case for SEIGH:
+
+    Runs SEIGH on all devices/dtypes/noisemats/recoveries, on a few low-rank
+    linops, and tests that:
+
+    * The EIGH is actually close to the matrix
+    * Eigenvectors are orthonormal columns
+    * Recovered eigvals given as a vector
+    * The recovered eigvals are by descending magnitude/value
+    * The devices and dtypes all match
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for hw, rank, outermeas, innermeas in ssvd_recovery_shapes:
+                    mat, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=100,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    I = torch.eye(outermeas, dtype=dtype, device=device)
+                    lop = BasicMatrixLinOp(mat)
+                    #
+                    for noise_type, complex_only in noise_types:
+                        if dtype not in COMPLEX_DTYPES and complex_only:
+                            # this noise type does not support reals,
+                            # skip this iteration
+                            continue
+                        for recovery_type in (
+                            "singlepass",
+                            "nystrom",
+                            f"oversampled_{innermeas}",
+                        ):
+                            errmsg = (
+                                "SSVD error! "
                                 "{(seed, device, dtype, (hw, rank, outermeas, "
                                 "innermeas), noise_type, recovery_type)})"
                             )
+                            # run SSVD
+                            U, S, Vh = ssvd(
+                                lop,
+                                device,
+                                dtype,
+                                outermeas,
+                                seed + 1,
+                                noise_type,
+                                recovery_type,
+                                max_mp_workers=max_mp_workers,
+                            )
+                            # test that output is correct and SVD-like
+                            try:
+                                svd_test_helper(mat, I, U, S, Vh, tol)
+                            except AssertionError as ae:
+                                raise AssertionError(errmsg) from ae

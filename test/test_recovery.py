@@ -15,6 +15,8 @@ from skerch.recovery import singlepass, nystrom, oversampled
 from skerch.recovery import singlepass_h, nystrom_h, oversampled_h
 from . import rng_seeds, torch_devices
 
+from . import svd_test_helper, eigh_test_helper
+
 
 # ##############################################################################
 # # FIXTURES
@@ -72,37 +74,6 @@ def uv_test_helper(mat, U, Vh, atol):
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
 
 
-def svd_test_helper(mat, svals, I, U, S, Vh, atol):
-    """SVD test helper.
-
-    Given the produced SVD of ``mat``, tests that:
-
-    * The SVD is actually close to the matrix
-    * The recovered ``S`` are close to the corresponding ``svals``
-    * ``U, V`` have orthonormal columns
-    * The devices and dtypes all match
-    """
-    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
-    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
-    # correctness of result
-    assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
-    # orthogonality of recovered U, V
-    assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
-    assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
-    # correctness of recovered svals
-    assert allclose(svals[: len(S)], S, atol=atol), "Incorrect svals!"
-    # svals nonnegative and by descending magnitude
-    assert (S >= 0).all(), "Negative svals!"
-    assert (diff(S) <= 0).all(), "Ascending svals?"
-    # matching device and type
-    assert U.device == mat.device, "Incorrect U device!"
-    assert S.device == mat.device, "Incorrect S device!"
-    assert Vh.device == mat.device, "Incorrect V device!"
-    assert U.dtype == mat.dtype, "Incorrect U dtype!"
-    assert S.dtype == mat.real.dtype, "Incorrect S dtype!"
-    assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
-
-
 def qc_test_helper(mat, I, core_rec, q_rec, atol):
     """ """
     allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
@@ -121,36 +92,6 @@ def qc_test_helper(mat, I, core_rec, q_rec, atol):
     assert C.dtype == mat.dtype, "Incorrect core dtype!"
 
 
-def eigh_test_helper(mat, ews, I, ews_rec, evs_rec, atol):
-    """Hermitian eigendecomposition test helper.
-
-    Given the produced EIGH of ``mat``, tests that:
-
-    * The EIGH is actually close to the matrix
-    * The recovered eigvals are close to true ones
-    * Eigenvectors are orthonormal
-    * The devices and dtypes all match
-    """
-    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
-    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
-    V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
-    # correctness of result
-    assert allclose(mat, (V * Lbd) @ Vh, atol=atol), "Incorrect recovery!"
-    # orthogonality of recovered V
-    assert allclose(I, Vh @ V, atol=atol), "Eigvecs not orthogonal?"
-    # correctness of recovered eigvals
-    sorted_Lbd = Lbd[Lbd.argsort()]
-    sorted_ews = ews[ews[: len(Lbd)].argsort()]
-    assert allclose(sorted_ews, sorted_Lbd, atol=atol), "Incorrect eigvals!"
-    # Eigvals by descending magnitude
-    assert (diff(abs(Lbd)) <= 0).all(), "Ascending eigval magnitudes?"
-    # matching device and type
-    assert V.device == mat.device, "Incorrect eigvecs device!"
-    assert Lbd.device == mat.device, "Incorrect eigvals device!"
-    assert V.dtype == mat.dtype, "Incorrect eigvecs dtype!"
-    assert Lbd.dtype == mat.real.dtype, "Incorrect eigvals dtype!"
-
-
 # ##############################################################################
 # # RECOVERY FOR GENERAL MATRICES
 # ##############################################################################
@@ -161,10 +102,6 @@ def test_recovery_general(
 
     For torch/numpy inputs, and for all recovery methods (in UV/SVD mode),
     tests that:
-
-    *
-    :func:`svd_test_helper`. This tests that provided outputs are correct,
-    have the expected properties and are in the matching device/dtype.
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -229,6 +166,11 @@ def test_recovery_general(
                         ("torch", *conf1),
                         ("numpy", *conf2),
                     ):
+                        allclose = (
+                            torch.allclose
+                            if isinstance(I, torch.Tensor)
+                            else np.allclose
+                        )
                         # singlepass - UV
                         Urec, Vhrec = singlepass(Y, Z, right, as_svd=False)
                         try:
@@ -241,7 +183,11 @@ def test_recovery_general(
                             Y, Z, right, as_svd=True
                         )
                         try:
-                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                            svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
+                            # correctness of recovered svals
+                            assert allclose(
+                                S[: len(Srec)], Srec, atol=tol
+                            ), "Incorrect svals!"
                         except AssertionError as ae:
                             errmsg = f"Singlepass-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
@@ -255,7 +201,11 @@ def test_recovery_general(
                         # nystrom - SVD
                         Urec, Srec, Vhrec = nystrom(Y, Z, right, as_svd=True)
                         try:
-                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                            svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
+                            # correctness of recovered svals
+                            assert allclose(
+                                S[: len(Srec)], Srec, atol=tol
+                            ), "Incorrect svals!"
                         except AssertionError as ae:
                             errmsg = f"Nystrom-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
@@ -273,7 +223,11 @@ def test_recovery_general(
                             Y, Z, C, lilop, rilop, as_svd=True
                         )
                         try:
-                            svd_test_helper(mat, S, I, Urec, Srec, Vhrec, tol)
+                            svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
+                            # correctness of recovered svals
+                            assert allclose(
+                                S[: len(Srec)], Srec, atol=tol
+                            ), "Incorrect svals!"
                         except AssertionError as ae:
                             errmsg = f"Oversampled-SVD {mode} error!"
                             raise AssertionError(errmsg) from ae
@@ -289,10 +243,6 @@ def test_recovery_hermitian(
 
     For torch/numpy inputs, and for all recovery methods (in UV/SVD mode),
     tests that:
-
-    *
-    :func:`svd_test_helper`. This tests that provided outputs are correct,
-    have the expected properties and are in the matching device/dtype.
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -355,6 +305,12 @@ def test_recovery_hermitian(
                         ("torch", *conf1),
                         ("numpy", *conf2),
                     ):
+                        sorted_ews = ews[ews[: len(I)].argsort()]
+                        allclose = (
+                            torch.allclose
+                            if isinstance(I, torch.Tensor)
+                            else np.allclose
+                        )
                         # singlepass_h - QCQh
                         Crec, Qrec = singlepass_h(Y, right, as_eigh=False)
                         try:
@@ -363,14 +319,23 @@ def test_recovery_hermitian(
                             errmsg = f"Singlepass_h-QCQh {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass_h - EIGH
-                        ews_rec, evs_rec = singlepass_h(Y, right, as_eigh=True)
-                        try:
-                            eigh_test_helper(
-                                mat, ews, I, ews_rec, evs_rec, tol
+                        for by_mag in (True, False):
+                            ews_rec, evs_rec = singlepass_h(
+                                Y, right, as_eigh=True, by_mag=by_mag
                             )
-                        except AssertionError as ae:
-                            errmsg = f"Singlepass_h-EIGH {mode} error!"
-                            raise AssertionError(errmsg) from ae
+                            try:
+                                eigh_test_helper(
+                                    mat, I, ews_rec, evs_rec, tol, by_mag
+                                )
+                                # correctness of recovered eigvals
+                                sorted_rec = ews_rec[ews_rec.argsort()]
+                                assert allclose(
+                                    sorted_ews, sorted_rec, atol=tol
+                                ), "Incorrect eigvals!"
+                            except AssertionError as ae:
+                                errmsg = f"Singlepass_h-EIGH {mode} error!"
+                                errmsg += f" (by_mag={by_mag})"
+                                raise AssertionError(errmsg) from ae
                         # nystrom_h - UV
                         Urec, Vhrec = nystrom_h(Y, right, as_eigh=False)
                         try:
@@ -379,14 +344,23 @@ def test_recovery_hermitian(
                             errmsg = f"Nystrom_h-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # nystrom_h - EIGH
-                        ews_rec, evs_rec = nystrom_h(Y, right, as_eigh=True)
-                        try:
-                            eigh_test_helper(
-                                mat, ews, I, ews_rec, evs_rec, tol
+                        for by_mag in (True, False):
+                            ews_rec, evs_rec = nystrom_h(
+                                Y, right, as_eigh=True, by_mag=by_mag
                             )
-                        except AssertionError as ae:
-                            errmsg = f"Nystrom_h-EIGH {mode} error!"
-                            raise AssertionError(errmsg) from ae
+                            try:
+                                eigh_test_helper(
+                                    mat, I, ews_rec, evs_rec, tol, by_mag
+                                )
+                                # correctness of recovered eigvals
+                                sorted_rec = ews_rec[ews_rec.argsort()]
+                                assert allclose(
+                                    sorted_ews, sorted_rec, atol=tol
+                                ), "Incorrect eigvals!"
+                            except AssertionError as ae:
+                                errmsg = f"Nystrom_h-EIGH {mode} error!"
+                                errmsg += f" (by_mag={by_mag})"
+                                raise AssertionError(errmsg) from ae
                         # oversampled_h - QCQh
                         Crec, Qrec = oversampled_h(
                             Y, C, lilop, rilop, as_eigh=False
@@ -397,13 +371,20 @@ def test_recovery_hermitian(
                             errmsg = f"Oversampled_h-QCQh {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # oversampled_h - EIGH
-                        ews_rec, evs_rec = oversampled_h(
-                            Y, C, lilop, rilop, as_eigh=True
-                        )
-                        try:
-                            eigh_test_helper(
-                                mat, ews, I, ews_rec, evs_rec, tol
+                        for by_mag in (True, False):
+                            ews_rec, evs_rec = oversampled_h(
+                                Y, C, lilop, rilop, as_eigh=True, by_mag=by_mag
                             )
-                        except AssertionError as ae:
-                            errmsg = f"Oversampled_h-EIGH {mode} error!"
-                            raise AssertionError(errmsg) from ae
+                            try:
+                                eigh_test_helper(
+                                    mat, I, ews_rec, evs_rec, tol, by_mag
+                                )
+                                # correctness of recovered eigvals
+                                sorted_rec = ews_rec[ews_rec.argsort()]
+                                assert allclose(
+                                    sorted_ews, sorted_rec, atol=tol
+                                ), "Incorrect eigvals!"
+                            except AssertionError as ae:
+                                errmsg = f"Oversampled_h-EIGH {mode} error!"
+                                errmsg += f" (by_mag={by_mag})"
+                                raise AssertionError(errmsg) from ae
