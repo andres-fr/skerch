@@ -3,12 +3,6 @@
 
 
 """
-BUG:
-* when measurement linop is an actual linop, we can't just transpose it
-  - FIX: rewrite recovery algorithms, such that mops are not directly
-    transposed: either transpose the sketch, or use TransposedLinOp
-
-
 LATER TODO:
 * add all in-core algorithms
 * formal tests for algorithms and dispatchers
@@ -64,7 +58,7 @@ def recovery_dispatcher(recovery_type, hermitian=False):
     elif recovery_type == "nystrom":
         recovery_fn = nystrom_h if hermitian else nystrom
     elif "oversampled" in recovery_type:
-        recovery_fn = oversampled_ if hermitian else oversampled
+        recovery_fn = oversampled_h if hermitian else oversampled
         inner_dims = int(recovery_type.split("_")[-1])
     else:
         supported = "singlepass, nystrom, oversampled_12345"
@@ -186,7 +180,7 @@ def ssvd(
         U, S, Vh = recovery_fn(
             ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
         )
-    # if oversampled, perform inner measurements before
+    # if oversampled, perform inner measurements before solving
     else:
         lop_mop = CompositeLinOp([("lop", lop), ("ri", ri_mop)])
         _, inner_sketch = perform_measurements(
@@ -231,35 +225,34 @@ def seigh(
     """ """
     register = False  # set to True for seed debugging
     h, w = lop.shape
+    if h != w:
+        raise ValueError("SEIGH expects square operators!")
+    dims = h
     # figure out parallel mode and recovery settings
     parallel_mode = None if max_mp_workers is None else "mp"
     recovery_fn, inner_dims = recovery_dispatcher(recovery_type, True)
-    if (outer_dims > max(h, w)) or (
-        inner_dims is not None and (inner_dims > max(h, w))
-    ):
+    if (outer_dims > dims) or (inner_dims is not None and (inner_dims > dims)):
         raise ValueError("More measurements than rows/columns not supported!")
     if (inner_dims is not None) and inner_dims < outer_dims:
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
-    # instantiate outer measurement linops
+    # instantiate right-combined measurement linop
     combined_dims = outer_dims if inner_dims is None else inner_dims
     r_seed = seed
     r_mop = noise_dispatcher(
-        noise_type, (w, combined_dims), r_seed, lop_dtype, register
+        noise_type, (dims, combined_dims), r_seed, lop_dtype, register
     )
-    # instantiate inner measurement linops
-    if inner_dims is not None:
-        l_seed = r_seed + combined_dims + 1
-        l_mop = noise_dispatcher(
-            noise_type, (w, inner_dims), l_seed, lop_dtype, register
-        )
-    # perform outer measurements
-    _, r_sketch = perform_measurements(
+    # instantiate outer measurement linop and perform outer measurements
+    ro_seed = seed
+    ro_mop = noise_dispatcher(
+        noise_type, (dims, outer_dims), ro_seed, lop_dtype, register
+    )
+    _, ro_sketch = perform_measurements(
         partial(
             lop_measurement,
             lop=lop,
-            meas_lop=r_mop,
+            meas_lop=ro_mop,
             device=lop_device,
             dtype=lop_dtype,
         ),
@@ -269,18 +262,26 @@ def seigh(
         compact=True,
         max_mp_workers=max_mp_workers,
     )
-    # solve sketches
     if inner_dims is None:
-        U, S, Vh = recovery_fn(
-            r_sketch,
-            r_mop,
+        # if no oversampling, solve sketch and return
+        ews, evs = recovery_fn(
+            ro_sketch,
+            ro_mop,
             rcond=lstsq_rcond,
             as_eigh=True,
             by_mag=by_mag,
         )
-        breakpoint()
-    # if oversampled, perform inner measurements before
     else:
+        # if oversampled, perform inner measurements before solving
+        ri_seed = ro_seed + outer_dims + 1
+        li_seed = ri_seed + inner_dims + 1
+        ri_mop = noise_dispatcher(
+            noise_type, (dims, inner_dims), ri_seed, lop_dtype, register
+        )
+        li_mop = noise_dispatcher(
+            noise_type, (dims, inner_dims), li_seed, lop_dtype, register
+        )
+        #
         lop_mop = CompositeLinOp([("lop", lop), ("ri", ri_mop)])
         _, inner_sketch = perform_measurements(
             partial(
@@ -296,14 +297,14 @@ def seigh(
             compact=True,
             max_mp_workers=max_mp_workers,
         )
-        U, S, Vh = recovery_fn(
+        ews, evs = recovery_fn(
             ro_sketch,
-            lo_sketch,
             inner_sketch,
             TransposedLinOp(li_mop),
             ri_mop,
             rcond=lstsq_rcond,
-            as_svd=True,
+            as_eigh=True,
+            by_mag=by_mag,
         )
     #
-    return U, S, Vh
+    return ews, evs
