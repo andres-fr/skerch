@@ -11,7 +11,7 @@ import numpy as np
 
 from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import ssvd
+from skerch.algorithms import ssvd, seigh
 from . import rng_seeds, torch_devices, max_mp_workers
 from . import svd_test_helper, eigh_test_helper
 
@@ -192,13 +192,14 @@ def test_seigh_correctness(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                for hw, rank, outermeas, innermeas in ssvd_recovery_shapes:
+                for dims, rank, outermeas, innermeas in seigh_recovery_shapes:
+                    hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
                         decay=100,
                         diag_ratio=0.0,
-                        symmetric=False,
+                        symmetric=True,
                         psd=False,
                         seed=seed,
                         dtype=dtype,
@@ -217,24 +218,27 @@ def test_seigh_correctness(
                             "nystrom",
                             f"oversampled_{innermeas}",
                         ):
-                            errmsg = (
-                                "SSVD error! "
-                                "{(seed, device, dtype, (hw, rank, outermeas, "
-                                "innermeas), noise_type, recovery_type)})"
-                            )
-                            # run SSVD
-                            U, S, Vh = ssvd(
-                                lop,
-                                device,
-                                dtype,
-                                outermeas,
-                                seed + 1,
-                                noise_type,
-                                recovery_type,
-                                max_mp_workers=max_mp_workers,
-                            )
+                            # run SEIGh
+                            for by_mag in (True, False):
+                                ews, evs = seigh(
+                                    lop,
+                                    device,
+                                    dtype,
+                                    outermeas,
+                                    seed + 1,
+                                    noise_type,
+                                    recovery_type,
+                                    max_mp_workers=max_mp_workers,
+                                    by_mag=by_mag,
+                                )
                             # test that output is correct and SVD-like
                             try:
-                                svd_test_helper(mat, I, U, S, Vh, tol)
+                                eigh_test_helper(mat, I, ews, evs, tol, by_mag)
                             except AssertionError as ae:
+                                matconf = (hw, rank, outermeas, innermeas)
+                                errmsg = (
+                                    f"SEIGH error! (by_mag={by_mag}, {seed}, "
+                                    f"{device}, {dtype}, {matconf}, "
+                                    f"{noise_type}, {recovery_type})"
+                                )
                                 raise AssertionError(errmsg) from ae

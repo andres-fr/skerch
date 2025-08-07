@@ -3,10 +3,13 @@
 
 
 """
+BUG:
+* when measurement linop is an actual linop, we can't just transpose it
+  - FIX: rewrite recovery algorithms, such that mops are not directly
+    transposed: either transpose the sketch, or use TransposedLinOp
 
-TODO:
 
-
+LATER TODO:
 * add all in-core algorithms
 * formal tests for algorithms and dispatchers
 * HDF5 measurement/wrapper API
@@ -223,13 +226,14 @@ def seigh(
     recovery_type="singlepass",
     max_mp_workers=None,
     lstsq_rcond=1e-6,
+    by_mag=True,
 ):
     """ """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     # figure out parallel mode and recovery settings
     parallel_mode = None if max_mp_workers is None else "mp"
-    recovery_fn, inner_dims = recovery_dispatcher(recovery_type, False)
+    recovery_fn, inner_dims = recovery_dispatcher(recovery_type, True)
     if (outer_dims > max(h, w)) or (
         inner_dims is not None and (inner_dims > max(h, w))
     ):
@@ -239,23 +243,23 @@ def seigh(
             "Inner dims must be larger than outer for oversampled!"
         )
     # instantiate outer measurement linops
-    combined_dims = combined_dims if inner_dims is None else inner_dims
+    combined_dims = outer_dims if inner_dims is None else inner_dims
     r_seed = seed
     r_mop = noise_dispatcher(
-        noise_type, (w, combined_dims), ro_seed, lop_dtype, register
+        noise_type, (w, combined_dims), r_seed, lop_dtype, register
     )
     # instantiate inner measurement linops
     if inner_dims is not None:
         l_seed = r_seed + combined_dims + 1
         l_mop = noise_dispatcher(
-            noise_type, (w, inner_dims), ri_seed, lop_dtype, register
+            noise_type, (w, inner_dims), l_seed, lop_dtype, register
         )
     # perform outer measurements
-    _, ro_sketch = perform_measurements(
+    _, r_sketch = perform_measurements(
         partial(
             lop_measurement,
             lop=lop,
-            meas_lop=ro_mop,
+            meas_lop=r_mop,
             device=lop_device,
             dtype=lop_dtype,
         ),
@@ -268,8 +272,13 @@ def seigh(
     # solve sketches
     if inner_dims is None:
         U, S, Vh = recovery_fn(
-            ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
+            r_sketch,
+            r_mop,
+            rcond=lstsq_rcond,
+            as_eigh=True,
+            by_mag=by_mag,
         )
+        breakpoint()
     # if oversampled, perform inner measurements before
     else:
         lop_mop = CompositeLinOp([("lop", lop), ("ri", ri_mop)])

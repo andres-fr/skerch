@@ -122,9 +122,10 @@ def singlepass_h(
     # If the placements of the .conj() don't make sense, note that we
     # leverage symmetries, adding conj in some places and removed from others,
     # to an equivalent result, but less overal scalar conjugations.
+    # But also, we can't directly conj() mop_right, so we also avoid that
     Q = qr(sketch_right, in_place_q=False, return_R=False)
-    B = Q.T @ mop_right.conj()
-    core = lstsq(B.T, sketch_right.conj().T @ Q).conj().T
+    B = (Q.conj().T @ mop_right).conj().T
+    core = lstsq(B, sketch_right.conj().T @ Q).conj().T
     if not as_eigh:
         result = core, Q
     else:
@@ -142,11 +143,11 @@ def nystrom_h(
 ):
     """ """
     if not as_eigh:
-        # same as lstsq(sr.conj().T @ mop, sr.conj().T) but cheaper because
-        # of less total scalar conjugations
         coreInvSt = lstsq(
-            sketch_right.T @ mop_right.conj(), sketch_right.T, rcond=rcond
-        ).conj()
+            sketch_right.conj().T @ mop_right,
+            sketch_right.conj().T,
+            rcond=rcond,
+        )
         result = sketch_right, coreInvSt
     else:
         P, S = qr(sketch_right, in_place_q=False, return_R=True)
@@ -171,8 +172,8 @@ def oversampled_h(
     P = qr(sketch_right, in_place_q=False, return_R=False)
     core = lstsq(lilop @ P, sketch_inner, rcond=rcond)
     # equivalent to lstsq((rilop.conj().T @ P), core.conj().T).conj().T
-    # but less total scalar conjugations
-    core = lstsq((rilop.T @ P.conj()), core.T, rcond=rcond).T
+    # but we avoid direct congugation of rilop, which may not be supported
+    core = lstsq((P.conj().T @ rilop).T, core.T, rcond=rcond).T
     if not as_eigh:
         result = core, P
     else:
