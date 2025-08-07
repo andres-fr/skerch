@@ -50,7 +50,7 @@ from .measurements import (
     SsrftNoiseLinOp,
 )
 from .linops import CompositeLinOp, TransposedLinOp
-from .utils import COMPLEX_DTYPES
+from .utils import COMPLEX_DTYPES, qr, lstsq
 
 
 # ##############################################################################
@@ -319,59 +319,63 @@ def seigh(
 # ##############################################################################
 # # IN-CORE DIAGPP/XDIAG
 # ##############################################################################
-
-
-def __xdiag(
+def xdiag(
     lop,
+    lop_device,
+    lop_dtype,
     outer_dims,
-    seed=12345,
-    dtype=torch.float32,
-    device="cpu",
-    verbose=True,
+    seed=0b1110101001010101011,
+    noise_type="ssrft",
+    max_mp_workers=None,
+    lstsq_rcond=1e-6,
     diagpp=False,
 ):
     """Diagonal sketched approximation.
 
 
+    1. QR orth of right measurements
+    2.
+
     .. note::
       Number of measurements equals ``(2 * outer_dims)``.
     """
-    t0 = time()
     h, w = lop.shape
-    diag_dims = min(h, w)
-    if outer_dims > diag_dims:
+    h, w = lop.shape
+    if h != w:
+        raise ValueError("SEIGH expects square operators!")
+    dims = h
+    if outer_dims > dims:
         raise ValueError("outer_dims larger than operator rank!")
-    if verbose:
-        print("Running xdiag")
-        print("Computing measurements")
+    #
+    breakpoint()
+
     # compute and orthogonalize random measurements
-    lo_seed = seed
     sketch1, measmat1 = rademacher_measurements(
-        lop, outer_dims, lo_seed, dtype, device, adjoint=False, measmat=True
+        lop, outer_dims, seed, dtype, device, adjoint=False, measmat=True
     )
-    t1 = time()
-    Q, R = torch.linalg.qr(sketch1)
-    # compute Smat and X, needed for XDiag
-    S = torch.linalg.pinv(R.T)
-    S /= torch.linalg.norm(S, dim=0)
-    Smat = (S @ S.T) / -outer_dims
-    Smat[range(outer_dims), range(outer_dims)] += 1
     Xt = torch.empty((outer_dims, lop.shape[1]), dtype=dtype, device=device)
-    for i in range(outer_dims):
-        Xt[i, :] = (Q[:, i] if diagpp else (Q @ Smat[:, i])) @ lop
+    Q, R = torch.linalg.qr(sketch1)
+    if diagpp:
+        for i in range(outer_dims):
+            Xt[i, :] = Q[:, i]
+    else:
+        # compute Smat and X, needed for XDiag
+        S = torch.linalg.pinv(R.T)
+        S /= torch.linalg.norm(S, dim=0)
+        Smat = (S @ S.T) / -outer_dims
+        Smat[range(outer_dims), range(outer_dims)] += 1
+        for i in range(outer_dims):
+            Xt[i, :] = (Q @ Smat[:, i]) @ lop
     # compute top diagonal as preliminary diag (efficient and exact)
     d_recovery = (Q[:diag_dims, :] * Xt.T[:diag_dims, :]).sum(1)
     # refine diagonal with deflated (and optionally Xchanged) Girard-Hutchinson
-    t2 = time()
     for i in range(outer_dims):
         v_i = measmat1[:, i] / outer_dims
         meas_i = sketch1[:diag_dims, i]
         if not diagpp:
             meas_i = meas_i - Q[:diag_dims, :] @ (Xt @ v_i)
         d_recovery += v_i[:diag_dims] * meas_i
-    t3 = time()
-    all_times = (t1 - t0, t2 - t0, t3 - t0)
-    return d_recovery, all_times
+    return d_recovery
 
 
 # ##############################################################################

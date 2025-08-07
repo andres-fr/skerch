@@ -11,7 +11,7 @@ import numpy as np
 
 from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import ssvd, seigh
+from skerch.algorithms import ssvd, seigh, xdiag
 from . import rng_seeds, torch_devices, max_mp_workers
 from . import svd_test_helper, eigh_test_helper
 
@@ -59,10 +59,10 @@ def seigh_recovery_shapes(request):
 
 @pytest.fixture
 def xdiag_recovery_shapes(request):
-    """Tuples in the form ``(dims, rank, outermeas, innermeas)."""
+    """Tuples in the form ``(dims, rank, outermeas)."""
     result = [
-        (30, 5, 15, 20),
-        (200, 20, 35, 40),
+        (30, 5, 15),
+        (200, 20, 35),
     ]
     if request.config.getoption("--quick"):
         result = result[:1]
@@ -282,7 +282,11 @@ def test_xdiag_correctness(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                for dims, rank, outermeas, innermeas in xdiag_recovery_shapes:
+                for (
+                    dims,
+                    rank,
+                    outermeas,
+                ) in xdiag_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
@@ -295,37 +299,44 @@ def test_xdiag_correctness(
                         dtype=dtype,
                         device=device,
                     )
-                    I = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
+                    diag = mat.diag()
                     #
                     for noise_type, complex_only in noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        for recovery_type in (
-                            "singlepass",
-                            "nystrom",
-                            f"oversampled_{innermeas}",
-                        ):
-                            errmsg = (
-                                "SSVD error! "
-                                "{(seed, device, dtype, (hw, rank, outermeas, "
-                                "innermeas), noise_type, recovery_type)})"
-                            )
-                            # run SSVD
-                            U, S, Vh = ssvd(
-                                lop,
-                                device,
-                                dtype,
-                                outermeas,
-                                seed + 1,
-                                noise_type,
-                                recovery_type,
-                                max_mp_workers=max_mp_workers,
-                            )
-                            # test that output is correct and SVD-like
-                            try:
-                                svd_test_helper(mat, I, U, S, Vh, tol)
-                            except AssertionError as ae:
-                                raise AssertionError(errmsg) from ae
+                        #
+                        diag, _ = xdiag(
+                            lop,
+                            device,
+                            dtype,
+                            outermeas,
+                            seed,
+                            noise_type,
+                            max_mp_workers,
+                            diagpp=False,
+                        )
+                        breakpoint()
+                        errmsg = (
+                            "SSVD error! "
+                            "{(seed, device, dtype, (hw, rank, outermeas, "
+                            "innermeas), noise_type, recovery_type)})"
+                        )
+                        # run SSVD
+                        U, S, Vh = ssvd(
+                            lop,
+                            device,
+                            dtype,
+                            outermeas,
+                            seed + 1,
+                            noise_type,
+                            recovery_type,
+                            max_mp_workers=max_mp_workers,
+                        )
+                        # test that output is correct and SVD-like
+                        try:
+                            svd_test_helper(mat, I, U, S, Vh, tol)
+                        except AssertionError as ae:
+                            raise AssertionError(errmsg) from ae
