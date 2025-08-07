@@ -90,6 +90,7 @@ def oversampled(
     sketch_inner,
     lilop,
     rilop,
+    rcond=1e-6,
     as_svd=True,
 ):
     """ """
@@ -97,8 +98,8 @@ def oversampled(
     # equivalent to just using T, but more expensive (conj may return copy)
     P = qr(sketch_right, in_place_q=False, return_R=False)
     Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
-    core = lstsq(lilop @ P, sketch_inner)
-    core = lstsq((Qh @ rilop).T, core.T).T
+    core = lstsq(lilop @ P, sketch_inner, rcond=rcond)
+    core = lstsq((Qh @ rilop).T, core.T, rcond=rcond).T
     if as_svd:
         U, S, Vh = svd(core)
         result = (P @ U), S, (Vh @ Qh)
@@ -160,14 +161,15 @@ def oversampled_h(
     sketch_inner,
     lilop,
     rilop,
+    rcond=1e-6,
     as_eigh=True,
 ):
     """ """
     P = qr(sketch_right, in_place_q=False, return_R=False)
-    core = lstsq(lilop @ P, sketch_inner)
+    core = lstsq(lilop @ P, sketch_inner, rcond=rcond)
     # equivalent to lstsq((rilop.conj().T @ P), core.conj().T).conj().T
     # but less total scalar conjugations
-    core = lstsq((rilop.T @ P.conj()), core.T).T
+    core = lstsq((rilop.T @ P.conj()), core.T, rcond=rcond).T
     if not as_eigh:
         result = core, P
     else:

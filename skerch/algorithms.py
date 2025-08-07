@@ -32,6 +32,7 @@ CHANGELOG:
 """
 
 
+from functools import partial
 import torch
 from .recovery import singlepass, nystrom, oversampled
 from .recovery import singlepass_h, nystrom_h, oversampled_h
@@ -42,6 +43,7 @@ from .measurements import (
     PhaseNoiseLinOp,
     SsrftNoiseLinOp,
 )
+from .linops import CompositeLinOp, TransposedLinOp
 from .utils import COMPLEX_DTYPES
 
 
@@ -58,10 +60,6 @@ def recovery_dispatcher(recovery_type, hermitian=False):
     elif "oversampled" in recovery_type:
         recovery_fn = oversampled_ if hermitian else oversampled
         inner_dims = int(recovery_type.split("_")[-1])
-        if inner_dims < outer_dims:
-            raise ValueError(
-                "Inner dims must be larger than outer for oversampled!"
-            )
     else:
         supported = "singlepass, nystrom, oversampled_12345"
         raise ValueError(
@@ -112,54 +110,101 @@ def ssvd(
     seed=0b1110101001010101011,
     noise_type="ssrft",
     recovery_type="singlepass",
+    max_mp_workers=None,
+    lstsq_rcond=1e-6,
 ):
     """ """
+    register = False  # set to True for seed debugging
     h, w = lop.shape
+    # figure out parallel mode and recovery settings
+    parallel_mode = None if max_mp_workers is None else "mp"
     recovery_fn, inner_dims = recovery_dispatcher(recovery_type, False)
     if (outer_dims > max(h, w)) or (
         inner_dims is not None and (inner_dims > max(h, w))
     ):
         raise ValueError("More measurements than rows/columns not supported!")
-    #
+    if (inner_dims is not None) and inner_dims < outer_dims:
+        raise ValueError(
+            "Inner dims must be larger than outer for oversampled!"
+        )
+    # instantiate outer measurement linops
     ro_seed = seed
     lo_seed = ro_seed + outer_dims + 1
     ro_mop = noise_dispatcher(
-        noise_type, (w, outer_dims), ro_seed, lop_dtype, True
+        noise_type, (w, outer_dims), ro_seed, lop_dtype, register
     )
     lo_mop = noise_dispatcher(
-        noise_type, (h, outer_dims), lo_seed, lop_dtype, True
+        noise_type, (h, outer_dims), lo_seed, lop_dtype, register
     )
-    #
+    # instantiate inner measurement linops
     if inner_dims is not None:
         ri_seed = lo_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
         ri_mop = noise_dispatcher(
-            noise_type, (w, inner_dims), ri_seed, lop_dtype, True
+            noise_type, (w, inner_dims), ri_seed, lop_dtype, register
         )
         li_mop = noise_dispatcher(
-            noise_type, (h, inner_dims), li_seed, lop_dtype, True
+            noise_type, (h, inner_dims), li_seed, lop_dtype, register
+        )
+    # perform outer measurements
+    _, ro_sketch = perform_measurements(
+        partial(
+            lop_measurement,
+            lop=lop,
+            meas_lop=ro_mop,
+            device=lop_device,
+            dtype=lop_dtype,
+        ),
+        range(outer_dims),
+        adjoint=False,
+        parallel_mode=parallel_mode,
+        compact=True,
+        max_mp_workers=max_mp_workers,
+    )
+    _, lo_sketch = perform_measurements(
+        partial(
+            lop_measurement,
+            lop=lop,
+            meas_lop=lo_mop,
+            device=lop_device,
+            dtype=lop_dtype,
+        ),
+        range(outer_dims),
+        adjoint=True,
+        parallel_mode=parallel_mode,
+        compact=True,
+        max_mp_workers=max_mp_workers,
+    )
+    # solve sketches
+    if inner_dims is None:
+        U, S, Vh = recovery_fn(
+            ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
+        )
+    # if oversampled, perform inner measurements before
+    else:
+        lop_mop = CompositeLinOp([("lop", lop), ("ri", ri_mop)])
+        _, inner_sketch = perform_measurements(
+            partial(
+                lop_measurement,
+                lop=lop_mop,
+                meas_lop=li_mop,
+                device=lop_device,
+                dtype=lop_dtype,
+            ),
+            range(inner_dims),
+            adjoint=True,
+            parallel_mode=parallel_mode,
+            compact=True,
+            max_mp_workers=max_mp_workers,
+        )
+        U, S, Vh = recovery_fn(
+            ro_sketch,
+            lo_sketch,
+            inner_sketch,
+            TransposedLinOp(li_mop),
+            ri_mop,
+            rcond=lstsq_rcond,
+            as_svd=True,
         )
     #
-    breakpoint()
-
-    # mop = noise_dispatcher(
-    #     noise_type,
-    # )
-    # meas_fn = partial(
-    #     lop_measurement,
-    #     lop=lop,
-    #     meas_lop=mop,
-    #     device=device,
-    #     dtype=dtype,
-    # )
-    # _, z1 = perform_measurements(
-    #     meas_fn,
-    #     range(mop.shape[1]),
-    #     adjoint=False,
-    #     parallel_mode=parall,
-    #     compact=True,
-    #     max_mp_workers=max_mp_workers,
-    # )
-
-    # mop = noise_dispatcher(noise_type, hw, seed, dtype, register=False)
-    breakpoint()
+    return U, S, Vh

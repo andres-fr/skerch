@@ -27,7 +27,12 @@ from skerch.measurements import (
     SsrftNoiseLinOp,
 )
 
-from skerch.utils import gaussian_noise, BadShapeError, BadSeedError
+from skerch.utils import (
+    gaussian_noise,
+    BadShapeError,
+    BadSeedError,
+    COMPLEX_DTYPES,
+)
 
 from . import (
     rng_seeds,
@@ -227,11 +232,7 @@ def test_perform_measurements_correctness(
                     ),
                     SsrftNoiseLinOp(meas_hw, seed, norm="ortho"),
                 ]
-                if dtype in {
-                    torch.complex32,
-                    torch.complex64,
-                    torch.complex128,
-                }:
+                if dtype in COMPLEX_DTYPES:
                     meas_lops.append(
                         PhaseNoiseLinOp(
                             meas_hw,

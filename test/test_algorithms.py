@@ -9,6 +9,7 @@ import pytest
 import torch
 import numpy as np
 
+from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import ssvd
 from . import rng_seeds, torch_devices
@@ -33,10 +34,10 @@ def dtypes_tols():
 def ssvd_recovery_shapes(request):
     """Tuples in the form ``((height, width), rank, outermeas, innermeas)."""
     result = [
-        ((50, 50), 5, 25, 35),
-        ((40, 50), 5, 25, 35),
-        ((50, 40), 5, 25, 35),
-        ((1000, 800), 20, 50, 100),
+        ((30, 30), 5, 15, 20),
+        ((20, 30), 5, 15, 20),
+        ((30, 20), 5, 15, 20),
+        ((200, 150), 20, 35, 40),
     ]
     if request.config.getoption("--quick"):
         result = result[:3]
@@ -45,8 +46,13 @@ def ssvd_recovery_shapes(request):
 
 @pytest.fixture
 def noise_types():
-    """ """
-    result = ["rademacher", "gaussian", "phase", "ssrft"]
+    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    result = [
+        ("rademacher", False),
+        ("gaussian", False),
+        ("ssrft", False),
+        ("phase", True),
+    ]
     return result
 
 
@@ -94,15 +100,30 @@ def test_ssvd_correctness(
                     )
                     lop = BasicMatrixLinOp(mat)
                     #
-                    for noise_type in noise_types:
-                        # singlepass recovery
-                        U, S, Vh = ssvd(
-                            lop,
-                            device,
-                            dtype,
-                            outermeas,
-                            seed + 1,
-                            noise_type,
+                    for noise_type, complex_only in noise_types:
+                        if dtype not in COMPLEX_DTYPES and complex_only:
+                            # this noise type does not support reals,
+                            # skip this iteration
+                            continue
+                        for recovery_type in (
                             "singlepass",
-                        )
-                        breakpoint()
+                            "nystrom",
+                            f"oversampled_{innermeas}",
+                        ):
+                            # singlepass recovery
+                            U, S, Vh = ssvd(
+                                lop,
+                                device,
+                                dtype,
+                                outermeas,
+                                seed + 1,
+                                noise_type,
+                                recovery_type,
+                                max_mp_workers=None,
+                            )
+                            recovery = (U * S) @ Vh
+                            assert torch.allclose(mat, recovery, atol=tol), (
+                                "Incorrect recovery! "
+                                "{(seed, device, dtype, (hw, rank, outermeas, "
+                                "innermeas), noise_type, recovery_type)})"
+                            )
