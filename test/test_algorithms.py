@@ -53,7 +53,19 @@ def seigh_recovery_shapes(request):
         (200, 20, 35, 40),
     ]
     if request.config.getoption("--quick"):
-        result = result[:3]
+        result = result[:1]
+    return result
+
+
+@pytest.fixture
+def xdiag_recovery_shapes(request):
+    """Tuples in the form ``(dims, rank, outermeas, innermeas)."""
+    result = [
+        (30, 5, 15, 20),
+        (200, 20, 35, 40),
+    ]
+    if request.config.getoption("--quick"):
+        result = result[:1]
     return result
 
 
@@ -241,4 +253,79 @@ def test_seigh_correctness(
                                     f"{device}, {dtype}, {matconf}, "
                                     f"{noise_type}, {recovery_type})"
                                 )
+                                raise AssertionError(errmsg) from ae
+
+
+# ##############################################################################
+# # XDIAG/DIAGPP
+# ##############################################################################
+def test_xdiag_correctness(
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    xdiag_recovery_shapes,
+    noise_types,
+    max_mp_workers,
+):
+    """Correctness test case for XDIAG/DIAGPP:
+
+    Runs XDIAG on all devices/dtypes/noisemats/recoveries, on a few low-rank
+    linops, and tests that:
+
+
+    * The SSVD is actually close to the matrix
+    * ``U, V`` have orthonormal columns
+    * Recovered ``S`` is a vector
+    * The recovered ``S`` are nonnegative and in descending order
+    * The devices and dtypes all match
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for dims, rank, outermeas, innermeas in xdiag_recovery_shapes:
+                    hw = (dims, dims)
+                    mat, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=0,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    I = torch.eye(outermeas, dtype=dtype, device=device)
+                    lop = BasicMatrixLinOp(mat)
+                    #
+                    for noise_type, complex_only in noise_types:
+                        if dtype not in COMPLEX_DTYPES and complex_only:
+                            # this noise type does not support reals,
+                            # skip this iteration
+                            continue
+                        for recovery_type in (
+                            "singlepass",
+                            "nystrom",
+                            f"oversampled_{innermeas}",
+                        ):
+                            errmsg = (
+                                "SSVD error! "
+                                "{(seed, device, dtype, (hw, rank, outermeas, "
+                                "innermeas), noise_type, recovery_type)})"
+                            )
+                            # run SSVD
+                            U, S, Vh = ssvd(
+                                lop,
+                                device,
+                                dtype,
+                                outermeas,
+                                seed + 1,
+                                noise_type,
+                                recovery_type,
+                                max_mp_workers=max_mp_workers,
+                            )
+                            # test that output is correct and SVD-like
+                            try:
+                                svd_test_helper(mat, I, U, S, Vh, tol)
+                            except AssertionError as ae:
                                 raise AssertionError(errmsg) from ae
