@@ -60,6 +60,49 @@ def shapes_too_many_files(request):
 # ##############################################################################
 # # DISTRIBUTED HDF5
 # ##############################################################################
+def test_hdf5_merge():
+    """
+    Test here:
+
+    create the layout, populate it and merge while checking flag
+
+    test behaviour with and without deleting subfiles
+    """
+    # create test array
+    num_files, shape, seed, dtype = 10, (3, 4, 5), 12345, torch.float32
+    arr = gaussian_noise(
+        (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
+    ).numpy()
+    for in_place in (True, False):
+        # create HDF5 layout
+        tmpdir = tempfile.TemporaryDirectory()
+        out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
+        h5_path, h5_subpaths = DistributedHDF5.create(
+            out_path,
+            num_files,
+            shape,
+            torch_dtype_as_str(dtype),
+            filedim_last=False,
+        )
+        # write array to layout
+        for i in range(num_files):
+            vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
+            vals[:] = arr[i]
+            flag[0] = f"good_{i}"
+            h5.close()
+        # merge layout into monolithic file
+        breakpoint()
+        DistributedHDF5.merge_all(
+            h5_path,
+            delete_subfiles_while_merging=in_place,
+        )
+
+        all_data, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
+        for i in range(num_files):
+            vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
+            breakpoint()
+
+
 def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
     rng_seeds, dtypes_tols, shapes_numfiles
 ):
@@ -77,21 +120,19 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
         for dtype, tol in dtypes_tols.items():
             for shape, num_files in shapes_numfiles:
                 # target tensor
-                mat_base = gaussian_noise(
+                arr_base = gaussian_noise(
                     (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
                 ).numpy()
                 for filedim_last in (True, False):
-                    mat = (
-                        np.moveaxis(mat_base, 0, -1)
+                    arr = (
+                        np.moveaxis(arr_base, 0, -1)
                         if filedim_last
-                        else mat_base
+                        else arr_base
                     )
                     h5shape = tuple(
-                        np.roll(mat.shape, -1) if filedim_last else mat.shape
+                        np.roll(arr.shape, -1) if filedim_last else arr.shape
                     )
-                    # if filedim_last:
-                    #     mat = mat.moveaxis(0, -1)
-                    # test HDF5 files (merged and partials) are created on disk
+                    # test that virtual+partial HDF5 files are created in disk
                     tmpdir = tempfile.TemporaryDirectory()
                     out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
                     h5_path, h5_subpaths = DistributedHDF5.create(
@@ -108,7 +149,7 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                     # then test that load_virtual holds correct values
                     for i in range(num_files):
                         vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-                        vals[:] = mat_base[i]
+                        vals[:] = arr_base[i]
                         flag[0] = f"good_{i}"
                         h5.close()
                     # LOAD_VIRTUAL TEST
@@ -118,10 +159,10 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                         h5_path
                     )
                     assert (
-                        all_vals.shape == mat.shape
+                        all_vals.shape == arr.shape
                     ), "Wrong merged dataset shape!"
                     assert np.allclose(
-                        mat, all_vals, atol=tol
+                        arr, all_vals, atol=tol
                     ), "Wrong merged dataset values!"
                     assert all_flags.shape == (
                         num_files,
@@ -137,9 +178,9 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                         assert flag[0].decode() == f"good_{i}", "Wrong flag?"
                         #
                         if filedim_last:
-                            sub_target, sub_all = mat[..., i], all_vals[..., i]
+                            sub_target, sub_all = arr[..., i], all_vals[..., i]
                         else:
-                            sub_target, sub_all = mat[i], all_vals[i]
+                            sub_target, sub_all = arr[i], all_vals[i]
                         # breakpoint()
                         assert np.allclose(
                             vals, sub_target, atol=tol
