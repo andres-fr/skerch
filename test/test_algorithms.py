@@ -13,7 +13,8 @@ from collections import defaultdict
 
 from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import SketchedAlgorithmDispatcher, ssvd, seigh, xdiag
+from skerch.algorithms import SketchedAlgorithmDispatcher
+from skerch.algorithms import ssvd, seigh, diagpp, xdiag
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices, max_mp_workers
 from . import svd_test_helper, eigh_test_helper
@@ -64,7 +65,7 @@ def seigh_recovery_shapes(request):
 def diag_recovery_shapes(request):
     """Tuples in the form ``(dims, rank, outermeas, rec_rtol)."""
     result = [
-        (500, 500, 100, 1e-5),
+        (500, 50, 100, 1e-5),
         (100, 100, 50, 0.1),
         (200, 20, 35),
     ]
@@ -379,32 +380,23 @@ def test_xdiag_correctness(
                             # skip this iteration
                             continue
                         # run XDiag
-                        diag1, (dtop1, ddefl1, Q1, R1) = xdiag(
+                        diag1, (dtop1, ddefl1, Q1, R1) = diagpp(
                             lop,
                             device,
                             dtype,
-                            outermeas,
+                            50,  # outermeas
+                            100,
                             seed,
-                            noise_type,
+                            # noise_type,
+                            "rademacher",
                             max_mp_workers,
                             diagpp=True,
                             dispatcher=MyDispatcher,
                         )
-                        diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
-                            lop,
-                            device,
-                            dtype,
-                            outermeas,
-                            seed,
-                            noise_type,
-                            max_mp_workers,
-                            diagpp=False,
-                            dispatcher=MyDispatcher,
-                        )
 
-                        print(torch.dist(D, diag1), torch.dist(D, diag2))
                         import matplotlib.pyplot as plt
 
                         # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
                         # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()
+                        # torch.dist(D, diag1)
                         breakpoint()

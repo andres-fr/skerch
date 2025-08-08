@@ -143,22 +143,22 @@ class SketchedAlgorithmDispatcher:
         return mop
 
     @staticmethod
-    def unitnorm_lop_entries(lop):
+    def unitnorm_lop_entries(lop_type):
         """Returns True if all ``lop`` entries must have unit norm."""
-        if type(lop) in {RademacherNoiseLinOp, PhaseNoiseLinOp}:
+        if lop_type in {"rademacher", "phase"}:
             return True
-        elif type(lop) in {GaussianNoiseLinOp, SsrftNoiseLinOp}:
+        elif lop_type in {"gaussian", "ssrft"}:
             return False
         else:
             warnings.warn(
-                f"Unknown linop type {type(lop)}. Assumed to be non-unitnorm. ",
+                f"Unknown linop type {lop_type}. Assumed to be non-unitnorm. ",
                 RuntimeWarning,
             )
             return False
 
 
 # ##############################################################################
-# # SSVD
+# # SSVD/SEIGH
 # ##############################################################################
 def ssvd(
     lop,
@@ -269,9 +269,6 @@ def ssvd(
     return U, S, Vh
 
 
-# ##############################################################################
-# # SEIGH
-# ##############################################################################
 def seigh(
     lop,
     lop_device,
@@ -368,8 +365,116 @@ def seigh(
 
 
 # ##############################################################################
-# # XDIAG
+# # DIAGPP/XDIAG
 # ##############################################################################
+def diagpp(
+    lop,
+    lop_device,
+    lop_dtype,
+    defl_dims,
+    extra_gh_meas=0,
+    seed=0b1110101001010101011,
+    noise_type="ssrft",
+    max_mp_workers=None,
+    diagpp=False,
+    dispatcher=SketchedAlgorithmDispatcher,
+):
+    """Diagonal sketched approximation via Hutch++."""
+    register = False  # set to True for seed debugging
+    h, w = lop.shape
+    if h != w:
+        raise ValueError("XDiag expects square operators!")
+    dims = h
+    # figure out parallel mode and recovery settings
+    parallel_mode = None if max_mp_workers is None else "mp"
+    if defl_dims > dims:
+        raise ValueError("defl_dims larger than operator rank!")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for diagonal estimation! "
+            + "Check output and consider using Rademacher or PhaseNoise.",
+            RuntimeWarning,
+        )
+    if (defl_dims < 0) or (extra_gh_meas < 0):
+        raise ValueError("Negative number of measurements?")
+    # deflation:
+    if defl_dims <= 0:
+        Q, R, Xh = None, None, None
+        d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    else:
+        # instantiate deflation linop and perform measurements
+        mop = dispatcher.mop(
+            noise_type, (dims, defl_dims), seed, lop_dtype, register
+        )
+        _, sketch = perform_measurements(
+            partial(
+                lop_measurement,
+                lop=lop,
+                meas_lop=mop,
+                device=lop_device,
+                dtype=lop_dtype,
+            ),
+            range(defl_dims),
+            adjoint=False,
+            parallel_mode=parallel_mode,
+            compact=True,
+            max_mp_workers=max_mp_workers,
+        )
+        # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
+        # the first component. Here, X.H = Q.H @ A
+        Q, R = qr(sketch, in_place_q=False, return_R=True)
+        _, Xh = perform_measurements(
+            partial(
+                lop_measurement,
+                lop=lop,
+                meas_lop=Q,
+                device=lop_device,
+                dtype=lop_dtype,
+            ),
+            range(defl_dims),
+            adjoint=True,
+            parallel_mode=parallel_mode,
+            compact=True,
+            max_mp_workers=max_mp_workers,
+        )
+        # top diagonal estimate is then Q @ X.H
+        d_top = (Q * Xh.conj().T).sum(1)
+    # Girard-Hutchinson:
+    # if we deflated, also recycle measurements for estimator
+    d_defl = torch.zeros_like(d_top)
+    for i in range(defl_dims):
+        v_i = get_measvec(i, mop, lop_device, lop_dtype)
+        w_i = sketch[:, i] - (Q @ (Xh @ v_i))
+        if is_noise_unitnorm:
+            d_defl += v_i * w_i
+        else:
+            d_defl += (v_i * w_i) / (v_i * v_i)
+    # perform any extra Girard-Hutchinson measurements,
+    # assumed to not fit in memory so done sequentially
+    if extra_gh_meas > 0:
+        seed_gh = seed + defl_dims + 1
+        mop_gh = dispatcher.mop(
+            noise_type, (dims, extra_gh_meas), seed_gh, lop_dtype, register
+        )
+        for i in range(extra_gh_meas):
+            v_i = get_measvec(i, mop_gh, lop_device, lop_dtype)
+            meas_i = lop @ v_i
+            if Q is None:
+                w_i = lop @ v_i
+            else:
+                meas_i = lop @ v_i
+                w_i = meas_i - Q @ (meas_i.conj() @ Q).conj()
+            if is_noise_unitnorm:
+                d_defl += v_i * w_i
+            else:
+                d_defl += (v_i * w_i) / (v_i * v_i)
+    d_defl /= defl_dims + extra_gh_meas
+    #
+    return (d_top + d_defl), (d_top, d_defl, Q, R)
+
+
 def xdiag(
     lop,
     lop_device,
