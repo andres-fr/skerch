@@ -449,7 +449,7 @@ def diagpp(
             max_mp_workers=max_mp_workers,
         )
         # top diagonal estimate is then Q @ X.H
-        d_top = (Q * Xh.conj().T).sum(1)
+        d_top = (Q * Xh.T).sum(1)  # here only Xh.T!
     # Girard-Hutchinson:
     # if we deflated, also recycle measurements for estimator
     d_defl = torch.zeros_like(d_top)
@@ -553,7 +553,7 @@ def xdiag(
     Z[range(defl_dims), range(defl_dims)] += 1
     Xh = Z @ Xh
     # top diagonal estimate is then Q @ X.H
-    d_top = (Q * Xh.conj().T).sum(1)
+    d_top = (Q * Xh.T).sum(1)
     d_defl = torch.zeros_like(d_top)
     # it remains to estimate the deflated (and optionally Xchanged) part via
     # Girard-Hutchinson estimator.

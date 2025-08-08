@@ -65,11 +65,12 @@ def seigh_recovery_shapes(request):
 def diag_recovery_shapes(request):
     """Fixture to test Diag++ and XDiag.
 
-    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xtrace_tol).
+    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
+    where the tolerances are in the form ``(full, top_only)``.
     """
     result = [
-        # low-rank matrix with deflation: good recovery on both
-        (50, 5, 20, 0, 0.01, 0.01),
+        # low-rank matrix with good deflation: good recovery on both
+        (1000, 5, 20, 0, (1e-10, 1e-10), (None, 0.005)),
         # # full-rank with some deflation (+ large GH for d++): d++ ok, XT bad
         # (50, 50, 20, 100, 0.1, 1),
         # # high-rank with high deflation: both ok
@@ -180,6 +181,12 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
                 noise_type, hw, seed, dtype, register
             )
         return mop
+
+
+def relerr(ori, rec):
+    """Relative square error in the form ``(frob(ori - rec) / frob(ori))**2``."""
+    result = (ori - rec).norm() / ori.norm()
+    return result**2
 
 
 # ##############################################################################
@@ -340,7 +347,7 @@ def test_seigh_correctness(
 # ##############################################################################
 # # XDIAG/DIAGPP
 # ##############################################################################
-def test_diag_correctness(
+def test_diagpp_xdiag_correctness(
     rng_seeds,
     torch_devices,
     dtypes_tols,
@@ -368,8 +375,8 @@ def test_diag_correctness(
                     rank,
                     defl,
                     gh_extra,
-                    diagpp_tol,
-                    xtrace_tol,
+                    (diagpp_full_tol, diagpp_top_tol),
+                    (xdiag_full_tol, xdiag_top_tol),
                 ) in diag_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
@@ -385,6 +392,7 @@ def test_diag_correctness(
                     )
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
+                    I = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diag_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
@@ -414,10 +422,34 @@ def test_diag_correctness(
                             max_mp_workers,
                             dispatcher=MyDispatcher,
                         )
+                        # test Qs are orthogonal
+                        if Q1 is not None:
+                            QhQ1 = Q1.H @ Q1
+                            assert torch.allclose(
+                                QhQ1, I, atol=tol
+                            ), "Diag++ Q not orthogonal?"
+                        QhQ2 = Q2.H @ Q2
+                        assert torch.allclose(
+                            QhQ2, I, atol=tol
+                        ), "XDiag Q not orthogonal?"
+                        # test recoveries are correct
+                        if diagpp_full_tol is not None:
+                            assert (
+                                relerr(D, diag1) < diagpp_full_tol
+                            ), "Bad full Diag++?"
+                        #
+                        if diagpp_top_tol is not None:
+                            assert (
+                                relerr(D, dtop1) < diagpp_top_tol
+                            ), "Bad top Diag++?"
+                        #
+                        if xdiag_top_tol is not None:
+                            try:
+                                assert (
+                                    relerr(D, dtop2) < xdiag_top_tol
+                                ), "Bad top XDiag?"
+                            except:
+                                import matplotlib.pyplot as plt
 
-                        # import matplotlib.pyplot as plt
-
-                        # # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
-                        # # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()
-                        # # torch.dist(D, diag1)
-                        # breakpoint()
+                                # plt.clf(), plt.plot(D); plt.plot(diag2), plt.show()
+                                breakpoint()
