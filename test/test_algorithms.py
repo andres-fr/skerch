@@ -63,11 +63,17 @@ def seigh_recovery_shapes(request):
 
 @pytest.fixture
 def diag_recovery_shapes(request):
-    """Tuples in the form ``(dims, rank, outermeas, rec_rtol)."""
+    """Fixture to test Diag++ and XDiag.
+
+    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xtrace_tol).
+    """
     result = [
-        (500, 50, 100, 1e-5),
-        (100, 100, 50, 0.1),
-        (200, 20, 35),
+        # low-rank matrix with deflation: good recovery on both
+        (50, 5, 20, 0, 0.01, 0.01),
+        # # full-rank with some deflation (+ large GH for d++): d++ ok, XT bad
+        # (50, 50, 20, 100, 0.1, 1),
+        # # high-rank with high deflation: both ok
+        # (50, 50, 40, 0, 0.01, 0.01),
     ]
     if request.config.getoption("--quick"):
         result = result[:1]
@@ -150,7 +156,11 @@ class ShiftedGaussianNoiseLinOp(GaussianNoiseLinOp):
         See base class definition for details.
         """
         result = super().get_vector(idx, device)
-        result = result + result.sign() * self.shift
+        try:
+            result = result + result.sign() * self.shift
+        except:
+            result.real += result.real.sign() * self.shift
+            result.imag += result.imag.sign() * self.shift
         return result
 
 
@@ -330,7 +340,7 @@ def test_seigh_correctness(
 # ##############################################################################
 # # XDIAG/DIAGPP
 # ##############################################################################
-def test_xdiag_correctness(
+def test_diag_correctness(
     rng_seeds,
     torch_devices,
     dtypes_tols,
@@ -356,8 +366,10 @@ def test_xdiag_correctness(
                 for (
                     dims,
                     rank,
-                    outermeas,
-                    rec_rtol,
+                    defl,
+                    gh_extra,
+                    diagpp_tol,
+                    xtrace_tol,
                 ) in diag_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
@@ -379,24 +391,33 @@ def test_xdiag_correctness(
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # run XDiag
+                        # run diagpp
                         diag1, (dtop1, ddefl1, Q1, R1) = diagpp(
                             lop,
                             device,
                             dtype,
-                            50,  # outermeas
-                            100,
+                            defl,
+                            gh_extra,
                             seed,
-                            # noise_type,
-                            "rademacher",
+                            noise_type,
                             max_mp_workers,
-                            diagpp=True,
+                            dispatcher=MyDispatcher,
+                        )
+                        # run XDiag
+                        diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                            lop,
+                            device,
+                            dtype,
+                            defl,
+                            seed,
+                            noise_type,
+                            max_mp_workers,
                             dispatcher=MyDispatcher,
                         )
 
-                        import matplotlib.pyplot as plt
+                        # import matplotlib.pyplot as plt
 
-                        # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
-                        # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()
-                        # torch.dist(D, diag1)
-                        breakpoint()
+                        # # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
+                        # # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()
+                        # # torch.dist(D, diag1)
+                        # breakpoint()

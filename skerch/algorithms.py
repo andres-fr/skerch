@@ -146,15 +146,23 @@ class SketchedAlgorithmDispatcher:
     def unitnorm_lop_entries(lop_type):
         """Returns True if all ``lop`` entries must have unit norm."""
         if lop_type in {"rademacher", "phase"}:
-            return True
+            result = True
         elif lop_type in {"gaussian", "ssrft"}:
-            return False
+            result = False
         else:
             warnings.warn(
                 f"Unknown linop type {lop_type}. Assumed to be non-unitnorm. ",
                 RuntimeWarning,
             )
-            return False
+            result = False
+        #
+        if not result:
+            warnings.warn(
+                "Non-unitnorm noise can be unstable for diagonal estimation! "
+                + "Check output and consider using Rademacher or PhaseNoise.",
+                RuntimeWarning,
+            )
+        return result
 
 
 # ##############################################################################
@@ -371,12 +379,11 @@ def diagpp(
     lop,
     lop_device,
     lop_dtype,
-    defl_dims,
+    defl_dims=0,
     extra_gh_meas=0,
     seed=0b1110101001010101011,
     noise_type="ssrft",
     max_mp_workers=None,
-    diagpp=False,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
     """Diagonal sketched approximation via Hutch++."""
@@ -399,6 +406,8 @@ def diagpp(
         )
     if (defl_dims < 0) or (extra_gh_meas < 0):
         raise ValueError("Negative number of measurements?")
+    if defl_dims + extra_gh_meas <= 0:
+        raise ValueError("Deflation dims and/or GH measurements needed!")
     # deflation:
     if defl_dims <= 0:
         Q, R, Xh = None, None, None
@@ -483,7 +492,6 @@ def xdiag(
     seed=0b1110101001010101011,
     noise_type="ssrft",
     max_mp_workers=None,
-    diagpp=False,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
     """Diagonal sketched approximation."""
@@ -496,18 +504,16 @@ def xdiag(
     parallel_mode = None if max_mp_workers is None else "mp"
     if defl_dims > dims:
         raise ValueError("defl_dims larger than operator rank!")
+    if defl_dims < 0:
+        raise ValueError("Negative number of measurements?")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
         noise_type, (dims, defl_dims), ro_seed, lop_dtype, register
     )
-    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(ro_mop)
-    if not is_noise_unitnorm:
-        warnings.warn(
-            "Non-unitnorm noise can be unstable for diagonal estimation! "
-            + "Check output and consider using Rademacher or PhaseNoise.",
-            RuntimeWarning,
-        )
     _, ro_sketch = perform_measurements(
         partial(
             lop_measurement,
@@ -539,14 +545,13 @@ def xdiag(
         compact=True,
         max_mp_workers=max_mp_workers,
     )
-    if not diagpp:
-        # For XDiag, X = I - (1/defl_dims)*(S @ S.H), where S is explained in
-        # the Xtrace paper, section 2.1. Then, Xh becomes Z @ Q.H @ A
-        S = torch.linalg.pinv(R.conj().T)
-        S /= torch.linalg.norm(S, dim=0)
-        Z = (S @ S.conj().T) / -defl_dims
-        Z[range(defl_dims), range(defl_dims)] += 1
-        Xh = Z @ Xh
+    # For XDiag, X = I - (1/defl_dims)*(S @ S.H), where S is explained in
+    # the Xtrace paper, section 2.1. Then, Xh becomes Z @ Q.H @ A
+    S = torch.linalg.pinv(R.conj().T)
+    S /= torch.linalg.norm(S, dim=0)
+    Z = (S @ S.conj().T) / -defl_dims
+    Z[range(defl_dims), range(defl_dims)] += 1
+    Xh = Z @ Xh
     # top diagonal estimate is then Q @ X.H
     d_top = (Q * Xh.conj().T).sum(1)
     d_defl = torch.zeros_like(d_top)
@@ -561,25 +566,7 @@ def xdiag(
             d_defl += (v_i * w_i) / (v_i * v_i)
     d_defl /= defl_dims
     #
-    # return (d_top + d_defl), (d_top, d_defl, Q, R)
-    """
-
-
-    """
-    from skerch.utils import rademacher_noise
-    import matplotlib.pyplot as plt
-
-    defl_dims = defl_dims * 2
-    rn = rademacher_noise((w, defl_dims), seed=42341, device=lop_device).to(
-        lop_dtype
-    )
-    mat = lop.matrix
-    aa, bb, cc = torch.linalg.svd(mat)
-    deflated = mat - (Q @ Q.H @ mat)
-    quack = (rn * (deflated @ rn)).mean(dim=1)
-    # torch.dist(mat, Q @ Q.H @ mat)
-
-    return (d_top + quack), (d_top, quack, Q, R)
+    return (d_top + d_defl), (d_top, d_defl, Q, R)
 
 
 # ##############################################################################
