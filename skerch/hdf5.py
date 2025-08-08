@@ -3,31 +3,6 @@
 
 
 """
-TODO:
-
-* adapt test to complex. see if it covers all we want
-
-
-BUT WHAT DO WE WANT?
-
-- so far, we have a lib that works on a bunch of algos and noise, with
-  mp parallelizable measurements. We tested a few components on torch/np
-
-- but when scaling up, we distibute the measurements. Each computer gets
-  its own lop and idx, and writes to disk. This is a HDF5 file
-
-- Specifically:
-  1. Create a file layout, even with 1000s of entries
-  2. the H5 object loads a specific entry to RAM, and the rest is a np/torch measurement
-  3. write flag to file and close
-  4. Merge h5 files into single one. We can then load this as numpy
-
-
-The utest does:
-* test that file layout is indeed created
-
-MISSING:
-* test merge_all
 """
 
 import os

@@ -51,7 +51,7 @@ def shapes_numfiles():
 @pytest.fixture
 def shapes_too_many_files(request):
     """Provides virtual datasets with too many files to cause errors."""
-    result = [((5, 1), 20000)]
+    result = [((5, 1), 10000)]
     if request.config.getoption("--skip_toomanyfiles"):
         result = []
     return result
@@ -91,7 +91,6 @@ def test_hdf5_merge():
             flag[0] = f"good_{i}"
             h5.close()
         # merge layout into monolithic file
-        breakpoint()
         DistributedHDF5.merge_all(
             h5_path,
             delete_subfiles_while_merging=in_place,
@@ -202,18 +201,12 @@ def test_hdf5_too_many_files(shapes_too_many_files):
     full virtual dataset actually contains erroneous (missing) columns.
     """
     seed = 0
-    dtype, atol = torch.float32, 1e-5
-    filedim_last = False
+    dtype, tol = torch.float32, 1e-5
     for shape, num_files in shapes_too_many_files:
-        # target tensor
-        target_vals = torch.empty((num_files, *shape), dtype=dtype)
-        for i in range(num_files):
-            target_vals[i] = gaussian_noise(
-                shape, seed=seed + i, dtype=dtype, device="cpu"
-            )
-        if filedim_last:
-            target_vals = target_vals.moveaxis(0, -1)
-        # check dataset is actually being created on (temp) disk
+        tnsr = gaussian_noise(
+            (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
+        )
+        # create layout and check is actually being created on (temp) disk
         tmpdir = tempfile.TemporaryDirectory()
         out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
         h5_path, h5_subpaths = DistributedHDF5.create(
@@ -221,7 +214,7 @@ def test_hdf5_too_many_files(shapes_too_many_files):
             num_files,
             shape,
             torch_dtype_as_str(dtype),
-            filedim_last=filedim_last,
+            filedim_last=False,
         )
         assert os.path.isfile(h5_path), "Merged HDF5 not created?"
         for sp in h5_subpaths:
@@ -229,21 +222,17 @@ def test_hdf5_too_many_files(shapes_too_many_files):
         # write values to sub-datasets
         for i in range(num_files):
             vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-            vals[:] = gaussian_noise(
-                shape, seed=seed + i, dtype=dtype, device="cpu"
-            )
+            vals[:] = tnsr[i]
             flag[0] = str(i)
             h5.close()
         # test that separate files  are correct
         all_vals, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
-        assert (
-            all_vals.shape == target_vals.shape
-        ), "Wrong merged dataset shape!"
+        assert all_vals.shape == tnsr.shape, "Wrong merged dataset shape!"
         # but here is the catch, merger is not correct!
         # this is due to file limit being exceeded, overflown values are empty
         with pytest.raises(AssertionError):
             assert np.allclose(
-                target_vals, all_vals, atol=atol
+                tnsr, all_vals, atol=tol
             ), "Wrong merged dataset values!"
         # it would follow to test that merged is not consistent with
         # sub-datasets, but this itself causes OSErros, so we skip that.
