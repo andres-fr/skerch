@@ -53,29 +53,30 @@ def singlepass(
     # equivalent to just using T, but more expensive (conj may return copy)
     Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
     B = Qh @ mop_right
+    P, S = qr(sketch_right, in_place_q=False, return_R=True)
     if as_svd:
-        P, S = qr(sketch_right, in_place_q=False, return_R=True)
-        core = lstsq(B.T, S.T).T
+        core = lstsq(B.T, S.T, rcond=rcond).T
         U, S, Vh = svd(core)
         result = (P @ U), S, (Vh @ Qh)
 
     else:
-        YBinv = lstsq(B.T, sketch_right.T, rcond=rcond).T
+        # equivalent to sketch_right @ inv(B)
+        YBinv = P @ lstsq(B.T, S.T, rcond=rcond).T
         result = YBinv, Qh
     return result
 
 
 def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-6, as_svd=True):
     """ """
+    P1, S1 = qr(sketch_right, in_place_q=False, return_R=True)
     if not as_svd:
-        # the original nystrom recovery, cheaper
         Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
-        rightRinv = lstsq(R.T, sketch_right.T, rcond=rcond).T
-        result = rightRinv, (Q.conj().T @ sketch_left)  # U, Vh
+        # P1 @ SRinv equals sketch_right @ inv(R)
+        SRinv = lstsq(R.T, S1.T, rcond=rcond).T
+        result = P1, (SRinv @ Q.conj().T @ sketch_left)
     else:
         # return in SVD form, more expensive
         # orthogonalization of sketches is needed
-        P1, S1 = qr(sketch_right, in_place_q=False, return_R=True)
         P2, S2 = qr(sketch_left.conj().T, in_place_q=False, return_R=True)
         # now invert the Nystrom core upon S2 and compute a small SVD with S1
         coreInvS2t = lstsq(sketch_left @ mop_right, S2.conj().T, rcond=rcond)
@@ -125,7 +126,7 @@ def singlepass_h(
     # But also, we can't directly conj() mop_right, so we also avoid that
     Q = qr(sketch_right, in_place_q=False, return_R=False)
     B = (Q.conj().T @ mop_right).conj().T
-    core = lstsq(B, sketch_right.conj().T @ Q).conj().T
+    core = lstsq(B, sketch_right.conj().T @ Q, rcond=rcond).conj().T
     if not as_eigh:
         result = core, Q
     else:
@@ -142,15 +143,15 @@ def nystrom_h(
     by_mag=True,
 ):
     """ """
+    P, S = qr(sketch_right, in_place_q=False, return_R=True)
     if not as_eigh:
+        # (coreInvSt @ P.H) equals inv(rsketch.H @ rmop) @ rsketch.H
         coreInvSt = lstsq(
-            sketch_right.conj().T @ mop_right,
-            sketch_right.conj().T,
-            rcond=rcond,
+            sketch_right.conj().T @ mop_right, S.conj().T, rcond=rcond
         )
-        result = sketch_right, coreInvSt
+        # result = P, S @ coreInvSt @ P.conj().T
+        result = (S @ coreInvSt), P
     else:
-        P, S = qr(sketch_right, in_place_q=False, return_R=True)
         coreInvSt = lstsq(
             sketch_right.conj().T @ mop_right, S.conj().T, rcond=rcond
         )

@@ -61,10 +61,10 @@ def seigh_recovery_shapes(request):
 
 
 @pytest.fixture
-def xdiag_recovery_shapes(request):
+def diag_recovery_shapes(request):
     """Tuples in the form ``(dims, rank, outermeas, rec_rtol)."""
     result = [
-        (100, 5, 50, 1e-5),
+        (500, 500, 100, 1e-5),
         (100, 100, 50, 0.1),
         (200, 20, 35),
     ]
@@ -74,12 +74,23 @@ def xdiag_recovery_shapes(request):
 
 
 @pytest.fixture
-def noise_types():
+def lowrank_noise_types():
     """Collection of tuples ``(noise_type, is_complex_only)``"""
     result = [
         ("rademacher", False),
         ("gaussian", False),
         ("ssrft", False),
+        ("phase", True),
+    ]
+    return result
+
+
+@pytest.fixture
+def diag_noise_types():
+    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    result = [
+        ("rademacher", False),
+        ("shifted_1.0", False),
         ("phase", True),
     ]
     return result
@@ -173,7 +184,7 @@ def test_ssvd_correctness(
     torch_devices,
     dtypes_tols,
     ssvd_recovery_shapes,
-    noise_types,
+    lowrank_noise_types,
     max_mp_workers,
 ):
     """Correctness test case for SSVD:
@@ -205,7 +216,7 @@ def test_ssvd_correctness(
                     I = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
                     #
-                    for noise_type, complex_only in noise_types:
+                    for noise_type, complex_only in lowrank_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
@@ -246,7 +257,7 @@ def test_seigh_correctness(
     torch_devices,
     dtypes_tols,
     seigh_recovery_shapes,
-    noise_types,
+    lowrank_noise_types,
     max_mp_workers,
 ):
     """Correctness test case for SEIGH:
@@ -279,7 +290,7 @@ def test_seigh_correctness(
                     I = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
                     #
-                    for noise_type, complex_only in noise_types:
+                    for noise_type, complex_only in lowrank_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
@@ -322,8 +333,8 @@ def test_xdiag_correctness(
     rng_seeds,
     torch_devices,
     dtypes_tols,
-    xdiag_recovery_shapes,
-    noise_types,
+    diag_recovery_shapes,
+    diag_noise_types,
     max_mp_workers,
 ):
     """Correctness test case for XDIAG/DIAGPP:
@@ -346,7 +357,7 @@ def test_xdiag_correctness(
                     rank,
                     outermeas,
                     rec_rtol,
-                ) in xdiag_recovery_shapes:
+                ) in diag_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
@@ -362,26 +373,38 @@ def test_xdiag_correctness(
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
                     #
-                    for noise_type, complex_only in noise_types:
+                    for noise_type, complex_only in diag_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
                         # run XDiag
-                        diag, (dtop, ddefl, Q, R) = xdiag(
+                        diag1, (dtop1, ddefl1, Q1, R1) = xdiag(
                             lop,
                             device,
                             dtype,
                             outermeas,
                             seed,
-                            "rademacher",
-                            # "shifted_10",
+                            noise_type,
+                            max_mp_workers,
+                            diagpp=True,
+                            dispatcher=MyDispatcher,
+                        )
+                        diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                            lop,
+                            device,
+                            dtype,
+                            outermeas,
+                            seed,
+                            noise_type,
                             max_mp_workers,
                             diagpp=False,
                             dispatcher=MyDispatcher,
                         )
 
+                        print(torch.dist(D, diag1), torch.dist(D, diag2))
                         import matplotlib.pyplot as plt
 
-                        # plt.clf(); plt.plot(D); plt.plot(diag); plt.show()
+                        # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
                         # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()
+                        breakpoint()

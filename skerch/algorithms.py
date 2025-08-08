@@ -158,7 +158,7 @@ class SketchedAlgorithmDispatcher:
 
 
 # ##############################################################################
-# # IN-CORE SSVD/SEIGH
+# # SSVD
 # ##############################################################################
 def ssvd(
     lop,
@@ -269,6 +269,9 @@ def ssvd(
     return U, S, Vh
 
 
+# ##############################################################################
+# # SEIGH
+# ##############################################################################
 def seigh(
     lop,
     lop_device,
@@ -365,13 +368,13 @@ def seigh(
 
 
 # ##############################################################################
-# # IN-CORE DIAGPP/XDIAG
+# # XDIAG
 # ##############################################################################
 def xdiag(
     lop,
     lop_device,
     lop_dtype,
-    outer_dims,
+    defl_dims,
     seed=0b1110101001010101011,
     noise_type="ssrft",
     max_mp_workers=None,
@@ -386,12 +389,12 @@ def xdiag(
     dims = h
     # figure out parallel mode and recovery settings
     parallel_mode = None if max_mp_workers is None else "mp"
-    if outer_dims > dims:
-        raise ValueError("outer_dims larger than operator rank!")
+    if defl_dims > dims:
+        raise ValueError("defl_dims larger than operator rank!")
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
-        noise_type, (dims, outer_dims), ro_seed, lop_dtype, register
+        noise_type, (dims, defl_dims), ro_seed, lop_dtype, register
     )
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(ro_mop)
     if not is_noise_unitnorm:
@@ -408,7 +411,7 @@ def xdiag(
             device=lop_device,
             dtype=lop_dtype,
         ),
-        range(outer_dims),
+        range(defl_dims),
         adjoint=False,
         parallel_mode=parallel_mode,
         compact=True,
@@ -425,37 +428,55 @@ def xdiag(
             device=lop_device,
             dtype=lop_dtype,
         ),
-        range(outer_dims),
+        range(defl_dims),
         adjoint=True,
         parallel_mode=parallel_mode,
         compact=True,
         max_mp_workers=max_mp_workers,
     )
     if not diagpp:
-        # For XDiag, X = I - (1/outer_dims)*(S @ S.H), where S is explained in
+        # For XDiag, X = I - (1/defl_dims)*(S @ S.H), where S is explained in
         # the Xtrace paper, section 2.1. Then, Xh becomes Z @ Q.H @ A
         S = torch.linalg.pinv(R.conj().T)
         S /= torch.linalg.norm(S, dim=0)
-        Z = (S @ S.conj().T) / -outer_dims
-        Z[range(outer_dims), range(outer_dims)] += 1
+        Z = (S @ S.conj().T) / -defl_dims
+        Z[range(defl_dims), range(defl_dims)] += 1
         Xh = Z @ Xh
     # top diagonal estimate is then Q @ X.H
     d_top = (Q * Xh.conj().T).sum(1)
     d_defl = torch.zeros_like(d_top)
     # it remains to estimate the deflated (and optionally Xchanged) part via
     # Girard-Hutchinson estimator.
-    for i in range(outer_dims):
+    for i in range(defl_dims):
         v_i = get_measvec(i, ro_mop, lop_device, lop_dtype)
         w_i = ro_sketch[:, i] - (Q @ (Xh @ v_i))
         if is_noise_unitnorm:
             d_defl += v_i * w_i
         else:
             d_defl += (v_i * w_i) / (v_i * v_i)
-    d_defl /= outer_dims
+    d_defl /= defl_dims
     #
-    return (d_top + d_defl), (d_top, d_defl, Q, R)
+    # return (d_top + d_defl), (d_top, d_defl, Q, R)
+    """
+
+
+    """
+    from skerch.utils import rademacher_noise
+    import matplotlib.pyplot as plt
+
+    defl_dims = defl_dims * 2
+    rn = rademacher_noise((w, defl_dims), seed=42341, device=lop_device).to(
+        lop_dtype
+    )
+    mat = lop.matrix
+    aa, bb, cc = torch.linalg.svd(mat)
+    deflated = mat - (Q @ Q.H @ mat)
+    quack = (rn * (deflated @ rn)).mean(dim=1)
+    # torch.dist(mat, Q @ Q.H @ mat)
+
+    return (d_top + quack), (d_top, quack, Q, R)
 
 
 # ##############################################################################
-# # IN-CORE
+# # XDIAGH
 # ##############################################################################
