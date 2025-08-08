@@ -4,23 +4,24 @@
 
 """
 TODO, to finish algorithms
-* integrate xdiag -> if rademacher or phase, dont normalize G-H
-* add xdiag sanity check (diag, orth, devices, correctness)
-* integrate lowtriang and utest. also utest dispatchers
-
+* finish xdiag utests (diag, orth, devices, correctness)
+* integrate lowtriang, xtrace and utest
 * Test dispatcher: create new type of noise etc
+* formal tests for algorithms and dispatchers
+* xdiagh
 
 
 LATER TODO:
-* add all in-core algorithms
-* formal tests for algorithms and dispatchers
 * HDF5 measurement/wrapper API
 * a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
 * Integration tests (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
   - scale up: good recovery of very large composite linop, quick.
-* future: diag, triang, lord
+* sketchlord and sketchlordh.
+* xtrace and xtraceh
+* what about generalized_nystrom_xdiag?
+* sketched permutations
 
 
 
@@ -33,7 +34,7 @@ CHANGELOG:
 * Sketching API:
   - Modular measurement API supporting multiprocessing and HDF5
   - Modular recovery methods (singlepass, Nystrom, oversampled) for
-    general and symmetric cases
+    general and symmetric low-rank matrices
   - Algorithms: XDiag/DiagPP, SSVD/SEIGH, Sketchlord, Triangular
 * A-posteriori error verification
 * A-priori hyperparameter selection
