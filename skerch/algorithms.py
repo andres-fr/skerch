@@ -4,9 +4,11 @@
 
 """
 TODO, to finish algorithms
-* integrate xdiag
+* integrate xdiag -> if rademacher or phase, dont normalize G-H
 * add xdiag sanity check (diag, orth, devices, correctness)
 * integrate lowtriang and utest. also utest dispatchers
+
+* Test dispatcher: create new type of noise etc
 
 
 LATER TODO:
@@ -38,11 +40,12 @@ CHANGELOG:
 """
 
 
+import warnings
 from functools import partial
 import torch
 from .recovery import singlepass, nystrom, oversampled
 from .recovery import singlepass_h, nystrom_h, oversampled_h
-from .measurements import lop_measurement, perform_measurements
+from .measurements import get_measvec, lop_measurement, perform_measurements
 from .measurements import (
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
@@ -54,55 +57,103 @@ from .utils import COMPLEX_DTYPES, qr, lstsq
 
 
 # ##############################################################################
-# # HELPERS
+# # DISPATCHER
 # ##############################################################################
-def recovery_dispatcher(recovery_type, hermitian=False):
-    """ """
-    inner_dims = None
-    if recovery_type == "singlepass":
-        recovery_fn = singlepass_h if hermitian else singlepass
-    elif recovery_type == "nystrom":
-        recovery_fn = nystrom_h if hermitian else nystrom
-    elif "oversampled" in recovery_type:
-        recovery_fn = oversampled_h if hermitian else oversampled
-        inner_dims = int(recovery_type.split("_")[-1])
-    else:
-        supported = "singlepass, nystrom, oversampled_12345"
-        raise ValueError(
-            f"Unknown recovery type! {recovery_type}! "
-            "Supported: {supported}"
-        )
-    #
-    return recovery_fn, inner_dims
+class SketchedAlgorithmDispatcher:
+    """
 
+    This static class provides functionality to dispatch simple, high-level
+    sets of specifications into detailed components of the sketched methods,
+    such as noise measurement types and recovery algorithms.
 
-def noise_dispatcher(noise_type, hw, seed, dtype, register=False):
-    """ """
-    if noise_type == "rademacher":
-        mop = RademacherNoiseLinOp(
-            hw, seed, dtype, by_row=False, register=register
-        )
-    elif noise_type == "gaussian":
-        mop = GaussianNoiseLinOp(
-            hw, seed, dtype, by_row=False, register=register
-        )
-    elif noise_type == "ssrft":
-        mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
-    elif noise_type == "phase":
-        if dtype not in COMPLEX_DTYPES:
-            raise ValueError(
-                "Phase noise expects complex dtype! Use Rademacher instead"
+    The goal of such a dispatcher is to help simplifying the interface of the
+    sketched algorithms, so users have to provide less details and errors due
+    to incorrect/inconsistent inputs are prevented.
+
+    The downside is that flexibility is reduced: If users want to test a new
+    type of noise or recovery algorithm, this dispatcher will not work.
+
+    To overcome this issue, users can extend this class to incorporate the
+    new desired specs, and then provide the extended dispatcher class as
+    an argument to the sketched method, which will now recognize the new specs.
+
+    For example, if users want to run :func:`ssvd` with a new type of noise
+    linop called ``MyNoise``:
+    1. Extend this class as ``MyDispatcher`` and override the ``mop`` method,
+      adding an ``if noise_type=='my_noise'`` clause that returns the
+      desired instance.
+    2. When calling ``ssvd``, provide the ``noise_type='my_noise'`` and
+      ``dispatcher=MyDispatcher`` arguments.
+
+    Now ``ssvd`` should perform all measurements using ``MyNoise`` instances.
+    """
+
+    @staticmethod
+    def recovery(recovery_type, hermitian=False):
+        """Returns recovery funtion with given specs."""
+        inner_dims = None
+        if recovery_type == "singlepass":
+            recovery_fn = singlepass_h if hermitian else singlepass
+        elif recovery_type == "nystrom":
+            recovery_fn = nystrom_h if hermitian else nystrom
+        elif "oversampled" in recovery_type:
+            recovery_fn = oversampled_h if hermitian else oversampled
+            inner_dims = int(recovery_type.split("_")[-1])
+        else:
+            supported = "singlepass, nystrom, oversampled_12345"
+            warnings.warn(
+                f"Unknown recovery type! {recovery_type}! "
+                "Supported: {supported}"
             )
-        mop = PhaseNoiseLinOp(
-            hw, seed, dtype, by_row=False, register=register, conj=False
-        )
-    else:
-        supported = "rademacher, gaussian, ssrft, phase"
-        raise ValueError(
-            f"Unknown recovery type! {recovery_type} " "Supported: {supported}"
-        )
-    #
-    return mop
+            recovery_fn = None
+        #
+        return recovery_fn, inner_dims
+
+    @staticmethod
+    def mop(noise_type, hw, seed, dtype, register=False):
+        """Returns measurement linop with given specs."""
+        if noise_type == "rademacher":
+            mop = RademacherNoiseLinOp(
+                hw, seed, dtype, by_row=False, register=register
+            )
+        elif noise_type == "gaussian":
+            mop = GaussianNoiseLinOp(
+                hw, seed, dtype, by_row=False, register=register
+            )
+        elif noise_type == "ssrft":
+            mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+        elif noise_type == "phase":
+            if dtype not in COMPLEX_DTYPES:
+                raise ValueError(
+                    "Phase noise expects complex dtype! Use Rademacher instead"
+                )
+            mop = PhaseNoiseLinOp(
+                hw, seed, dtype, by_row=False, register=register, conj=False
+            )
+        else:
+            # unknown recovery type
+            supported = "rademacher, gaussian, ssrft, phase"
+            warnings.warn(
+                f"Unknown recovery type! {recovery_type} "
+                "Supported: {supported}"
+            )
+            mop = None
+        #
+        return mop
+
+    @staticmethod
+    def unitnorm_lop_entries(lop):
+        """Returns True if all ``lop`` entries must have unit norm."""
+        if type(lop) in {RademacherNoiseLinOp, PhaseNoiseLinOp}:
+            return True
+        elif type(lop) in {GaussianNoiseLinOp, SsrftNoiseLinOp}:
+            return False
+        else:
+            warnings.warn(
+                f"Unknown linop type {type(lop)}. Assumed to be non-unitnorm. ",
+                RuntimeWarning,
+            )
+            return False
 
 
 # ##############################################################################
@@ -118,13 +169,14 @@ def ssvd(
     recovery_type="singlepass",
     max_mp_workers=None,
     lstsq_rcond=1e-6,
+    dispatcher=SketchedAlgorithmDispatcher,
 ):
     """ """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     # figure out parallel mode and recovery settings
     parallel_mode = None if max_mp_workers is None else "mp"
-    recovery_fn, inner_dims = recovery_dispatcher(recovery_type, False)
+    recovery_fn, inner_dims = dispatcher.recovery(recovery_type, False)
     if (outer_dims > max(h, w)) or (
         inner_dims is not None and (inner_dims > max(h, w))
     ):
@@ -136,20 +188,20 @@ def ssvd(
     # instantiate outer measurement linops
     ro_seed = seed
     lo_seed = ro_seed + outer_dims + 1
-    ro_mop = noise_dispatcher(
+    ro_mop = dispatcher.mop(
         noise_type, (w, outer_dims), ro_seed, lop_dtype, register
     )
-    lo_mop = noise_dispatcher(
+    lo_mop = dispatcher.mop(
         noise_type, (h, outer_dims), lo_seed, lop_dtype, register
     )
     # instantiate inner measurement linops
     if inner_dims is not None:
         ri_seed = lo_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
-        ri_mop = noise_dispatcher(
+        ri_mop = dispatcher.mop(
             noise_type, (w, inner_dims), ri_seed, lop_dtype, register
         )
-        li_mop = noise_dispatcher(
+        li_mop = dispatcher.mop(
             noise_type, (h, inner_dims), li_seed, lop_dtype, register
         )
     # perform outer measurements
@@ -227,6 +279,7 @@ def seigh(
     max_mp_workers=None,
     lstsq_rcond=1e-6,
     by_mag=True,
+    dispatcher=SketchedAlgorithmDispatcher,
 ):
     """ """
     register = False  # set to True for seed debugging
@@ -236,22 +289,16 @@ def seigh(
     dims = h
     # figure out parallel mode and recovery settings
     parallel_mode = None if max_mp_workers is None else "mp"
-    recovery_fn, inner_dims = recovery_dispatcher(recovery_type, True)
+    recovery_fn, inner_dims = dispatcher.recovery(recovery_type, True)
     if (outer_dims > dims) or (inner_dims is not None and (inner_dims > dims)):
         raise ValueError("More measurements than rows/columns not supported!")
     if (inner_dims is not None) and inner_dims < outer_dims:
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
-    # instantiate right-combined measurement linop
-    combined_dims = outer_dims if inner_dims is None else inner_dims
-    r_seed = seed
-    r_mop = noise_dispatcher(
-        noise_type, (dims, combined_dims), r_seed, lop_dtype, register
-    )
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
-    ro_mop = noise_dispatcher(
+    ro_mop = dispatcher.mop(
         noise_type, (dims, outer_dims), ro_seed, lop_dtype, register
     )
     _, ro_sketch = perform_measurements(
@@ -281,10 +328,10 @@ def seigh(
         # if oversampled, perform inner measurements before solving
         ri_seed = ro_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
-        ri_mop = noise_dispatcher(
+        ri_mop = dispatcher.mop(
             noise_type, (dims, inner_dims), ri_seed, lop_dtype, register
         )
-        li_mop = noise_dispatcher(
+        li_mop = dispatcher.mop(
             noise_type, (dims, inner_dims), li_seed, lop_dtype, register
         )
         #
@@ -327,55 +374,85 @@ def xdiag(
     seed=0b1110101001010101011,
     noise_type="ssrft",
     max_mp_workers=None,
-    lstsq_rcond=1e-6,
     diagpp=False,
+    dispatcher=SketchedAlgorithmDispatcher,
 ):
-    """Diagonal sketched approximation.
-
-
-    1. QR orth of right measurements
-    2.
-
-    .. note::
-      Number of measurements equals ``(2 * outer_dims)``.
-    """
-    h, w = lop.shape
+    """Diagonal sketched approximation."""
+    register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
-        raise ValueError("SEIGH expects square operators!")
+        raise ValueError("XDiag expects square operators!")
     dims = h
+    # figure out parallel mode and recovery settings
+    parallel_mode = None if max_mp_workers is None else "mp"
     if outer_dims > dims:
         raise ValueError("outer_dims larger than operator rank!")
-    #
-    breakpoint()
-
-    # compute and orthogonalize random measurements
-    sketch1, measmat1 = rademacher_measurements(
-        lop, outer_dims, seed, dtype, device, adjoint=False, measmat=True
+    # instantiate outer measurement linop and perform outer measurements
+    ro_seed = seed
+    ro_mop = dispatcher.mop(
+        noise_type, (dims, outer_dims), ro_seed, lop_dtype, register
     )
-    Xt = torch.empty((outer_dims, lop.shape[1]), dtype=dtype, device=device)
-    Q, R = torch.linalg.qr(sketch1)
-    if diagpp:
-        for i in range(outer_dims):
-            Xt[i, :] = Q[:, i]
-    else:
-        # compute Smat and X, needed for XDiag
-        S = torch.linalg.pinv(R.T)
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(ro_mop)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for diagonal estimation! "
+            + "Check output and consider using Rademacher or PhaseNoise.",
+            RuntimeWarning,
+        )
+    _, ro_sketch = perform_measurements(
+        partial(
+            lop_measurement,
+            lop=lop,
+            meas_lop=ro_mop,
+            device=lop_device,
+            dtype=lop_dtype,
+        ),
+        range(outer_dims),
+        adjoint=False,
+        parallel_mode=parallel_mode,
+        compact=True,
+        max_mp_workers=max_mp_workers,
+    )
+    # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
+    # the first component. For DiagPP, X.H = Q.H @ A
+    Q, R = qr(ro_sketch, in_place_q=False, return_R=True)
+    _, Xh = perform_measurements(
+        partial(
+            lop_measurement,
+            lop=lop,
+            meas_lop=Q,
+            device=lop_device,
+            dtype=lop_dtype,
+        ),
+        range(outer_dims),
+        adjoint=True,
+        parallel_mode=parallel_mode,
+        compact=True,
+        max_mp_workers=max_mp_workers,
+    )
+    if not diagpp:
+        # For XDiag, X = I - (1/outer_dims)*(S @ S.H), where S is explained in
+        # the Xtrace paper, section 2.1. Then, Xh becomes Z @ Q.H @ A
+        S = torch.linalg.pinv(R.conj().T)
         S /= torch.linalg.norm(S, dim=0)
-        Smat = (S @ S.T) / -outer_dims
-        Smat[range(outer_dims), range(outer_dims)] += 1
-        for i in range(outer_dims):
-            Xt[i, :] = (Q @ Smat[:, i]) @ lop
-    # compute top diagonal as preliminary diag (efficient and exact)
-    d_recovery = (Q[:diag_dims, :] * Xt.T[:diag_dims, :]).sum(1)
-    # refine diagonal with deflated (and optionally Xchanged) Girard-Hutchinson
+        Z = (S @ S.conj().T) / -outer_dims
+        Z[range(outer_dims), range(outer_dims)] += 1
+        Xh = Z @ Xh
+    # top diagonal estimate is then Q @ X.H
+    d_top = (Q * Xh.conj().T).sum(1)
+    d_defl = torch.zeros_like(d_top)
+    # it remains to estimate the deflated (and optionally Xchanged) part via
+    # Girard-Hutchinson estimator.
     for i in range(outer_dims):
-        v_i = measmat1[:, i] / outer_dims
-        meas_i = sketch1[:diag_dims, i]
-        if not diagpp:
-            meas_i = meas_i - Q[:diag_dims, :] @ (Xt @ v_i)
-        d_recovery += v_i[:diag_dims] * meas_i
-    return d_recovery
+        v_i = get_measvec(i, ro_mop, lop_device, lop_dtype)
+        w_i = ro_sketch[:, i] - (Q @ (Xh @ v_i))
+        if is_noise_unitnorm:
+            d_defl += v_i * w_i
+        else:
+            d_defl += (v_i * w_i) / (v_i * v_i)
+    d_defl /= outer_dims
+    #
+    return (d_top + d_defl), (d_top, d_defl, Q, R)
 
 
 # ##############################################################################

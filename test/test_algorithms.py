@@ -8,10 +8,13 @@
 import pytest
 import torch
 import numpy as np
+from collections import defaultdict
+
 
 from skerch.utils import COMPLEX_DTYPES
 from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import ssvd, seigh, xdiag
+from skerch.algorithms import SketchedAlgorithmDispatcher, ssvd, seigh, xdiag
+from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices, max_mp_workers
 from . import svd_test_helper, eigh_test_helper
 
@@ -59,9 +62,10 @@ def seigh_recovery_shapes(request):
 
 @pytest.fixture
 def xdiag_recovery_shapes(request):
-    """Tuples in the form ``(dims, rank, outermeas)."""
+    """Tuples in the form ``(dims, rank, outermeas, rec_rtol)."""
     result = [
-        (30, 5, 15),
+        (100, 5, 50, 1e-5),
+        (100, 100, 50, 0.1),
         (200, 20, 35),
     ]
     if request.config.getoption("--quick"):
@@ -101,8 +105,63 @@ class BasicMatrixLinOp:
         return x @ self.matrix
 
 
+class ShiftedGaussianNoiseLinOp(GaussianNoiseLinOp):
+    """Gaussian noise plus a signed constant.
+
+    For a given gaussian noise entry ``x``, and a constant ``c``, this
+    linop contains the entry ``x+c`` if ``x`` was positive, and ``x-c``
+    otherwise.
+
+    :param shift: The shifting constant.
+    """
+
+    REGISTER = defaultdict(list)
+
+    def __init__(
+        self,
+        shape,
+        seed,
+        dtype,
+        by_row=False,
+        register=True,
+        mean=0.0,
+        std=1.0,
+        shift=1.0,
+    ):
+        """Initializer. See class docstring."""
+        super().__init__(shape, seed, dtype, by_row, register, mean, std)
+        self.shift = shift
+
+    def get_vector(self, idx, device):
+        """Samples a vector with standard Gaussian i.i.d. noise.
+
+        See base class definition for details.
+        """
+        result = super().get_vector(idx, device)
+        result = result + result.sign() * self.shift
+        return result
+
+
+class MyDispatcher(SketchedAlgorithmDispatcher):
+    """ """
+
+    @staticmethod
+    def mop(noise_type, hw, seed, dtype, register=False):
+        """ """
+        if "shifted" in noise_type:
+            shift = float(noise_type.split("_")[-1])
+            mop = ShiftedGaussianNoiseLinOp(
+                hw, seed, dtype, by_row=False, register=register, shift=shift
+            )
+        else:
+            mop = SketchedAlgorithmDispatcher.mop(
+                noise_type, hw, seed, dtype, register
+            )
+        return mop
+
+
 # ##############################################################################
-# # DISPATCHERS
+# # DISPATCHER
 # ##############################################################################
 
 
@@ -286,12 +345,13 @@ def test_xdiag_correctness(
                     dims,
                     rank,
                     outermeas,
+                    rec_rtol,
                 ) in xdiag_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
-                        decay=0,
+                        decay=100,
                         diag_ratio=0.0,
                         symmetric=False,
                         psd=False,
@@ -300,43 +360,28 @@ def test_xdiag_correctness(
                         device=device,
                     )
                     lop = BasicMatrixLinOp(mat)
-                    diag = mat.diag()
+                    D = mat.diag()
                     #
                     for noise_type, complex_only in noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        #
-                        diag, _ = xdiag(
+                        # run XDiag
+                        diag, (dtop, ddefl, Q, R) = xdiag(
                             lop,
                             device,
                             dtype,
                             outermeas,
                             seed,
-                            noise_type,
+                            "rademacher",
+                            # "shifted_10",
                             max_mp_workers,
                             diagpp=False,
+                            dispatcher=MyDispatcher,
                         )
-                        breakpoint()
-                        errmsg = (
-                            "SSVD error! "
-                            "{(seed, device, dtype, (hw, rank, outermeas, "
-                            "innermeas), noise_type, recovery_type)})"
-                        )
-                        # run SSVD
-                        U, S, Vh = ssvd(
-                            lop,
-                            device,
-                            dtype,
-                            outermeas,
-                            seed + 1,
-                            noise_type,
-                            recovery_type,
-                            max_mp_workers=max_mp_workers,
-                        )
-                        # test that output is correct and SVD-like
-                        try:
-                            svd_test_helper(mat, I, U, S, Vh, tol)
-                        except AssertionError as ae:
-                            raise AssertionError(errmsg) from ae
+
+                        import matplotlib.pyplot as plt
+
+                        # plt.clf(); plt.plot(D); plt.plot(diag); plt.show()
+                        # plt.clf(); plt.plot(D); plt.plot(diag); plt.plot(dtop, c="black"); plt.show()

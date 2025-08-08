@@ -30,7 +30,7 @@ from .utils import (
 # ##############################################################################
 # # CONVENIENCE WRAPPERS
 # ##############################################################################
-def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
+def get_measvec(idx, meas_lop, device=None, dtype=None):
     """ """
     if isinstance(meas_lop, torch.Tensor):
         measvec = meas_lop[:, idx]
@@ -41,6 +41,12 @@ def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
     else:
         measvec = meas_lop.get_vector(idx, device)
     #
+    return measvec
+
+
+def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
+    """ """
+    measvec = get_measvec(idx, meas_lop, device, dtype)
     result = (measvec.conj() @ lop) if adjoint else (lop @ measvec)
     return idx, result
 
@@ -53,7 +59,11 @@ def perform_measurements(
     compact=False,
     max_mp_workers=None,
 ):
-    """ """
+    """
+    :param meas_fn: Function callable with ``meas_fn(idx)`` that returns
+      the pair ``idx, v_idx``, where ``v_idx`` is a vector corresponding
+      to the desired measurement at given index.
+    """
     result = {}
     meas_fn = partial(meas_fn, adjoint=adjoint)
     #
