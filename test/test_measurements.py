@@ -90,7 +90,7 @@ def iid_noise_linop_types():
 @pytest.fixture
 def iid_hw_and_autocorr_tolerances():
     """Error tolerances for each complex dtype."""
-    hw = (20, 20)
+    hw = (50, 50)
     delta_at_least = 0.7
     nondelta_at_most = 0.5
     return hw, delta_at_least, nondelta_at_most
@@ -99,7 +99,7 @@ def iid_hw_and_autocorr_tolerances():
 @pytest.fixture
 def ssrft_hw_and_autocorr_tolerances():
     """Error tolerances for each complex dtype."""
-    hw = (30, 10)
+    hw = (50, 40)
     delta_at_least = 0.7
     nondelta_at_most = 0.5
     return hw, delta_at_least, nondelta_at_most
@@ -579,13 +579,23 @@ def test_iid_measurements_correctness(
                     )
                     # Columns/rows behave like iid noise (delta autocorr)
                     for x in mat1a:  # x is a row
-                        autocorrelation_test_helper(
-                            x, delta_at_least, nondelta_at_most
-                        )
+                        try:
+                            autocorrelation_test_helper(
+                                x, delta_at_least, nondelta_at_most
+                            )
+                        except AssertionError as ae:
+                            raise AssertionError(
+                                "IID autocorr error (row)"
+                            ) from ae
                     for x in mat1a.H:  # x is a column
-                        autocorrelation_test_helper(
-                            x, delta_at_least, nondelta_at_most
-                        )
+                        try:
+                            autocorrelation_test_helper(
+                                x, delta_at_least, nondelta_at_most
+                            )
+                        except AssertionError as ae:
+                            raise AssertionError(
+                                "IID autocorr error (col)"
+                            ) from ae
                     # matmul and rmatmul with linop is same as with matrix
                     v1 = torch.randn(hw[0], dtype=dtype, device=device)
                     v2 = torch.randn(hw[1], dtype=dtype, device=device)
@@ -820,13 +830,23 @@ def test_ssrft_correctness(
                 mat = linop_to_matrix(lop, dtype, device, adjoint=False)
                 # Columns/rows behave like iid noise (delta autocorr)
                 for x in mat:  # x is a row
-                    autocorrelation_test_helper(
-                        x, delta_at_least, nondelta_at_most
-                    )
+                    try:
+                        autocorrelation_test_helper(
+                            x, delta_at_least, nondelta_at_most
+                        )
+                    except AssertionError as ae:
+                        raise AssertionError(
+                            "SSRFT autocorr error (row)"
+                        ) from ae
                 for x in mat.H:  # x is a column
-                    autocorrelation_test_helper(
-                        x, delta_at_least, nondelta_at_most
-                    )
+                    try:
+                        autocorrelation_test_helper(
+                            x, delta_at_least, nondelta_at_most
+                        )
+                    except AssertionError as ae:
+                        raise AssertionError(
+                            "SSRFT autocorr error (col)"
+                        ) from ae
                 # matmul and rmatmul with linop is same as with matrix
                 v1 = torch.randn(hw[0], dtype=dtype, device=device)
                 v2 = torch.randn(hw[1], dtype=dtype, device=device)

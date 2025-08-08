@@ -4,11 +4,10 @@
 
 """
 TODO, to finish algorithms
-* finish xdiag utests (diag, orth, devices, correctness)
-* integrate lowtriang, xtrace and utest
 * Test dispatcher: create new type of noise etc
 * formal tests for algorithms and dispatchers
-* xdiagh
+* xdiagh, diagpph, xtrace, xtraceh
+
 
 
 LATER TODO:
@@ -22,7 +21,6 @@ LATER TODO:
 * xtrace and xtraceh
 * what about generalized_nystrom_xdiag?
 * sketched permutations
-
 
 
 CHANGELOG:
@@ -476,9 +474,10 @@ def diagpp(
                 meas_i = lop @ v_i
                 w_i = meas_i - Q @ (meas_i.conj() @ Q).conj()
             if is_noise_unitnorm:
-                d_defl += v_i * w_i
+                d_defl += v_i.conj() * w_i
             else:
-                d_defl += (v_i * w_i) / (v_i * v_i)
+                v_i_c = v_i.conj()
+                d_defl += (v_i_c * w_i) / (v_i_c * v_i)
     d_defl /= defl_dims + extra_gh_meas
     #
     return (d_top + d_defl), (d_top, d_defl, Q, R)
@@ -504,11 +503,10 @@ def xdiag(
     parallel_mode = None if max_mp_workers is None else "mp"
     if defl_dims > dims:
         raise ValueError("defl_dims larger than operator rank!")
-    if defl_dims < 0:
-        raise ValueError("Negative number of measurements?")
+    if defl_dims <= 0:
+        raise ValueError("No measurements?")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
-
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
@@ -561,9 +559,10 @@ def xdiag(
         v_i = get_measvec(i, ro_mop, lop_device, lop_dtype)
         w_i = ro_sketch[:, i] - (Q @ (Xh @ v_i))
         if is_noise_unitnorm:
-            d_defl += v_i * w_i
+            d_defl += v_i.conj() * w_i
         else:
-            d_defl += (v_i * w_i) / (v_i * v_i)
+            v_i_c = v_i.conj()
+            d_defl += (v_i_c * w_i) / (v_i_c * v_i)
     d_defl /= defl_dims
     #
     return (d_top + d_defl), (d_top, d_defl, Q, R)

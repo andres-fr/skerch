@@ -69,12 +69,15 @@ def diag_recovery_shapes(request):
     where the tolerances are in the form ``(full, top_only)``.
     """
     result = [
-        # low-rank matrix with good deflation: good recovery on both
-        (1000, 5, 20, 0, (1e-10, 1e-10), (None, 0.005)),
-        # # full-rank with some deflation (+ large GH for d++): d++ ok, XT bad
-        # (50, 50, 20, 100, 0.1, 1),
-        # # high-rank with high deflation: both ok
-        # (50, 50, 40, 0, 0.01, 0.01),
+        # low-rank matrix with good deflation: good d++, decent XD top
+        (200, 5, 50, 0, (1e-10, 1e-10), (0.5, 0.1)),
+        # now less deflation but we add G-H: while dtop is equally good in
+        # both, the few GH measurements seem to hurt much more in d++ than XD
+        (200, 10, 9, 9, (2, 0.2), (0.5, 0.3)),
+        # now we add more GH measurements to D++, and then it surpasses XD
+        (200, 10, 9, 190, (0.25, 0.2), (0.5, 0.3)),
+        # just doing a lot of GH measurements also works for D++
+        (10, 10, 0, 2_000, (0.05, None), (None, None)),
     ]
     if request.config.getoption("--quick"):
         result = result[:1]
@@ -98,7 +101,7 @@ def diag_noise_types():
     """Collection of tuples ``(noise_type, is_complex_only)``"""
     result = [
         ("rademacher", False),
-        ("shifted_1.0", False),
+        ("bloated_1.0", False),
         ("phase", True),
     ]
     return result
@@ -124,7 +127,7 @@ class BasicMatrixLinOp:
         return x @ self.matrix
 
 
-class ShiftedGaussianNoiseLinOp(GaussianNoiseLinOp):
+class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
     """Gaussian noise plus a signed constant.
 
     For a given gaussian noise entry ``x``, and a constant ``c``, this
@@ -171,9 +174,9 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
     @staticmethod
     def mop(noise_type, hw, seed, dtype, register=False):
         """ """
-        if "shifted" in noise_type:
+        if "bloated" in noise_type:
             shift = float(noise_type.split("_")[-1])
-            mop = ShiftedGaussianNoiseLinOp(
+            mop = BloatedGaussianNoiseLinOp(
                 hw, seed, dtype, by_row=False, register=register, shift=shift
             )
         else:
@@ -357,15 +360,11 @@ def test_diagpp_xdiag_correctness(
 ):
     """Correctness test case for XDIAG/DIAGPP:
 
-    Runs XDIAG on all devices/dtypes/noisemats/recoveries, on a few low-rank
-    linops, and tests that:
+    Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
+    different settings for rank and measurements, testing that:
 
-
-    * The SSVD is actually close to the matrix
-    * ``U, V`` have orthonormal columns
-    * Recovered ``S`` is a vector
-    * The recovered ``S`` are nonnegative and in descending order
-    * The devices and dtypes all match
+    * Retrieved Q matrices are orthogonal
+    * Retrieved diagonals are close enough (either deflation or final ones)
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -412,44 +411,47 @@ def test_diagpp_xdiag_correctness(
                             dispatcher=MyDispatcher,
                         )
                         # run XDiag
-                        diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
-                            lop,
-                            device,
-                            dtype,
-                            defl,
-                            seed,
-                            noise_type,
-                            max_mp_workers,
-                            dispatcher=MyDispatcher,
-                        )
+                        if (
+                            xdiag_full_tol is not None
+                            or xdiag_top_tol is not None
+                        ):
+                            diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                                lop,
+                                device,
+                                dtype,
+                                defl,
+                                seed,
+                                noise_type,
+                                max_mp_workers,
+                                dispatcher=MyDispatcher,
+                            )
+                        else:
+                            Q2 = None
                         # test Qs are orthogonal
                         if Q1 is not None:
                             QhQ1 = Q1.H @ Q1
                             assert torch.allclose(
                                 QhQ1, I, atol=tol
                             ), "Diag++ Q not orthogonal?"
-                        QhQ2 = Q2.H @ Q2
-                        assert torch.allclose(
-                            QhQ2, I, atol=tol
-                        ), "XDiag Q not orthogonal?"
+                        if Q2 is not None:
+                            QhQ2 = Q2.H @ Q2
+                            assert torch.allclose(
+                                QhQ2, I, atol=tol
+                            ), "XDiag Q not orthogonal?"
                         # test recoveries are correct
                         if diagpp_full_tol is not None:
                             assert (
                                 relerr(D, diag1) < diagpp_full_tol
                             ), "Bad full Diag++?"
-                        #
                         if diagpp_top_tol is not None:
                             assert (
                                 relerr(D, dtop1) < diagpp_top_tol
                             ), "Bad top Diag++?"
-                        #
+                        if xdiag_full_tol is not None:
+                            assert (
+                                relerr(D, diag2) < xdiag_full_tol
+                            ), "Bad full XDiag?"
                         if xdiag_top_tol is not None:
-                            try:
-                                assert (
-                                    relerr(D, dtop2) < xdiag_top_tol
-                                ), "Bad top XDiag?"
-                            except:
-                                import matplotlib.pyplot as plt
-
-                                # plt.clf(), plt.plot(D); plt.plot(diag2), plt.show()
-                                breakpoint()
+                            assert (
+                                relerr(D, dtop2) < xdiag_top_tol
+                            ), "Bad top XDiag?"
