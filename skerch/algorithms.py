@@ -3,10 +3,18 @@
 
 
 """
-TODO, to finish algorithms
-* Test dispatcher: create new type of noise etc
-* formal tests for algorithms and dispatchers
-* xdiagh, diagpph, xtrace, xtraceh
+TODO, finish algorithms:
+* sketchlord, sketchlordh
+* xdiagh, diagpph, xtrace, xtraceh, triangular
+* unit tests for remaining algorithms
+* priori and posteriori stuff
+* Integration tests (add utests where needed):
+  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
+  - scale up: good recovery of very large composite linop, quick.
+  - priori and posteriori...
+* add remaining todos as issues:
+
+
 
 
 
@@ -14,9 +22,6 @@ LATER TODO:
 * HDF5 measurement/wrapper API
 * a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
-* Integration tests (add utests where needed):
-  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
-  - scale up: good recovery of very large composite linop, quick.
 * sketchlord and sketchlordh.
 * xtrace and xtraceh
 * what about generalized_nystrom_xdiag?
@@ -33,7 +38,12 @@ CHANGELOG:
   - Modular measurement API supporting multiprocessing and HDF5
   - Modular recovery methods (singlepass, Nystrom, oversampled) for
     general and symmetric low-rank matrices
-  - Algorithms: XDiag/DiagPP, SSVD/SEIGH, Sketchlord, Triangular
+* Algorithm API:
+  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Sketchlord, Triangular
+  - Efficient support for Hermitian versions
+  - Dispatcher for modularized use of noise sources and recovery types
+  - Matrix-free a-posteriori error verification
+
 * A-posteriori error verification
 * A-priori hyperparameter selection
 """
@@ -66,8 +76,8 @@ class SketchedAlgorithmDispatcher:
     such as noise measurement types and recovery algorithms.
 
     The goal of such a dispatcher is to help simplifying the interface of the
-    sketched algorithms, so users have to provide less details and errors due
-    to incorrect/inconsistent inputs are prevented.
+    sketched algorithms, so users have to provide less details and there are
+    less errors due to incorrect/inconsistent inputs.
 
     The downside is that flexibility is reduced: If users want to test a new
     type of noise or recovery algorithm, this dispatcher will not work.

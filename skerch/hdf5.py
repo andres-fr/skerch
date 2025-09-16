@@ -147,7 +147,10 @@ class DistributedHDF5:
 
     @classmethod
     def load(cls, path, filemode="r+"):
-        """Load an individual dataset created via :meth:`.create`.
+        """Load an individual dataset.
+
+        Load an individual dataset, such as the ones created via
+        :meth:`.create` or merged via :meth:`merge_all`.
 
         :param path: One of the subpaths returned by :meth:`.create`.
         :param filemode: Default is 'r+', read/write, file must preexist. See
@@ -164,26 +167,6 @@ class DistributedHDF5:
         data = h5f[cls.DATA_NAME]
         flag = h5f[cls.FLAG_NAME]
         return data, flag, h5f
-
-    @classmethod
-    def load_virtual(cls, all_path, filemode="r+"):
-        """Load a merged dataset created via :meth:`.create`.
-
-        :param path: The ``all_path`` returned by :meth:`.create`.
-        :param filemode: Default is 'r+', read/write, file must preexist. See
-          documentation of ``h5py.File`` for more details.
-        :returns: ``(data, flag, h5f)``, where ``data`` is the dataset
-          for the numerical measurements, ``flag`` is the dataset for state
-          tracking, and ``h5f`` is the (open) HDF5 file handle.
-
-        .. note::
-
-          Remember to ``h5f.close()`` once done with this file.
-        """
-        all_h5f = h5py.File(all_path, filemode)
-        data = all_h5f[cls.DATA_NAME]
-        flags = all_h5f[cls.FLAG_NAME]
-        return data, flags, all_h5f
 
     @classmethod
     def analyze_virtual(cls, all_path, check_success_flag=None):
@@ -204,7 +187,7 @@ class DistributedHDF5:
         # load virtual HDF5 and grab main infos. Note that we avoid
         # using data and flags for anything else, since they may be affected by
         # the "too many open files" OS issue.
-        data, flags, h5f = DistributedHDF5.load_virtual(all_path, filemode="r")
+        data, flags, h5f = DistributedHDF5.load(all_path, filemode="r")
         data_shape, flags_shape = data.shape, flags.shape
         data_dtype, flags_dtype = data.dtype, flags.dtype
         abspath = h5f.filename
@@ -226,16 +209,17 @@ class DistributedHDF5:
                 (b, e + 1) for b, e in zip(*vs.vspace.get_select_bounds())
             )
             shape = tuple(e - b for b, e in begs_ends)
-            assert shape == (1,), "Flags expected to have shape (1,)!"
+            if shape != (1,):
+                raise AssertionError("Flags expected to have shape (1,)!")
             flag_map[begs_ends] = subpath
             flag_subshapes.append(shape)
         subpaths = set(data_map.values())
-        # figure out position of filedim was first or last
-        is_filedim = [
-            (a - b) == 0 for a, b in zip(data_shape, data_subshapes[0])
-        ]
-        assert sum(is_filedim) == 1, "Only one running dimension supported!"
-        filedim_idx = is_filedim.index(False)
+        # figure out position of filedim was first or last.
+        # all dims should match except for one, which is the filedim
+        is_filedim = [a != b for a, b in zip(data_shape, data_subshapes[0])]
+        if sum(is_filedim) != 1:
+            raise AssertionError("Exactly one running dimension expected!")
+        filedim_idx = is_filedim.index(True)
         # virtual sanity check and close virtual
         data_beginnings = {k[filedim_idx][0] for k in data_map.keys()}
         assert len(data_beginnings) == len(

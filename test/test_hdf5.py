@@ -61,15 +61,18 @@ def shapes_too_many_files(request):
 # # DISTRIBUTED HDF5
 # ##############################################################################
 def test_hdf5_merge():
-    """
-    Test here:
+    """Test case for ``DistributedHDF5`` merging.
 
-    create the layout, populate it and merge while checking flag
-
-    test behaviour with and without deleting subfiles
+    Creates a DistributedHDF5 layout and fills it with random values. Checks
+    that written data is indeed in virtual datasets. Then merges it and checks:
+    * Merged flags are correct
+    * Merged numerical data is correct
+    * Merged datasets are not virtual
+    * Virtual files are deleted if in_place, and kept otherwise
     """
     # create test array
     num_files, shape, seed, dtype = 10, (3, 4, 5), 12345, torch.float32
+    flag_str = "success"
     arr = gaussian_noise(
         (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
     ).numpy()
@@ -88,18 +91,33 @@ def test_hdf5_merge():
         for i in range(num_files):
             vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
             vals[:] = arr[i]
-            flag[0] = f"good_{i}"
+            flag[0] = flag_str
             h5.close()
+        # load ALL layout, check that it contains virtual data
+        all_data, all_flags, all_h5 = DistributedHDF5.load(h5_path)
+        for ds in all_h5.values():
+            assert ds.is_virtual, f"HDF5 layout not virtual?"
+        all_h5.close()
         # merge layout into monolithic file
         DistributedHDF5.merge_all(
             h5_path,
             delete_subfiles_while_merging=in_place,
+            check_success_flag=flag_str,
         )
-
-        all_data, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
-        for i in range(num_files):
-            vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-            breakpoint()
+        # load file again. Now it is non-virtual, contents are correct
+        all_data, all_flags, all_h5 = DistributedHDF5.load(h5_path)
+        assert all(
+            [flag_str == s.decode() for s in all_flags[:]]
+        ), "Unsuccessful flags in merged array!"
+        assert np.array_equal(all_data, arr), "Wrong merged array!"
+        for ds in all_h5.values():
+            assert not ds.is_virtual, f"HDF5 still virtual? {ds}"
+        # check that partial data was/wasn't deleted
+        num_tmp = len(os.listdir(tmpdir.name))
+        expected = 1 if in_place else num_files + 1
+        assert num_tmp == expected, "Wrong number of files after merging?"
+        all_h5.close()
+        tmpdir.cleanup()
 
 
 def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
@@ -151,12 +169,10 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                         vals[:] = arr_base[i]
                         flag[0] = f"good_{i}"
                         h5.close()
-                    # LOAD_VIRTUAL TEST
+                    # LOAD TEST
                     # test that separate files and merger are correct in
                     # content+shape, and that flags were all set to correct
-                    all_vals, all_flags, all_h5 = DistributedHDF5.load_virtual(
-                        h5_path
-                    )
+                    all_vals, all_flags, all_h5 = DistributedHDF5.load(h5_path)
                     assert (
                         all_vals.shape == arr.shape
                     ), "Wrong merged dataset shape!"
@@ -226,7 +242,7 @@ def test_hdf5_too_many_files(shapes_too_many_files):
             flag[0] = str(i)
             h5.close()
         # test that separate files  are correct
-        all_vals, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
+        all_vals, all_flags, all_h5 = DistributedHDF5.load(h5_path)
         assert all_vals.shape == tnsr.shape, "Wrong merged dataset shape!"
         # but here is the catch, merger is not correct!
         # this is due to file limit being exceeded, overflown values are empty

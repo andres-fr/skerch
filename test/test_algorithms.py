@@ -135,6 +135,9 @@ class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
     otherwise.
 
     :param shift: The shifting constant.
+
+    Used in diag test case to test the ability to incorporate custom noise
+    sources via custom dispatchers.
     """
 
     REGISTER = defaultdict(list)
@@ -169,7 +172,7 @@ class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
 
 
 class MyDispatcher(SketchedAlgorithmDispatcher):
-    """ """
+    """Used here to test the ability to use custom dispatchers."""
 
     @staticmethod
     def mop(noise_type, hw, seed, dtype, register=False):
@@ -187,14 +190,9 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
 
 
 def relerr(ori, rec):
-    """Relative square error in the form ``(frob(ori - rec) / frob(ori))**2``."""
+    """Relative error in the form ``(frob(ori - rec) / frob(ori))**2``."""
     result = (ori - rec).norm() / ori.norm()
     return result**2
-
-
-# ##############################################################################
-# # DISPATCHER
-# ##############################################################################
 
 
 # ##############################################################################
