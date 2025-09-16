@@ -27,8 +27,8 @@ from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
 def dtypes_tols():
     """Error tolerances for each dtype."""
     result = {
-        torch.float32: 1e-2,
-        torch.complex64: 1e-2,
+        torch.float32: 1e-5,
+        torch.complex64: 1e-5,
         torch.float64: 1e-10,
         torch.complex128: 1e-10,
     }
@@ -77,17 +77,18 @@ def hadamard_testcases():
     """
     case1 = (
         [1, 2, 3, 4, 5, 6, 7],
-        #
+        # subdiag: idx=i
         [
             [1, 2, 3, 4, 5, 6, 7],
             [0, 1, 2, 3, 4, 5, 6],
             [0, 0, 1, 2, 3, 4, 5],
             [0, 0, 0, 1, 2, 3, 4],
-            [0, 0, 0, 0, 2, 3, 3],
-            [0, 0, 0, 0, 0, 3, 2],
+            [0, 0, 0, 0, 1, 2, 3],
+            [0, 0, 0, 0, 0, 1, 2],
             [0, 0, 0, 0, 0, 0, 1],
             [0, 0, 0, 0, 0, 0, 0],
         ],
+        # subdiag: idx=-1
         [
             [1, 2, 3, 4, 5, 6, 7],
             [2, 3, 4, 5, 6, 7, 0],
@@ -98,13 +99,68 @@ def hadamard_testcases():
             [7, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0],
         ],
-        [],
-        [],
-        #
-        [],
-        [],
-        [],
-        [],
+        # subdiag: idxs = 0, ... i
+        [
+            [1, 2, 3, 4, 5, 6, 7],
+            [1, 3, 5, 7, 9, 11, 13],
+            [1, 3, 6, 9, 12, 15, 18],
+            [1, 3, 6, 10, 14, 18, 22],
+            [1, 3, 6, 10, 15, 20, 25],
+            [1, 3, 6, 10, 15, 21, 27],
+            [1, 3, 6, 10, 15, 21, 28],
+            [1, 3, 6, 10, 15, 21, 28],
+        ],
+        # subdiag: idxs = 0, ... -i
+        [
+            [1, 2, 3, 4, 5, 6, 7],
+            [3, 5, 7, 9, 11, 13, 7],
+            [6, 9, 12, 15, 18, 13, 7],
+            [10, 14, 18, 22, 18, 13, 7],
+            [15, 20, 25, 22, 18, 13, 7],
+            [21, 27, 25, 22, 18, 13, 7],
+            [28, 27, 25, 22, 18, 13, 7],
+            [28, 27, 25, 22, 18, 13, 7],
+        ],
+        # serrated: lower, with diag
+        [
+            [1, 2, 3, 4, 5, 6, 7],  # blocksize=1
+            [1, 3, 3, 7, 5, 11, 7],  # blocksize=2
+            [1, 3, 6, 4, 9, 15, 7],  # blocksize=3
+            [1, 3, 6, 10, 5, 11, 18],
+            [1, 3, 6, 10, 15, 6, 13],
+            [1, 3, 6, 10, 15, 21, 7],
+            [1, 3, 6, 10, 15, 21, 28],
+        ],
+        # serrated: lower, without diag (like z1 but subtractin 1st row)
+        [
+            [0, 0, 0, 0, 0, 0, 0],  # blocksize=1
+            [0, 1, 0, 3, 0, 5, 0],  # blocksize=2
+            [0, 1, 3, 0, 4, 9, 0],  # blocksize=3
+            [0, 1, 3, 6, 0, 5, 11],
+            [0, 1, 3, 6, 10, 0, 6],
+            [0, 1, 3, 6, 10, 15, 0],
+            [0, 1, 3, 6, 10, 15, 21],
+        ],
+        # serrated: upper, with diag
+        [
+            [1, 2, 3, 4, 5, 6, 7],  # blocksize=1
+            [1, 5, 3, 9, 5, 13, 7],  # blocksize=2
+            [1, 9, 7, 4, 18, 13, 7],  # blocksize=3
+            [6, 5, 3, 22, 18, 13, 7],
+            [3, 2, 25, 22, 18, 13, 7],
+            [1, 27, 25, 22, 18, 13, 7],
+            [28, 27, 25, 22, 18, 13, 7],
+        ],
+        # serrated: upper, without diag
+        [
+            [0, 0, 0, 0, 0, 0, 0],  # blocksize=1
+            [0, 3, 0, 5, 0, 7, 0],  # blocksize=2
+            [0, 7, 4, 0, 13, 7, 0],  # blocksize=3
+            [5, 3, 0, 18, 13, 7, 0],
+            [2, 0, 22, 18, 13, 7, 0],
+            [0, 25, 22, 18, 13, 7, 0],
+            [27, 25, 22, 18, 13, 7, 0],
+        ],
     )
     #
     result = [case1]
@@ -587,12 +643,9 @@ def test_htr(rng_seeds, torch_devices, dtypes_tols):
                 m2b = htr(m2, in_place=True)
                 v2b = htr(v2, in_place=True)
                 # correctness: ori.T = ori_T_conj because conj was inplace
-                try:
-                    assert (
-                        m1.T == m1b
-                    ).all(), "Incorrect torch mat transp! (inplace=True)"
-                except:
-                    breakpoint()
+                assert (
+                    m1.T == m1b
+                ).all(), "Incorrect torch mat transp! (inplace=True)"
                 assert (
                     v1 == v1b
                 ).all(), "Incorrect torch vec transp! (inplace=True)"
@@ -638,10 +691,22 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                 x = torch.tensor(x, dtype=dtype, device=device)
                 y1 = torch.tensor(y1, dtype=dtype, device=device)
                 y2 = torch.tensor(y2, dtype=dtype, device=device)
+                y3 = torch.tensor(y3, dtype=dtype, device=device)
+                y4 = torch.tensor(y4, dtype=dtype, device=device)
+                z1 = torch.tensor(z1, dtype=dtype, device=device)
+                z2 = torch.tensor(z2, dtype=dtype, device=device)
+                z3 = torch.tensor(z3, dtype=dtype, device=device)
+                z4 = torch.tensor(z4, dtype=dtype, device=device)
                 if dtype in COMPLEX_DTYPES:
                     x = x + 1j * x
                     y1 = y1 + 1j * y1
                     y2 = y2 + 1j * y2
+                    y3 = y3 + 1j * y3
+                    y4 = y4 + 1j * y4
+                    z1 = z1 + 1j * z1
+                    z2 = z2 + 1j * z2
+                    z3 = z3 + 1j * z3
+                    z4 = z4 + 1j * z4
                 # empty idxs list raises error
                 with pytest.raises(ValueError):
                     subdiag_hadamard_pattern(x, [])
@@ -650,28 +715,78 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                     serrated_hadamard_pattern(x, 0)
                 with pytest.raises(ValueError):
                     serrated_hadamard_pattern(x, -1)
-                #
+                with pytest.raises(ValueError):
+                    serrated_hadamard_pattern(x, len(x) + 1)
+                # subdiag_hadamard_pattern
+                for i in range(dims + 1):
+                    for fft in (False, True):
+                        msg = " (FFT)" if fft else ""
+                        # subdiag with i produces a right shift
+                        w = subdiag_hadamard_pattern(x, [i], use_fft=fft)
+                        assert torch.allclose(y1[i], w, atol=tol), (
+                            "Wrong subdiag positive shift!" + msg
+                        )
+                        # subdiag with -i produces a left shift
+                        w = subdiag_hadamard_pattern(x, [-i], use_fft=fft)
+                        assert torch.allclose(y2[i], w, atol=tol), (
+                            "Wrong subdiag negative shift!" + msg
+                        )
+                        # subdiag with 0,1...i is a right-cumulative shift
+                        idxs = torch.arange(i + 1)
+                        w = subdiag_hadamard_pattern(x, idxs, use_fft=fft)
+                        assert torch.allclose(y3[i], w, atol=tol), (
+                            "Wrong cumulative positive shift!" + msg
+                        )
+                        # subdiag with 0,-1...-i is a left-cumulative shift
+                        w = subdiag_hadamard_pattern(x, -idxs, use_fft=fft)
+                        assert torch.allclose(y4[i], w, atol=tol), (
+                            "Wrong cumulative negative shift!" + msg
+                        )
+                # serrated_hadamard_pattern
                 for i in range(dims):
-                    # subdiag pattern with i produces a right shift
-                    w1 = subdiag_hadamard_pattern(x, [i], use_fft=False)
-                    w2 = subdiag_hadamard_pattern(x, [-i], use_fft=True)
-                    breakpoint()
-                    # assert torch.allclose(y1[i], w1), "asdf"
-                    # try:
-                    #     assert torch.allclose(y2[i], w2), "fdsa"
-                    # except:
-                    #     breakpoint()
-                    # breakpoint()
-                    # # subdiag pattern with -i produces a left shift
-                    # w1 = subdiag_hadamard_pattern(v, [-i], use_fft=False)
-                    # w2 = subdiag_hadamard_pattern(v, [-i], use_fft=True)
-                    # # subdiag pattern with 0,1...i is a right-cumulative shift
-                    # idxs = torch.arange(i + 1)
-                    # w1 = subdiag_hadamard_pattern(v, idxs, use_fft=False)
-                    # w2 = subdiag_hadamard_pattern(v, idxs, use_fft=True)
-                    # # subdiag pattern with 0,-1...-i is a left-cumulative shift
-                    # w1 = subdiag_hadamard_pattern(v, -idxs, use_fft=False)
-                    # w2 = subdiag_hadamard_pattern(v, -idxs, use_fft=True)
-
-                    # # serrated_hadamard_pattern
-                    # breakpoint()
+                    for fft in (False, True):
+                        msg = " (FFT)" if fft else ""
+                        # serrated pattern: lower, with main diag
+                        w = serrated_hadamard_pattern(
+                            x,
+                            i + 1,
+                            with_main_diagonal=True,
+                            lower=True,
+                            use_fft=fft,
+                        )
+                        assert torch.allclose(z1[i], w, atol=tol), (
+                            "Wrong serrated lower with main diag!" + msg
+                        )
+                        # serrated pattern: lower, without main diag
+                        w = serrated_hadamard_pattern(
+                            x,
+                            i + 1,
+                            with_main_diagonal=False,
+                            lower=True,
+                            use_fft=fft,
+                        )
+                        assert torch.allclose(z2[i], w, atol=tol), (
+                            "Wrong serrated lower without main diag!" + msg
+                        )
+                        # serrated pattern: upper, with main diag
+                        w = serrated_hadamard_pattern(
+                            x,
+                            i + 1,
+                            with_main_diagonal=True,
+                            lower=False,
+                            use_fft=fft,
+                        )
+                        assert torch.allclose(z3[i], w, atol=tol), (
+                            "Wrong serrated upper with main diag!" + msg
+                        )
+                        # serrated pattern: upper, without main diag
+                        w = serrated_hadamard_pattern(
+                            x,
+                            i + 1,
+                            with_main_diagonal=False,
+                            lower=False,
+                            use_fft=fft,
+                        )
+                        assert torch.allclose(z4[i], w, atol=tol), (
+                            "Wrong serrated upper without main diag!" + msg
+                        )

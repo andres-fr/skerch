@@ -405,19 +405,21 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
         raise ValueError("Empty diag_idxs?")
     len_v = len(v)
     if use_fft:
+        fft = torch.fft.fft if v.dtype in COMPLEX_DTYPES else torch.fft.rfft
+        ifft = torch.fft.ifft if v.dtype in COMPLEX_DTYPES else torch.fft.irfft
         # create a buffer of zeros to avoid circular conv and store the
         # convolutional impulse response
         buff = torch.zeros(2 * len_v, dtype=v.dtype, device=v.device)
         # padded FFT to avoid circular convolution
         buff[:len_v] = v
-        V = torch.fft.rfft(buff)
+        V = fft(buff)
         # now we can write the impulse response on buff
         buff[:len_v] = 0
         for idx in diag_idxs:
             buff[idx] = 1
         # non-circular FFT convolution:
-        V *= torch.fft.rfft(buff)
-        V = torch.fft.irfft(V)[:len_v]
+        V *= fft(buff)
+        V = ifft(V)[:len_v]
         return V
     else:
         result = torch.zeros_like(v)
@@ -486,10 +488,11 @@ def serrated_hadamard_pattern(
     * ``v10 + v9``
     * ``v10``
     """
-    if blocksize < 1:
-        raise ValueError("Block size must be a positive scalar!")
-    #
     len_v = len(v)
+    if blocksize < 1 or blocksize > len_v:
+        raise ValueError("Block size must be an integer from 1 to len(v)!")
+    #
+
     if use_fft:
         if lower:
             idxs = range(len_v) if with_main_diagonal else range(1, len_v)
