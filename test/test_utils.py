@@ -27,8 +27,20 @@ from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
 def dtypes_tols():
     """Error tolerances for each dtype."""
     result = {
-        torch.float32: 1e-2,  # not very small due to pinv/lstsq
+        torch.float32: 1e-2,
         torch.complex64: 1e-2,
+        torch.float64: 1e-10,
+        torch.complex128: 1e-10,
+    }
+    return result
+
+
+@pytest.fixture
+def dtypes_tols_badcond():
+    """Error tolerances for each dtype (f32 looser due to pinv/lstsq)"""
+    result = {
+        torch.float32: 1e-2,  # not very small due to pinv/lstsq
+        torch.complex64: 1e-2,  # not very small due to pinv/lstsq
         torch.float64: 1e-10,
         torch.complex128: 1e-10,
     }
@@ -67,12 +79,13 @@ def hadamard_testcases():
         [1, 2, 3, 4, 5, 6, 7],
         #
         [
+            [1, 2, 3, 4, 5, 6, 7],
             [0, 1, 2, 3, 4, 5, 6],
             [0, 0, 1, 2, 3, 4, 5],
             [0, 0, 0, 1, 2, 3, 4],
-            [0, 0, 0, 0, 1, 2, 3],
-            [0, 0, 0, 0, 0, 2, 3],
-            [0, 0, 0, 0, 0, 0, 3],
+            [0, 0, 0, 0, 2, 3, 3],
+            [0, 0, 0, 0, 0, 3, 2],
+            [0, 0, 0, 0, 0, 0, 1],
             [0, 0, 0, 0, 0, 0, 0],
         ],
         [
@@ -403,7 +416,7 @@ def test_qr(rng_seeds, torch_devices, dtypes_tols):
                 assert R2.dtype == arr.dtype, "Incorrect numpy R dtype?"
 
 
-def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
+def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols_badcond):
     """Test case for matrix inversion wrappers (formal and correctness).
 
     * ``pinv`` yields the correct inverse
@@ -413,7 +426,7 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols):
     hw = (10, 10)
     for seed in rng_seeds:
         for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+            for dtype, tol in dtypes_tols_badcond.items():
                 tnsr = gaussian_noise(hw, 0, 1, seed, dtype, device)
                 arr = tnsr.cpu().numpy()
                 Itnsr = torch.eye(hw[1], dtype=dtype, device=device)
@@ -624,32 +637,41 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                 dims = len(x)
                 x = torch.tensor(x, dtype=dtype, device=device)
                 y1 = torch.tensor(y1, dtype=dtype, device=device)
-                breakpoint()
-
+                y2 = torch.tensor(y2, dtype=dtype, device=device)
+                if dtype in COMPLEX_DTYPES:
+                    x = x + 1j * x
+                    y1 = y1 + 1j * y1
+                    y2 = y2 + 1j * y2
                 # empty idxs list raises error
                 with pytest.raises(ValueError):
-                    subdiag_hadamard_pattern(v, [])
+                    subdiag_hadamard_pattern(x, [])
                 # nonpositive blocksize raises error
                 with pytest.raises(ValueError):
-                    serrated_hadamard_pattern(v, 0)
+                    serrated_hadamard_pattern(x, 0)
                 with pytest.raises(ValueError):
-                    serrated_hadamard_pattern(v, -1)
+                    serrated_hadamard_pattern(x, -1)
                 #
                 for i in range(dims):
                     # subdiag pattern with i produces a right shift
-                    w1 = subdiag_hadamard_pattern(v, [i], use_fft=False)
-                    w2 = subdiag_hadamard_pattern(v, [i], use_fft=True)
+                    w1 = subdiag_hadamard_pattern(x, [i], use_fft=False)
+                    w2 = subdiag_hadamard_pattern(x, [-i], use_fft=True)
                     breakpoint()
-                    # subdiag pattern with -i produces a left shift
-                    w1 = subdiag_hadamard_pattern(v, [-i], use_fft=False)
-                    w2 = subdiag_hadamard_pattern(v, [-i], use_fft=True)
-                    # subdiag pattern with 0,1...i is a right-cumulative shift
-                    idxs = torch.arange(i + 1)
-                    w1 = subdiag_hadamard_pattern(v, idxs, use_fft=False)
-                    w2 = subdiag_hadamard_pattern(v, idxs, use_fft=True)
-                    # subdiag pattern with 0,-1...-i is a left-cumulative shift
-                    w1 = subdiag_hadamard_pattern(v, -idxs, use_fft=False)
-                    w2 = subdiag_hadamard_pattern(v, -idxs, use_fft=True)
+                    # assert torch.allclose(y1[i], w1), "asdf"
+                    # try:
+                    #     assert torch.allclose(y2[i], w2), "fdsa"
+                    # except:
+                    #     breakpoint()
+                    # breakpoint()
+                    # # subdiag pattern with -i produces a left shift
+                    # w1 = subdiag_hadamard_pattern(v, [-i], use_fft=False)
+                    # w2 = subdiag_hadamard_pattern(v, [-i], use_fft=True)
+                    # # subdiag pattern with 0,1...i is a right-cumulative shift
+                    # idxs = torch.arange(i + 1)
+                    # w1 = subdiag_hadamard_pattern(v, idxs, use_fft=False)
+                    # w2 = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+                    # # subdiag pattern with 0,-1...-i is a left-cumulative shift
+                    # w1 = subdiag_hadamard_pattern(v, -idxs, use_fft=False)
+                    # w2 = subdiag_hadamard_pattern(v, -idxs, use_fft=True)
 
-                    # serrated_hadamard_pattern
-                    breakpoint()
+                    # # serrated_hadamard_pattern
+                    # breakpoint()

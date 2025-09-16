@@ -370,13 +370,13 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
     r"""Shifted copies of vectors for subdiagonal Hutchinson estimation.
 
     Given a square linear operator :math:`A`, and random vectors
-    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
+    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^H] = I`, consider
     this generalized formulation of the Hutchinson diagonal estimator:
 
     .. math::
 
       f(A) =
-      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(v) \odot Av \big]
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(\bar{v}) \odot Av \big]
 
     If the :math:`\varphi` function is the identity, then :math:`f(A)` equals
     the main diagonal of :math:`A`. If e.g. :math:`\varphi` shifts the entries
