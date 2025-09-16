@@ -3,32 +3,26 @@
 
 
 """
-Implementing triang linop:
-- test hadamard patterns in utils
-- test triang here
-
-
-TODO, finish algorithms:
-* sketchlord, sketchlordh
-* xdiagh, diagpph, xtrace, xtraceh, triangular
-* unit tests for remaining algorithms
-* priori and posteriori stuff
-* Integration tests (add utests where needed):
+* Implementing triang linop:
+  - finish init method
+  - in test: create fixture and test case
+* Add sketchlord(h) facilities
+* Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
   - scale up: good recovery of very large composite linop, quick.
   - priori and posteriori...
-* add remaining todos as issues:
+* add remaining todos as GH issues and release!
 
 
 
 
 
 LATER TODO:
+* tracepp xtrace and hermitian
 * HDF5 measurement/wrapper API
 * a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
 * sketchlord and sketchlordh.
-* xtrace and xtraceh
 * what about generalized_nystrom_xdiag?
 * sketched permutations
 
@@ -67,7 +61,7 @@ from .measurements import (
     SsrftNoiseLinOp,
 )
 from .linops import BaseLinOp, CompositeLinOp, TransposedLinOp
-from .utils import COMPLEX_DTYPES, qr, lstsq
+from .utils import BadShapeError, COMPLEX_DTYPES, qr, lstsq
 
 
 # ##############################################################################
@@ -652,11 +646,15 @@ class TriangularLinOp(BaseLinOp):
         self,
         lop,
         stair_width=None,
-        num_hutch_measurements=0,
+        num_gh_meas=0,
         lower=True,
         with_main_diagonal=True,
-        seed=0b1110101001010101011,
         use_fft=True,
+        #
+        seed=0b1110101001010101011,
+        noise_type="rademacher",
+        max_mp_workers=None,
+        dispatcher=SketchedAlgorithmDispatcher,
     ):
         """Initializer. See class docstring."""
         h, w = lop.shape
@@ -688,6 +686,14 @@ class TriangularLinOp(BaseLinOp):
             num_stair_meas + self.n_hutch
         ) <= self.dims, "More total measurements than dimensions??"
         #
+
+        is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+        if not is_noise_unitnorm:
+            warnings.warn(
+                "Non-unitnorm noise can be unstable for triangular matvecs! "
+                + "Check output and consider using Rademacher or PhaseNoise.",
+                RuntimeWarning,
+            )
 
         # COMPLEX_DTYPES
         breakpoint()

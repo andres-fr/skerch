@@ -84,6 +84,20 @@ def diag_recovery_shapes(request):
     return result
 
 
+# @pytest.fixture
+# def triang_configs(request):
+#     """Configurations for the triangular linear operator.
+
+#     The plan is to grab a few square random matrices and run this thing on them
+#     with/without FFT,
+
+#     """
+#     result = [1, 3, 10, 30, 100]
+#     if request.config.getoption("--quick"):
+#         result = result[:4]
+#     return result
+
+
 @pytest.fixture
 def lowrank_noise_types():
     """Collection of tuples ``(noise_type, is_complex_only)``"""
@@ -455,14 +469,6 @@ def test_diagpp_xdiag_correctness(
                             ), "Bad top XDiag?"
 
 
-# @pytest.fixture
-# def triangular_configs(request):
-#     """Configurations for the triangular linear operator.
-
-#     For this test, we want to test many things
-
-#     """
-#     result = [1, 3, 10, 30, 100]
-#     if request.config.getoption("--quick"):
-#         result = result[:4]
-#     return result
+# ##############################################################################
+# # TRIANGULAR
+# ##############################################################################
