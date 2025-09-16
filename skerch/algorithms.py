@@ -3,6 +3,11 @@
 
 
 """
+Implementing triang linop:
+- test hadamard patterns in utils
+- test triang here
+
+
 TODO, finish algorithms:
 * sketchlord, sketchlordh
 * xdiagh, diagpph, xtrace, xtraceh, triangular
@@ -61,7 +66,7 @@ from .measurements import (
     PhaseNoiseLinOp,
     SsrftNoiseLinOp,
 )
-from .linops import CompositeLinOp, TransposedLinOp
+from .linops import BaseLinOp, CompositeLinOp, TransposedLinOp
 from .utils import COMPLEX_DTYPES, qr, lstsq
 
 
@@ -579,5 +584,212 @@ def xdiag(
 
 
 # ##############################################################################
-# # XDIAGH
+# # TRIANGULAR LINEAR OPERATOR
+# ##############################################################################
+class TriangularLinOp(BaseLinOp):
+    r"""Given a square linop, compute products with one of its triangles.
+
+    The triangle of a linear operator can be approximated from the full operator
+    via a "staircase pattern" of exact measurements, whose computation is exact
+    and fast. For example, given an operator of shape ``(1000, 1000)``, and
+    stairs of size 100, yields 9 exact measurements strictly under the diagonal,
+    the first one covering ``lop[100:, :100]``, the next one
+    ``lop[200:, 100:200]``, and so on. The more measurements, the more closely
+    the full triangle is approximated.
+
+    Note that this staircase pattern leaves a block-triangular section of the
+    linop untouched (near the main diagonal). This part can be then estimated
+    with the help of  :func:`serrated_hadamard_pattern`, completing the
+    triangular approximation, as follows:
+
+
+    Given a square linear operator :math:`A`, and random vectors
+    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
+    the generalized Hutchinson diagonal estimator:
+
+    .. math::
+
+      f(A) =
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(v) \odot Av \big]
+
+    In this case, if the :math:`\varphi` function follows a "serrated
+    Hadamard pattern", :math:`f(A)` will equal a block-triangular subset of
+    :math:`A`.
+
+
+    :param lop: A square linear operator of order ``dims``, such that
+      ``self @ v`` will equal ``triangle(lop) @ v``. It must implement a
+      ``lop.shape = (dims, dims)`` attribute as well as the left- and right-
+      matmul operator ``@``, interacting with torch tensors.
+    :param stair_width: Width of each step in the staircase pattern. If
+      it is 1, a total of ``dims`` exact measurements will be performed.
+      If it equals ``dims``, no exact measurements will be performed (since
+      the staircase pattern would cover the full triangle). The step size
+      regulates this trade-off: Ideally, we want as many exact measurements
+      as possible, but not too many. If no value is provided, ``dims // 2``
+      is chosen by default, such that only 1 exact measurement is performed.
+    :param num_hutch_measurements: The leftover entries from the
+      staircase measurements are approximated here using an extension of
+      the Hutchinson diagonal estimator. This estimator generally requires
+      many measurements to be informative, and it can even be counter-
+      productive if not enough measurements are given. If ``lop``is not
+      diagonally dominant, consider setting this to 0 for a sufficiently
+      good approximation via ``staircase_measurements``. Otherwise,
+      make sure to provide a sufficiently high number of measurements.
+    :param lower: If true, lower triangular matmuls will be computed.
+      Otherwise, upper triangular.
+    :param with_main_diagonal: If true, the main diagonal will be included
+      in the triangle, otherwise excluded. If you already have precomuted
+      the diagonal elsewhere, consider excluding it from this approximation,
+      and adding it separately.
+    :param seed: Seed for the random SSRFT measurements used in the
+      Hutchinson estimator.
+    :param use_fft: Whether to use FFT for the Hutchinson estimation. See
+      :func:`subdiag_hadamard_pattern` for more details.
+    """
+
+    def __init__(
+        self,
+        lop,
+        stair_width=None,
+        num_hutch_measurements=0,
+        lower=True,
+        with_main_diagonal=True,
+        seed=0b1110101001010101011,
+        use_fft=True,
+    ):
+        """Initializer. See class docstring."""
+        h, w = lop.shape
+        if h != w:
+            raise BadShapeError("Only square linear operators supported!")
+        self.dims = h
+        if self.dims < 1:
+            raise BadShapeError("Empty linear operators not supported!")
+        if stair_width is None:
+            stair_width = max(1, self.dims // 2)
+        assert stair_width > 0, "Stair width must be a positive int!"
+        self.lop = lop
+        self.use_fft = use_fft
+        self.lower = lower
+        self.with_main = with_main_diagonal
+        self.n_hutch = num_hutch_measurements
+        #
+        self.stair_width = stair_width
+        num_stair_meas = sum(
+            1 for _ in self._iter_stairs(self.dims, stair_width)
+        )
+        assert (
+            num_stair_meas <= self.dims
+        ), "More staircase measurements than dimensions??"
+        assert (
+            self.n_hutch <= self.dims
+        ), "More Hutchinson measurements than dimensions??"
+        assert (
+            num_stair_meas + self.n_hutch
+        ) <= self.dims, "More total measurements than dimensions??"
+        #
+
+        # COMPLEX_DTYPES
+        breakpoint()
+        # mop = RademacherNoiseLinOp(
+        #     hw, seed, dtype, by_row=False, register=register
+        # )
+        # mop = PhaseNoiseLinOp(
+        #     hw, seed, dtype, by_row=False, register=register, conj=False
+        # )
+
+        self.ssrft = SSRFT((self.n_hutch, self.dims), seed=seed)
+        super().__init__(lop.shape)  # this sets self.shape also
+
+    @staticmethod
+    def _iter_stairs(dims, stair_width):
+        """Helper method to iterate over staircase indices.
+
+        This method implements an iterator that yields ``(begin, end)`` index
+        pairs for each staircase-pattern step. It terminates before ``end``
+        is equal or greater than ``self.dims``, since only full steps are
+        considered.
+        """
+        beg, end = 0, stair_width
+        while end < dims:
+            yield (beg, end)
+            beg = end
+            end = beg + stair_width
+
+    def _matmul_helper(self, x, adjoint=False):
+        """Forward and adjoint triangular matrix multiplications.
+
+        Since forward and adjoint matmul share many common computations, this
+        method implements both at the same time. The specific mode can be
+        dispatched using the ``adjoint`` parameter.
+        """
+        self.check_input(x, adjoint=adjoint)
+        # we don't factorize this method because we want to share buff
+        # across both loops to hopefully save memory
+        buff = torch.zeros_like(x)
+        result = torch.zeros_like(x)
+        # add step computations to result
+        for beg, end in self._iter_stairs(self.dims, self.stair_width):
+            if (not adjoint) and self.lower:
+                buff[beg:end] = x[beg:end]
+                result[end:] += (self.lop @ buff)[end:]
+                buff[beg:end] = 0
+            elif (not adjoint) and (not self.lower):
+                buff[end:] = x[end:]
+                result[beg:end] += (self.lop @ buff)[beg:end]
+                buff[end:] = 0
+            elif adjoint and self.lower:
+                buff[end:] = x[end:]
+                result[beg:end] += (buff @ self.lop)[beg:end]
+                buff[end:] = 0
+            elif adjoint and (not self.lower):
+                buff[beg:end] = x[beg:end]
+                result[end:] += (buff @ self.lop)[end:]
+                buff[beg:end] = 0
+            else:
+                raise RuntimeError("This should never happen")
+        # add Hutchinson estimator to result
+        for i in range(self.n_hutch):
+            buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
+            result[:] += serrated_hadamard_pattern(
+                buff,
+                self.stair_width,
+                self.with_main,
+                lower=(self.lower ^ adjoint),  # pattern also depends on adj
+                use_fft=self.use_fft,
+            ) * (
+                ((buff * x) @ self.lop) if adjoint else (self.lop @ (buff * x))
+            )
+        return result
+
+    def __matmul__(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        See parent class for more details.
+        """
+        return self._matmul_helper(x, adjoint=False)
+
+    def __rmatmul__(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+
+        See parent class for more details.
+        """
+        return self._matmul_helper(x, adjoint=True)
+
+    def __repr__(self):
+        """Readable string version of this object.
+
+        Returns a string in the form
+        <TriangularlLinOp[lop](lower/upper, with/out main diag)>.
+        """
+        clsname = self.__class__.__name__
+        lopstr = str(self.lop)
+        lower_str = "lower" if self.lower else "upper"
+        diag_str = "with" if self.with_main else "no"
+        result = f"<{clsname}[{lopstr}]({lower_str}, {diag_str} main diag)>"
+        return result
+
+
+# ##############################################################################
+# # TRACEHPP/XTRACEH
 # ##############################################################################

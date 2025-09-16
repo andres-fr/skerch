@@ -14,6 +14,7 @@ from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
 from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
 from skerch.utils import qr, pinv, lstsq, svd, eigh, htr
+from skerch.utils import subdiag_hadamard_pattern, serrated_hadamard_pattern
 
 from . import rng_seeds, torch_devices
 from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
@@ -44,6 +45,56 @@ def rand_dims_samples(request):
     result = [
         (1000, num_samples),
     ]
+    return result
+
+
+@pytest.fixture
+def hadamard_testcases():
+    """Inputs and expected outputs for subdiag and serrated hadamard.
+
+    Returns tuples in the form:
+    ``(input, sub1, sub2, sub3, sub4, serr1, serr2, serr3, serr4)``, where:
+    * ``sub1`` contains subdiag outputs for idxs=[i]
+    * ``sub2`` contains subdiag outputs for idxs=[-1]
+    * ``sub3`` contains subdiag outputs for idxs=[0, ..., i]
+    * ``sub4`` contains subdiag outputs for idxs=[0, ..., -i]
+    * ``serr1`` contains serrated outputs for blocksize=i, lower, with diag
+    * ``serr1`` contains serrated outputs for blocksize=i, lower, without diag
+    * ``serr1`` contains serrated outputs for blocksize=i, upper, with diag
+    * ``serr1`` contains serrated outputs for blocksize=i, upper, without diag
+    """
+    case1 = (
+        [1, 2, 3, 4, 5, 6, 7],
+        #
+        [
+            [0, 1, 2, 3, 4, 5, 6],
+            [0, 0, 1, 2, 3, 4, 5],
+            [0, 0, 0, 1, 2, 3, 4],
+            [0, 0, 0, 0, 1, 2, 3],
+            [0, 0, 0, 0, 0, 2, 3],
+            [0, 0, 0, 0, 0, 0, 3],
+            [0, 0, 0, 0, 0, 0, 0],
+        ],
+        [
+            [1, 2, 3, 4, 5, 6, 7],
+            [2, 3, 4, 5, 6, 7, 0],
+            [3, 4, 5, 6, 7, 0, 0],
+            [4, 5, 6, 7, 0, 0, 0],
+            [5, 6, 7, 0, 0, 0, 0],
+            [6, 7, 0, 0, 0, 0, 0],
+            [7, 0, 0, 0, 0, 0, 0],
+            [0, 0, 0, 0, 0, 0, 0],
+        ],
+        [],
+        [],
+        #
+        [],
+        [],
+        [],
+        [],
+    )
+    #
+    result = [case1]
     return result
 
 
@@ -548,3 +599,57 @@ def test_htr(rng_seeds, torch_devices, dtypes_tols):
                 assert (v1 == v1b).all(), "View torch vec error?"
                 assert (m2.T == m2b).all(), "View np mat error?"
                 assert (v2 == v2b).all(), "View np vec error?"
+
+
+# ##############################################################################
+# # MEASUREMENT HADAMARD PATTERNS
+# ##############################################################################
+def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
+    """Test case for measurement Hadamard patterns in ``utils``.
+
+    For all devices and datatypes, with and without FFT, sample a random vector
+    and check that ``subdiag_hadamard_pattern`` produces the right shift for
+    all possible idxs.
+
+    Then, check that ``serrated_hadamard_pattern`` produces the right block
+    shifts for all combinations:
+    * blocksize
+    * with_main_diagonal
+    * lower
+    * use_fft
+    """
+    for device in torch_devices:
+        for dtype, tol in dtypes_tols.items():
+            for x, y1, y2, y3, y4, z1, z2, z3, z4 in hadamard_testcases:
+                dims = len(x)
+                x = torch.tensor(x, dtype=dtype, device=device)
+                y1 = torch.tensor(y1, dtype=dtype, device=device)
+                breakpoint()
+
+                # empty idxs list raises error
+                with pytest.raises(ValueError):
+                    subdiag_hadamard_pattern(v, [])
+                # nonpositive blocksize raises error
+                with pytest.raises(ValueError):
+                    serrated_hadamard_pattern(v, 0)
+                with pytest.raises(ValueError):
+                    serrated_hadamard_pattern(v, -1)
+                #
+                for i in range(dims):
+                    # subdiag pattern with i produces a right shift
+                    w1 = subdiag_hadamard_pattern(v, [i], use_fft=False)
+                    w2 = subdiag_hadamard_pattern(v, [i], use_fft=True)
+                    breakpoint()
+                    # subdiag pattern with -i produces a left shift
+                    w1 = subdiag_hadamard_pattern(v, [-i], use_fft=False)
+                    w2 = subdiag_hadamard_pattern(v, [-i], use_fft=True)
+                    # subdiag pattern with 0,1...i is a right-cumulative shift
+                    idxs = torch.arange(i + 1)
+                    w1 = subdiag_hadamard_pattern(v, idxs, use_fft=False)
+                    w2 = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+                    # subdiag pattern with 0,-1...-i is a left-cumulative shift
+                    w1 = subdiag_hadamard_pattern(v, -idxs, use_fft=False)
+                    w2 = subdiag_hadamard_pattern(v, -idxs, use_fft=True)
+
+                    # serrated_hadamard_pattern
+                    breakpoint()

@@ -15,7 +15,7 @@ default linear operators (composite, diagonal...).
 
 import torch
 
-from .utils import BadShapeError, htr
+from .utils import BadShapeError, htr, COMPLEX_DTYPES
 
 
 # ##############################################################################

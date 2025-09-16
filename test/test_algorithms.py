@@ -453,3 +453,16 @@ def test_diagpp_xdiag_correctness(
                             assert (
                                 relerr(D, dtop2) < xdiag_top_tol
                             ), "Bad top XDiag?"
+
+
+# @pytest.fixture
+# def triangular_configs(request):
+#     """Configurations for the triangular linear operator.
+
+#     For this test, we want to test many things
+
+#     """
+#     result = [1, 3, 10, 30, 100]
+#     if request.config.getoption("--quick"):
+#         result = result[:4]
+#     return result

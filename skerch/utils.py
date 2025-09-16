@@ -361,3 +361,176 @@ def htr(x, in_place=False):
                 pass  # x is not complex, ignore
     #
     return x
+
+
+# ##############################################################################
+# # MEASUREMENT HADAMARD PATTERNS
+# ##############################################################################
+def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
+    r"""Shifted copies of vectors for subdiagonal Hutchinson estimation.
+
+    Given a square linear operator :math:`A`, and random vectors
+    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
+    this generalized formulation of the Hutchinson diagonal estimator:
+
+    .. math::
+
+      f(A) =
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(v) \odot Av \big]
+
+    If the :math:`\varphi` function is the identity, then :math:`f(A)` equals
+    the main diagonal of :math:`A`. If e.g. :math:`\varphi` shifts the entries
+    in :math:`v` downwards by ``k`` positions, we get the ``k``-th subdiagonal.
+
+    .. seealso::
+
+      `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
+      Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds
+      and an improved algorithm”*.  CoRR abs/2201.10684.
+
+    :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
+    :param diag_idxs: Iterator with integers corresponding to the subdiagonal
+      indices to include, e.g. 0 corresponds to the main diagonal, 1 to the
+      diagonal above, -1 to the diagonal below, and so on.
+    :param use_fft: If false, shifted copies of ``v`` are pasted on the result.
+      This requires only ``len(v)``  memory, but has ``len(v) * len(diag_idxs)``
+      time complexity. If this argument is true, an FFT convolution is used
+      instead. This requires at least ``4 * len(v)`` memory, but the arithmetic
+      has a complexity of ``len(v) * log(len(v))``, which can be advantageous
+      whenever ``len(diag_idxs)`` becomes very large.
+    :returns: A vector of same shape, type and device as ``v``, composed of
+      shifted copies of ``v`` as given by ``diag_idxs``.
+    """
+    if len(diag_idxs) <= 0:
+        raise ValueError("Empty diag_idxs?")
+    len_v = len(v)
+    if use_fft:
+        # create a buffer of zeros to avoid circular conv and store the
+        # convolutional impulse response
+        buff = torch.zeros(2 * len_v, dtype=v.dtype, device=v.device)
+        # padded FFT to avoid circular convolution
+        buff[:len_v] = v
+        V = torch.fft.rfft(buff)
+        # now we can write the impulse response on buff
+        buff[:len_v] = 0
+        for idx in diag_idxs:
+            buff[idx] = 1
+        # non-circular FFT convolution:
+        V *= torch.fft.rfft(buff)
+        V = torch.fft.irfft(V)[:len_v]
+        return V
+    else:
+        result = torch.zeros_like(v)
+        for idx in diag_idxs:
+            if idx == 0:
+                result += v
+            elif idx > 0:
+                result[idx:] += v[:-idx]
+            else:
+                result[:idx] += v[-idx:]
+        return result
+
+
+def serrated_hadamard_pattern(
+    v, blocksize, with_main_diagonal=True, lower=True, use_fft=False
+):
+    """Shifted copies of vectors for block-triangular Hutchinson estimation.
+
+    :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
+    :param with_main_diagonal: If true, the main diagonal will be included
+          in the patterns, otherwise excluded.
+    :param lower: If true, the block-triangles will be below the diagonal,
+      otherwise above.
+    :param use_fft: See :func:`subdiag_hadamard_pattern`.
+    :returns: A vector of same shape, type and device as ``v``, composed of
+      shifted copies of ``v`` following a block-triangular (serrated) pattern.
+
+    For example, given a 10-dimensional vector, the corresponding serrated
+    pattern with ``blocksize=3, with_main_diagonal=True, lower=True`` yields
+    the following entries:
+
+    * ``v1``
+    * ``v1 + v2``
+    * ``v1 + v2 + v3``
+    * ``v4``
+    * ``v4 + v5``
+    * ``v4 + v5 + v6``
+    * ``v7``
+    * ``v7 + v8``
+    * ``v7 + v8 + v9``
+    * ``v10``
+
+    If main diagonal is excluded, it will look like this instead:
+
+    * ``0``
+    * ``v1``
+    * ``v1 + v2``
+    * ``0``
+    * ``v4``
+    * ``v4 + v5``
+    * ``0``
+    * ``v7``
+    * ``v7 + v8``
+    * ``0``
+
+    And if ``lower=False``, it will look like this instead:
+
+    * ``v1``
+    * ``v4 + v3 + v2``
+    * ``v4 + v3``
+    * ``v4``
+    * ``v7 + v6 + v5``
+    * ``v7 + v6``
+    * ``v7``
+    * ``v10 + v9 + v8``
+    * ``v10 + v9``
+    * ``v10``
+    """
+    if blocksize < 1:
+        raise ValueError("Block size must be a positive scalar!")
+    #
+    len_v = len(v)
+    if use_fft:
+        if lower:
+            idxs = range(len_v) if with_main_diagonal else range(1, len_v)
+            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+            for i in range(0, len_v, blocksize):
+                mark = i + blocksize
+                offset = sum(v[i:mark])
+                result[mark:] -= offset
+        else:
+            idxs = (
+                range(0, -len_v, -1)
+                if with_main_diagonal
+                else range(-1, -len_v, -1)
+            )
+            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+            for i in range(0, len_v, blocksize):
+                mark = len_v - (i + blocksize)
+                offset = sum(v[mark : (mark + blocksize)])
+                result[:mark] -= offset
+    else:
+        if with_main_diagonal:
+            result = v.clone()
+        else:
+            result = torch.zeros_like(v)
+        #
+        for i in range(len_v - 1):
+            block_n, block_i = divmod(i + 1, blocksize)
+            if block_i == 0:
+                continue
+            # get indices for result[out_beg:out_end] = v[beg:end]
+            if lower:
+                beg = block_n * blocksize
+                end = beg + block_i
+                out_end = min(beg + blocksize, len_v)
+                out_beg = out_end - block_i
+            else:
+                end = len_v - (block_n * blocksize)
+                beg = end - block_i
+                out_beg = max(0, end - blocksize)
+                out_end = out_beg + block_i
+            # add to serrated pattern
+            result[out_beg:out_end] += v[beg:end]
+    #
+    return result
