@@ -11,9 +11,9 @@ import numpy as np
 from collections import defaultdict
 
 
-from skerch.utils import COMPLEX_DTYPES
+from skerch.utils import COMPLEX_DTYPES, BadShapeError
 from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import SketchedAlgorithmDispatcher
+from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
 from skerch.algorithms import ssvd, seigh, diagpp, xdiag
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices, max_mp_workers
@@ -117,6 +117,22 @@ def diag_noise_types():
         ("rademacher", False),
         ("bloated_1.0", False),
         ("phase", True),
+    ]
+    return result
+
+
+@pytest.fixture
+def triang_iter_stairs():
+    """Collection of input, output pairs to test ``_iter_stairs``.
+
+    * Input: pair in the form ``(dims, stair_width)``
+    * Output: corresponding expected output in the form ``((0, 3), (3, 6))``
+    """
+    result = [
+        ((5, 1), ((0, 1), (1, 2), (2, 3), (3, 4))),
+        ((5, 2), ((0, 2), (2, 4))),
+        ((9, 3), ((0, 3), (3, 6))),
+        ((10, 3), ((0, 3), (3, 6), (6, 9))),
     ]
     return result
 
@@ -472,3 +488,59 @@ def test_diagpp_xdiag_correctness(
 # ##############################################################################
 # # TRIANGULAR
 # ##############################################################################
+def test_triang_formal(
+    rng_seeds, torch_devices, dtypes_tols, triang_iter_stairs
+):
+    """Formal test case for ``TriangularLinOp``.
+
+    * Only square, nonempty linops supported
+    * Stair width between 1 and linop dims
+    * Non-unitnorm noise raises warning
+    * Nonpositive GH measurements raises warning
+    * repr method
+    * iter_stairs
+    * Noise dispatcher and seed consistency
+    """
+    with pytest.raises(BadShapeError):
+        TriangularLinOp(torch.zeros(5, 6))
+    with pytest.raises(ValueError):
+        TriangularLinOp(torch.zeros(5, 5), stair_width=0)
+    with pytest.raises(ValueError):
+        TriangularLinOp(torch.zeros(5, 5), stair_width=6)
+    with pytest.warns(RuntimeWarning):
+        TriangularLinOp(torch.zeros(5, 5), num_gh_meas=10, noise_type="ssrft")
+    with pytest.warns(RuntimeWarning):
+        TriangularLinOp(torch.zeros(5, 5), num_gh_meas=-1)
+    #
+    s = "<TriangularLinOp[tensor([[0.]])](lower, with main diag)>"
+    assert s == str(TriangularLinOp(torch.zeros(1, 1))), "Wrong repr!"
+    #
+    for (dims, stair_width), stairs1 in triang_iter_stairs:
+        stairs2 = tuple(TriangularLinOp._iter_stairs(dims, stair_width))
+        assert stairs1 == stairs2, f"Wrong iter_stairs for {dims, stair_width}"
+    #
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                mat = torch.ones(10, 10)
+                diag, tril, triu = mat.diag(), mat.tril(), mat.triu()
+                lop = TriangularLinOp(
+                    mat,
+                    stair_width=3,
+                    lower=True,
+                    with_main_diagonal=True,
+                    use_fft=True,
+                    num_gh_meas=10000,
+                )
+                v = torch.ones(10)
+                w1 = lop @ v
+                w2 = tril @ v
+                breakpoint()
+
+                """
+                Triang correctness:
+                ma
+                * also test transpose
+                * mp parallelization compatible
+
+                """

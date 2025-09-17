@@ -61,7 +61,13 @@ from .measurements import (
     SsrftNoiseLinOp,
 )
 from .linops import BaseLinOp, CompositeLinOp, TransposedLinOp
-from .utils import BadShapeError, COMPLEX_DTYPES, qr, lstsq
+from .utils import (
+    BadShapeError,
+    COMPLEX_DTYPES,
+    qr,
+    lstsq,
+    serrated_hadamard_pattern,
+)
 
 
 # ##############################################################################
@@ -642,6 +648,8 @@ class TriangularLinOp(BaseLinOp):
       :func:`subdiag_hadamard_pattern` for more details.
     """
 
+    LOP_REPR_CHARS = 30
+
     def __init__(
         self,
         lop,
@@ -665,46 +673,36 @@ class TriangularLinOp(BaseLinOp):
             raise BadShapeError("Empty linear operators not supported!")
         if stair_width is None:
             stair_width = max(1, self.dims // 2)
-        assert stair_width > 0, "Stair width must be a positive int!"
-        self.lop = lop
-        self.use_fft = use_fft
-        self.lower = lower
-        self.with_main = with_main_diagonal
-        self.n_hutch = num_hutch_measurements
-        #
+        if stair_width < 1 or stair_width > self.dims:
+            raise ValueError("Stair width must be >=1 and <= dims!")
         self.stair_width = stair_width
-        num_stair_meas = sum(
-            1 for _ in self._iter_stairs(self.dims, stair_width)
-        )
-        assert (
-            num_stair_meas <= self.dims
-        ), "More staircase measurements than dimensions??"
-        assert (
-            self.n_hutch <= self.dims
-        ), "More Hutchinson measurements than dimensions??"
-        assert (
-            num_stair_meas + self.n_hutch
-        ) <= self.dims, "More total measurements than dimensions??"
+        self.lop = lop
+        self.n_gh = num_gh_meas
+        self.lower = lower
+        self.with_main_diag = with_main_diagonal
+        self.use_fft = use_fft
         #
-
-        is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
-        if not is_noise_unitnorm:
+        self.seed = seed
+        self.noise_type = noise_type
+        self.max_mp_workers = max_mp_workers
+        self.dispatcher = dispatcher
+        #
+        if num_gh_meas <= 0:
             warnings.warn(
-                "Non-unitnorm noise can be unstable for triangular matvecs! "
-                + "Check output and consider using Rademacher or PhaseNoise.",
+                "num_gh_meas <=0: only staircase measurements will be done! "
+                + "Increase this parameter for more accurate estimation",
                 RuntimeWarning,
             )
-
-        # COMPLEX_DTYPES
-        breakpoint()
-        # mop = RademacherNoiseLinOp(
-        #     hw, seed, dtype, by_row=False, register=register
-        # )
-        # mop = PhaseNoiseLinOp(
-        #     hw, seed, dtype, by_row=False, register=register, conj=False
-        # )
-
-        self.ssrft = SSRFT((self.n_hutch, self.dims), seed=seed)
+        else:
+            is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+            if not is_noise_unitnorm:
+                warnings.warn(
+                    "Non-unitnorm noise can be unstable for triangular "
+                    "matvecs! Check output and consider using Rademacher "
+                    "or PhaseNoise.",
+                    RuntimeWarning,
+                )
+        #
         super().__init__(lop.shape)  # this sets self.shape also
 
     @staticmethod
@@ -722,6 +720,35 @@ class TriangularLinOp(BaseLinOp):
             beg = end
             end = beg + stair_width
 
+    @staticmethod
+    def _gh_meas(
+        x,
+        lop,
+        mop,
+        adjoint,
+        stair_width,
+        with_main_diag,
+        lower=True,
+        use_fft=True,
+    ):
+        """Helper method to perform serrated Girard-Hutchinson measurements."""
+        device, dtype = x.device, x.dtype
+        result = torch.zeros_like(x)
+        num_meas = mop.shape[1]
+        normalizer = torch.zeros_like(x)
+        for i in range(num_meas):
+            m = get_measvec(i, mop, device, dtype)
+            pattern = serrated_hadamard_pattern(
+                m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
+            )
+            result += pattern * (
+                ((m * x) @ lop) if adjoint else (lop @ (m * x))
+            )
+            normalizer += m * m
+        #
+        result = result / normalizer
+        return result
+
     def _matmul_helper(self, x, adjoint=False):
         """Forward and adjoint triangular matrix multiplications.
 
@@ -729,7 +756,7 @@ class TriangularLinOp(BaseLinOp):
         method implements both at the same time. The specific mode can be
         dispatched using the ``adjoint`` parameter.
         """
-        self.check_input(x, adjoint=adjoint)
+        self.check_input(x, self.lop.shape, adjoint=adjoint)
         # we don't factorize this method because we want to share buff
         # across both loops to hopefully save memory
         buff = torch.zeros_like(x)
@@ -754,18 +781,22 @@ class TriangularLinOp(BaseLinOp):
                 buff[beg:end] = 0
             else:
                 raise RuntimeError("This should never happen")
-        # add Hutchinson estimator to result
-        for i in range(self.n_hutch):
-            buff[:] = self.ssrft.get_row(i, x.dtype, x.device)
-            result[:] += serrated_hadamard_pattern(
-                buff,
-                self.stair_width,
-                self.with_main,
-                lower=(self.lower ^ adjoint),  # pattern also depends on adj
-                use_fft=self.use_fft,
-            ) * (
-                ((buff * x) @ self.lop) if adjoint else (self.lop @ (buff * x))
+        #
+        if self.n_gh > 0:
+            mop = self.dispatcher.mop(
+                self.noise_type, (self.dims, self.n_gh), self.seed, x.dtype
             )
+            result += self._gh_meas(
+                x,
+                self.lop,
+                mop,
+                adjoint,
+                self.stair_width,
+                self.with_main_diag,
+                self.lower,
+                self.use_fft,
+            )
+        #
         return result
 
     def __matmul__(self, x):
@@ -790,8 +821,10 @@ class TriangularLinOp(BaseLinOp):
         """
         clsname = self.__class__.__name__
         lopstr = str(self.lop)
+        if len(lopstr) >= self.LOP_REPR_CHARS:
+            lopstr = lopstr[: (self.LOP_REPR_CHARS - 3)] + "..."
         lower_str = "lower" if self.lower else "upper"
-        diag_str = "with" if self.with_main else "no"
+        diag_str = "with" if self.with_main_diag else "no"
         result = f"<{clsname}[{lopstr}]({lower_str}, {diag_str} main diag)>"
         return result
 
