@@ -698,7 +698,7 @@ class TriangularLinOp(BaseLinOp):
         if num_gh_meas <= 0:
             warnings.warn(
                 "num_gh_meas <=0: only staircase measurements will be done! "
-                + "Increase this parameter for more accurate estimation",
+                + "Set this to a large integer for more accurate estimation",
                 RuntimeWarning,
             )
         else:
