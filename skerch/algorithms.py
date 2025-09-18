@@ -677,6 +677,7 @@ class TriangularLinOp(BaseLinOp):
             raise ValueError("Stair width must be >=1 and <= dims!")
         self.stair_width = stair_width
         self.lop = lop
+        self.tlop = TransposedLinOp(lop)
         self.n_gh = num_gh_meas
         self.lower = lower
         self.with_main_diag = with_main_diagonal
@@ -706,7 +707,7 @@ class TriangularLinOp(BaseLinOp):
         super().__init__(lop.shape)  # this sets self.shape also
 
     @staticmethod
-    def _iter_stairs(dims, stair_width):
+    def _iter_stairs(dims, stair_width, reverse=False):
         """Helper method to iterate over staircase indices.
 
         This method implements an iterator that yields ``(begin, end)`` index
@@ -716,7 +717,9 @@ class TriangularLinOp(BaseLinOp):
         """
         beg, end = 0, stair_width
         while end < dims:
-            yield (beg, end)
+            result = (dims - end, dims - beg) if reverse else (beg, end)
+            yield result
+            #
             beg = end
             end = beg + stair_width
 
@@ -739,11 +742,12 @@ class TriangularLinOp(BaseLinOp):
         for i in range(num_meas):
             m = get_measvec(i, mop, device, dtype)
             pattern = serrated_hadamard_pattern(
-                m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
+                m, stair_width, with_main_diag, lower, use_fft
             )
-            result += pattern * (
-                ((m * x) @ lop) if adjoint else (lop @ (m * x))
-            )
+            if adjoint:
+                result += pattern * ((m * x) @ lop)
+            else:
+                result += pattern * (lop @ (m * x))
             normalizer += m * m
         #
         result = result / normalizer
@@ -767,18 +771,21 @@ class TriangularLinOp(BaseLinOp):
                 buff[beg:end] = x[beg:end]
                 result[end:] += (self.lop @ buff)[end:]
                 buff[beg:end] = 0
-            elif (not adjoint) and (not self.lower):
-                buff[end:] = x[end:]
-                result[beg:end] += (self.lop @ buff)[beg:end]
-                buff[end:] = 0
             elif adjoint and self.lower:
                 buff[end:] = x[end:]
                 result[beg:end] += (buff @ self.lop)[beg:end]
                 buff[end:] = 0
+            #
+            elif (not adjoint) and (not self.lower):
+                breakpoint()
+                # buff[end:] = x[end:]
+                # result[beg:end] += (self.lop @ buff)[beg:end]
+                # buff[end:] = 0
             elif adjoint and (not self.lower):
-                buff[beg:end] = x[beg:end]
-                result[end:] += (buff @ self.lop)[end:]
-                buff[beg:end] = 0
+                breakpoint()
+                # buff[beg:end] = x[beg:end]
+                # result[end:] += (buff @ self.lop)[end:]
+                # buff[beg:end] = 0
             else:
                 raise RuntimeError("This should never happen")
         #

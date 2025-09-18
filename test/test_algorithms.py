@@ -125,14 +125,19 @@ def diag_noise_types():
 def triang_iter_stairs():
     """Collection of input, output pairs to test ``_iter_stairs``.
 
-    * Input: pair in the form ``(dims, stair_width)``
+    * Input: tuple in the form ``(dims, stair_width, reverse)``
     * Output: corresponding expected output in the form ``((0, 3), (3, 6))``
     """
     result = [
-        ((5, 1), ((0, 1), (1, 2), (2, 3), (3, 4))),
-        ((5, 2), ((0, 2), (2, 4))),
-        ((9, 3), ((0, 3), (3, 6))),
-        ((10, 3), ((0, 3), (3, 6), (6, 9))),
+        ((5, 1, False), ((0, 1), (1, 2), (2, 3), (3, 4))),
+        ((5, 2, False), ((0, 2), (2, 4))),
+        ((9, 3, False), ((0, 3), (3, 6))),
+        ((10, 3, False), ((0, 3), (3, 6), (6, 9))),
+        #
+        ((5, 1, True), ((4, 5), (3, 4), (2, 3), (1, 2))),
+        ((5, 2, True), ((3, 5), (1, 3))),
+        ((9, 3, True), ((6, 9), (3, 6))),
+        ((10, 3, True), ((7, 10), (4, 7), (1, 4))),
     ]
     return result
 
@@ -515,14 +520,15 @@ def test_triang_formal(
     s = "<TriangularLinOp[tensor([[0.]])](lower, with main diag)>"
     assert s == str(TriangularLinOp(torch.zeros(1, 1))), "Wrong repr!"
     #
-    for (dims, stair_width), stairs1 in triang_iter_stairs:
-        stairs2 = tuple(TriangularLinOp._iter_stairs(dims, stair_width))
+    for (dims, stair_width, rev), stairs1 in triang_iter_stairs:
+        stairs2 = tuple(TriangularLinOp._iter_stairs(dims, stair_width, rev))
         assert stairs1 == stairs2, f"Wrong iter_stairs for {dims, stair_width}"
     #
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
                 mat = torch.ones(10, 10)
+                # mat = torch.arange(100, dtype=dtype).reshape(10, 10)
                 diag, tril, triu = mat.diag(), mat.tril(), mat.triu()
                 lop = TriangularLinOp(
                     mat,
@@ -530,12 +536,16 @@ def test_triang_formal(
                     lower=True,
                     with_main_diagonal=True,
                     use_fft=True,
-                    num_gh_meas=10000,
+                    num_gh_meas=20000,
                 )
                 v = torch.ones(10)
-                w1 = lop @ v
-                w2 = tril @ v
-                breakpoint()
+                # w1 = lop @ v
+                # w2 = tril @ v
+
+                import matplotlib.pyplot as plt
+
+                # print(tril @ v)
+                # print(v @ tril)
 
                 """
                 Triang correctness:
@@ -543,4 +553,22 @@ def test_triang_formal(
                 * also test transpose
                 * mp parallelization compatible
 
+
+                apparently we also need seig
+                and max operator norm
                 """
+                (lop @ v).tolist()
+                # tril
+                # (v @ lop).tolist()
+                breakpoint()
+
+
+# import torch
+
+# A = torch.randn(16, 16)  # not normal w.p. 1
+
+# ev = torch.linalg.eigvals(A)
+# sv = torch.linalg.svdvals(A)
+
+# print(ev)
+# print(sv)

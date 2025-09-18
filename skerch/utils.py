@@ -476,6 +476,16 @@ def serrated_hadamard_pattern(
     * ``0``
 
     And if ``lower=False``, it will look like this instead:
+    * ``v3 + v2 + v1``
+    * ``v3 + v2``
+    * ``v3``
+    * ``v6 + v5 + v4``
+    * ``v6 + v5``
+    * ``v6``
+    * ``v9 + v8 + v7``
+    * ``v9 + v8``
+    * ``v9``
+    * ``v10``
 
     * ``v1``
     * ``v4 + v3 + v2``
