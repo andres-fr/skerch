@@ -657,7 +657,7 @@ class TriangularLinOp(BaseLinOp):
         num_gh_meas=0,
         lower=True,
         with_main_diagonal=True,
-        use_fft=True,
+        use_fft=False,
         #
         seed=0b1110101001010101011,
         noise_type="rademacher",
@@ -732,7 +732,7 @@ class TriangularLinOp(BaseLinOp):
         stair_width,
         with_main_diag,
         lower=True,
-        use_fft=True,
+        use_fft=False,
     ):
         """Helper method to perform serrated Girard-Hutchinson measurements."""
         device, dtype = x.device, x.dtype
@@ -742,7 +742,7 @@ class TriangularLinOp(BaseLinOp):
         for i in range(num_meas):
             m = get_measvec(i, mop, device, dtype)
             pattern = serrated_hadamard_pattern(
-                m, stair_width, with_main_diag, lower, use_fft
+                m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
             )
             if adjoint:
                 result += pattern * ((m * x) @ lop)
@@ -766,7 +766,9 @@ class TriangularLinOp(BaseLinOp):
         buff = torch.zeros_like(x)
         result = torch.zeros_like(x)
         # add step computations to result
-        for beg, end in self._iter_stairs(self.dims, self.stair_width):
+        for beg, end in self._iter_stairs(
+            self.dims, self.stair_width, reverse=False
+        ):
             if (not adjoint) and self.lower:
                 buff[beg:end] = x[beg:end]
                 result[end:] += (self.lop @ buff)[end:]
@@ -777,15 +779,13 @@ class TriangularLinOp(BaseLinOp):
                 buff[end:] = 0
             #
             elif (not adjoint) and (not self.lower):
-                breakpoint()
-                # buff[end:] = x[end:]
-                # result[beg:end] += (self.lop @ buff)[beg:end]
-                # buff[end:] = 0
+                buff[end:] = x[end:]
+                result[beg:end] += (self.lop @ buff)[beg:end]
+                buff[end:] = 0
             elif adjoint and (not self.lower):
-                breakpoint()
-                # buff[beg:end] = x[beg:end]
-                # result[end:] += (buff @ self.lop)[end:]
-                # buff[beg:end] = 0
+                buff[beg:end] = x[beg:end]
+                result[end:] += (buff @ self.lop)[end:]
+                buff[beg:end] = 0
             else:
                 raise RuntimeError("This should never happen")
         #

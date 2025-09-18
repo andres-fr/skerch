@@ -527,16 +527,16 @@ def test_triang_formal(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                mat = torch.ones(10, 10)
-                # mat = torch.arange(100, dtype=dtype).reshape(10, 10)
+                # mat = torch.ones(10, 10)
+                mat = torch.arange(100, dtype=dtype).reshape(10, 10)
                 diag, tril, triu = mat.diag(), mat.tril(), mat.triu()
                 lop = TriangularLinOp(
                     mat,
                     stair_width=3,
-                    lower=True,
+                    lower=False,
                     with_main_diagonal=True,
-                    use_fft=True,
-                    num_gh_meas=20000,
+                    use_fft=False,
+                    num_gh_meas=50000,
                 )
                 v = torch.ones(10)
                 # w1 = lop @ v
@@ -557,7 +557,7 @@ def test_triang_formal(
                 apparently we also need seig
                 and max operator norm
                 """
-                (lop @ v).tolist()
+                # (lop @ v).tolist()
                 # tril
                 # (v @ lop).tolist()
                 breakpoint()

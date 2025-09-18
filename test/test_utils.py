@@ -787,9 +787,6 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                             lower=False,
                             use_fft=fft,
                         )
-                        try:
-                            assert torch.allclose(z4[i], w, atol=tol), (
-                                "Wrong serrated upper without main diag!" + msg
-                            )
-                        except:
-                            breakpoint()
+                        assert torch.allclose(z4[i], w, atol=tol), (
+                            "Wrong serrated upper without main diag!" + msg
+                        )
