@@ -3,9 +3,9 @@
 
 
 """
-* Implementing triang linop:
-  - finish init method
-  - in test: create fixture and test case
+* Add support for batched matmat, with a param:
+  - if None, default is matmat, and if crashes, warn and do matvec
+  - If N (e.g. 3), try matmat by 3, and if crashes, also crash
 * Add sketchlord(h) facilities
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
@@ -19,12 +19,19 @@
 
 LATER TODO:
 * tracepp xtrace and hermitian
++ max operator norm
 * HDF5 measurement/wrapper API
 * a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
 * sketchlord and sketchlordh.
 * what about generalized_nystrom_xdiag?
 * sketched permutations
+
+Triang correctness:
+* mp parallelization compatible
+* Xchangeable version of serrated?
+* triang: stairs should include bits of main diag
+
 
 
 CHANGELOG:
@@ -793,16 +800,16 @@ class TriangularLinOp(BaseLinOp):
             mop = self.dispatcher.mop(
                 self.noise_type, (self.dims, self.n_gh), self.seed, x.dtype
             )
-            # result += self._gh_meas(
-            #     x,
-            #     self.lop,
-            #     mop,
-            #     adjoint,
-            #     self.stair_width,
-            #     self.with_main_diag,
-            #     self.lower,
-            #     self.use_fft,
-            # )
+            result += self._gh_meas(
+                x,
+                self.lop,
+                mop,
+                adjoint,
+                self.stair_width,
+                self.with_main_diag,
+                self.lower,
+                self.use_fft,
+            )
         #
         return result
 
