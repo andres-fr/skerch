@@ -11,7 +11,8 @@ import numpy as np
 from collections import defaultdict
 
 
-from skerch.utils import COMPLEX_DTYPES, BadShapeError
+from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
+from skerch.linops import linop_to_matrix
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
 from skerch.algorithms import ssvd, seigh, diagpp, xdiag
@@ -506,6 +507,97 @@ def test_triang_formal(
     * iter_stairs
     * Noise dispatcher and seed consistency
     """
+    dims, stair_width, gh_meas = 10, 3, 10
+    #
+    with pytest.raises(BadShapeError):
+        TriangularLinOp(torch.zeros(5, 6))
+    with pytest.raises(ValueError):
+        TriangularLinOp(torch.zeros(5, 5), stair_width=0)
+    with pytest.raises(ValueError):
+        TriangularLinOp(torch.zeros(5, 5), stair_width=6)
+    with pytest.warns(RuntimeWarning):
+        TriangularLinOp(torch.zeros(5, 5), num_gh_meas=10, noise_type="ssrft")
+    with pytest.warns(RuntimeWarning):
+        TriangularLinOp(torch.zeros(5, 5), num_gh_meas=-1)
+    #
+    s = "<TriangularLinOp[tensor([[0.]])](lower, with main diag)>"
+    assert s == str(TriangularLinOp(torch.zeros(1, 1))), "Wrong repr!"
+    #
+    for (dims, stair_width, rev), stairs1 in triang_iter_stairs:
+        stairs2 = tuple(TriangularLinOp._iter_stairs(dims, stair_width, rev))
+        assert stairs1 == stairs2, f"Wrong iter_stairs for {dims, stair_width}"
+    #
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                mat = torch.arange(dims**2, dtype=dtype).reshape(dims, dims)
+                for lower in (True, False):
+                    for diag in (True, False):
+                        lop1a = TriangularLinOp(
+                            mat,
+                            stair_width=stair_width,
+                            lower=lower,
+                            with_main_diagonal=diag,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            seed=seed,
+                        )
+                        lop1b = TriangularLinOp(
+                            mat,
+                            stair_width=stair_width,
+                            lower=lower,
+                            with_main_diagonal=diag,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            seed=seed,
+                        )
+                        lop2 = TriangularLinOp(
+                            mat,
+                            stair_width=stair_width,
+                            lower=lower,
+                            with_main_diagonal=diag,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            seed=seed + 1,
+                        )
+                        mat1a = linop_to_matrix(
+                            lop1a, dtype, device, adjoint=False
+                        )
+                        mat1b = linop_to_matrix(
+                            lop1b, dtype, device, adjoint=False
+                        )
+                        mat2 = linop_to_matrix(
+                            lop2, dtype, device, adjoint=False
+                        )
+
+                        # w1a = lop1a @ v
+                        # w1b = lop1a @ v
+                        # w2 = lop2 @ v
+                        # assert torch.allclose(
+                        #     w1a, w1b, atol=tol
+                        # ), "Same seed, different result?"
+                        # assert torch.allclose(
+                        #     w1a, w1b, atol=tol
+                        # ), "Same seed, different result?"
+
+                        breakpoint()
+
+
+def test_triang_correctness(
+    rng_seeds, torch_devices, dtypes_tols, triang_iter_stairs
+):
+    """Formal test case for ``TriangularLinOp``.
+
+    * Only square, nonempty linops supported
+    * Stair width between 1 and linop dims
+    * Non-unitnorm noise raises warning
+    * Nonpositive GH measurements raises warning
+    * repr method
+    * iter_stairs
+    * Noise dispatcher and seed consistency
+    """
+    dims = 10
+    #
     with pytest.raises(BadShapeError):
         TriangularLinOp(torch.zeros(5, 6))
     with pytest.raises(ValueError):
@@ -528,8 +620,9 @@ def test_triang_formal(
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
                 # mat = torch.ones(10, 10)
-                mat = torch.arange(100, dtype=dtype).reshape(10, 10)
-                diag, tril, triu = mat.diag(), mat.tril(), mat.triu()
+                # mat = torch.arange(100, dtype=dtype).reshape(10, 10)
+                mat = gaussian_noise((dims, dims), 0, 1, seed, dtype, device)
+                v = gaussian_noise(dims, 0, 1, seed + 1, dtype, device)
                 lop = TriangularLinOp(
                     mat,
                     stair_width=3,
@@ -538,7 +631,7 @@ def test_triang_formal(
                     use_fft=False,
                     num_gh_meas=50000,
                 )
-                v = torch.ones(10)
+
                 # w1 = lop @ v
                 # w2 = tril @ v
 
@@ -547,28 +640,18 @@ def test_triang_formal(
                 # print(tril @ v)
                 # print(v @ tril)
 
+                diag, tril, triu = mat.diag(), mat.tril(), mat.triu()
                 """
                 Triang correctness:
                 ma
                 * also test transpose
                 * mp parallelization compatible
+                * Xchangeable version of serrated?
 
-
-                apparently we also need seig
+                we also need seig
                 and max operator norm
                 """
                 # (lop @ v).tolist()
                 # tril
                 # (v @ lop).tolist()
                 breakpoint()
-
-
-# import torch
-
-# A = torch.randn(16, 16)  # not normal w.p. 1
-
-# ev = torch.linalg.eigvals(A)
-# sv = torch.linalg.svdvals(A)
-
-# print(ev)
-# print(sv)

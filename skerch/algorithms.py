@@ -793,16 +793,16 @@ class TriangularLinOp(BaseLinOp):
             mop = self.dispatcher.mop(
                 self.noise_type, (self.dims, self.n_gh), self.seed, x.dtype
             )
-            result += self._gh_meas(
-                x,
-                self.lop,
-                mop,
-                adjoint,
-                self.stair_width,
-                self.with_main_diag,
-                self.lower,
-                self.use_fft,
-            )
+            # result += self._gh_meas(
+            #     x,
+            #     self.lop,
+            #     mop,
+            #     adjoint,
+            #     self.stair_width,
+            #     self.with_main_diag,
+            #     self.lower,
+            #     self.use_fft,
+            # )
         #
         return result
 
