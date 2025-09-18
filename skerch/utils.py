@@ -504,24 +504,27 @@ def serrated_hadamard_pattern(
     #
 
     if use_fft:
-        if lower:
-            idxs = range(len_v) if with_main_diagonal else range(1, len_v)
-            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
-            for i in range(0, len_v, blocksize):
-                mark = i + blocksize
-                offset = sum(v[i:mark])
-                result[mark:] -= offset
-        else:
-            idxs = (
-                range(0, -len_v, -1)
-                if with_main_diagonal
-                else range(-1, -len_v, -1)
-            )
-            result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
-            for i in range(0, len_v, blocksize):
-                mark = len_v - (i + blocksize)
-                offset = sum(v[mark : (mark + blocksize)])
-                result[:mark] -= offset
+        # TODO: this is not efficient
+        raise NotImplementedError
+        # if lower:
+        #     idxs = range(len_v) if with_main_diagonal else range(1, len_v)
+        #     result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+        #     for i in range(0, len_v, blocksize):
+        #         mark = i + blocksize
+        #         offset = sum(v[i:mark])
+        #         result[mark:] -= offset
+        #         breakpoint()
+        # else:
+        #     idxs = (
+        #         range(0, -len_v, -1)
+        #         if with_main_diagonal
+        #         else range(-1, -len_v, -1)
+        #     )
+        #     result = subdiag_hadamard_pattern(v, idxs, use_fft=True)
+        #     for i in range(0, len_v, blocksize):
+        #         mark = len_v - (i + blocksize)
+        #         offset = sum(v[mark : (mark + blocksize)])
+        #         result[:mark] -= offset
     else:
         if with_main_diagonal:
             result = v.clone()
@@ -529,19 +532,27 @@ def serrated_hadamard_pattern(
             result = torch.zeros_like(v)
         #
         for i in range(len_v - 1):
+            # get indices for result[out_beg:out_end] = v[beg:end]
             block_n, block_i = divmod(i + 1, blocksize)
             if block_i == 0:
+                # we already handled main_diagonal, so ignore this i
                 continue
-            # get indices for result[out_beg:out_end] = v[beg:end]
             if lower:
+                # v[beg:end] grab incremental pyramid at beg of this block
                 beg = block_n * blocksize
                 end = beg + block_i
+                # out[beg:end] add pyramid at end of this block
                 out_end = min(beg + blocksize, len_v)
                 out_beg = out_end - block_i
             else:
-                end = len_v - (block_n * blocksize)
+                # v[beg:end] grab incremental pyramid at end of this block
+                end = (block_n + 1) * blocksize
+                if end > len_v:
+                    # only full blocks are processed
+                    break
                 beg = end - block_i
-                out_beg = max(0, end - blocksize)
+                # out[beg:end] add pyramid at beg of this block
+                out_beg = block_n * blocksize
                 out_end = out_beg + block_i
             # add to serrated pattern
             result[out_beg:out_end] += v[beg:end]

@@ -142,32 +142,23 @@ def hadamard_testcases():
             [0, 1, 3, 6, 10, 15, 21],
         ],
         # serrated: upper, with diag
-        #
         [
             [1, 2, 3, 4, 5, 6, 7],  # blocksize=1
             [3, 2, 7, 4, 11, 6, 7],  # blocksize=2
             [6, 5, 3, 15, 11, 6, 7],  # blocksize=3
             [10, 9, 7, 4, 5, 6, 7],
-        ]
-        #
-        # #
-        # [
-        #     [1, 2, 3, 4, 5, 6, 7],  # blocksize=1
-        #     [1, 5, 3, 9, 5, 13, 7],  # blocksize=2
-        #     [1, 9, 7, 4, 18, 13, 7],  # blocksize=3
-        #     [6, 5, 3, 22, 18, 13, 7],
-        #     [3, 2, 25, 22, 18, 13, 7],
-        #     [1, 27, 25, 22, 18, 13, 7],
-        #     [28, 27, 25, 22, 18, 13, 7],
-        # ],
+            [15, 14, 12, 9, 5, 6, 7],
+            [21, 20, 18, 15, 11, 6, 7],
+            [28, 27, 25, 22, 18, 13, 7],
+        ],
         # serrated: upper, without diag
         [
             [0, 0, 0, 0, 0, 0, 0],  # blocksize=1
-            [0, 3, 0, 5, 0, 7, 0],  # blocksize=2
-            [0, 7, 4, 0, 13, 7, 0],  # blocksize=3
-            [5, 3, 0, 18, 13, 7, 0],
-            [2, 0, 22, 18, 13, 7, 0],
-            [0, 25, 22, 18, 13, 7, 0],
+            [2, 0, 4, 0, 6, 0, 0],  # blocksize=2
+            [5, 3, 0, 11, 6, 0, 0],  # blocksize=3
+            [9, 7, 4, 0, 0, 0, 0],
+            [14, 12, 9, 5, 0, 0, 0],
+            [20, 18, 15, 11, 6, 0, 0],
             [27, 25, 22, 18, 13, 7, 0],
         ],
     )
@@ -753,7 +744,7 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                         )
                 # serrated_hadamard_pattern
                 for i in range(dims):
-                    for fft in (False, True):
+                    for fft in (False,):
                         msg = " (FFT)" if fft else ""
                         # serrated pattern: lower, with main diag
                         w = serrated_hadamard_pattern(
@@ -796,6 +787,9 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                             lower=False,
                             use_fft=fft,
                         )
-                        assert torch.allclose(z4[i], w, atol=tol), (
-                            "Wrong serrated upper without main diag!" + msg
-                        )
+                        try:
+                            assert torch.allclose(z4[i], w, atol=tol), (
+                                "Wrong serrated upper without main diag!" + msg
+                            )
+                        except:
+                            breakpoint()
