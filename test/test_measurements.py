@@ -10,6 +10,7 @@
 """
 
 
+import time
 import warnings
 import pytest
 import torch
@@ -109,19 +110,26 @@ def ssrft_hw_and_autocorr_tolerances():
 # # HELPERS
 # ##############################################################################
 class BasicMatrixLinOp:
-    """Intentionally simple linop, only supporting ``shape`` and @."""
+    """Intentionally simple linop, only supporting ``shape`` and @.
 
-    def __init__(self, matrix):
+    :param delay: Artificially introduced when computing  ``@``, in seconds.
+    """
+
+    def __init__(self, matrix, delay=0):
         """ """
         self.matrix = matrix
         self.shape = matrix.shape
 
     def __matmul__(self, x):
         """ """
+        if delay > 0:
+            time.sleep(delay)
         return self.matrix @ x
 
     def __rmatmul__(self, x):
         """ """
+        if delay > 0:
+            time.sleep(delay)
         return x @ self.matrix
 
 
