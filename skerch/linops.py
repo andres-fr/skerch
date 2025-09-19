@@ -254,7 +254,7 @@ class ByVectorLinOp(BaseLinOp):
         super().__init__(shape)
         self.by_row = by_row
 
-    def get_vector(self, idx, device):
+    def get_vector(self, idx, input_device):
         """Method to gather vector entries for this linear operator.
 
         Override this method with the desired behaviour. For a shape of
@@ -264,7 +264,9 @@ class ByVectorLinOp(BaseLinOp):
         :param idx: Index of the row/column to be sampled. It will go from 0
           to ``dims - 1``, both included, where ``dims`` is ``h`` if
           ``self.by_row`` is true, and ``w`` otherwise.
-        :param device: The returned vector is expected to be on this device.
+        :param input_device: The device of the input tensor that this linop
+          was called on. The output of this method should generally be in the
+          same device.
         """
         raise NotImplementedError
 

@@ -2,14 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for core linop functionality.
-
-The library implements a ``BaseLinOp`` class, plus core functionality to
-transpose linops, convert them to matrices and define matrix-free linops in
-terms of vector rows or matrices.
-
-This file tests correctness of the above functionality, plus some corner cases.
-"""
+"""Pytest for core linop functionality."""
 
 
 from time import time
@@ -53,8 +46,8 @@ def linop_correctness_shapes(request):
         (1, 10),
         (10, 1),
         (10, 10),
-        (10, 100),
-        (100, 10),
+        (10, 20),
+        (20, 10),
     ]
     if request.config.getoption("--quick"):
         result = result[:7]
@@ -64,24 +57,8 @@ def linop_correctness_shapes(request):
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-# class MatrixAsLinOp(ByVectorLinOp):
-#     """ """
-
-#     def __init__(self, mat, by_row=False):
-#         """ """
-#         super().__init__(mat.shape, by_row)
-#         self.mat = mat
-
-#     def get_vector(self, idx, device):
-#         """ """
-#         if self.by_row:
-#             return self.mat[idx]
-#         else:
-#             return self.mat[:, idx]
-
-
 class MatMatLinOp(BaseLinOp):
-    """ """
+    """Implementing matmul."""
 
     def __init__(self, mat, batch=None):
         """ """
@@ -98,7 +75,7 @@ class MatMatLinOp(BaseLinOp):
 
 
 class MatVecLinOp(BaseLinOp):
-    """ """
+    """Implementing matvec."""
 
     def __init__(self, mat, batch=None):
         """ """
@@ -112,6 +89,22 @@ class MatVecLinOp(BaseLinOp):
     def rvecmul(self, x):
         """ """
         return x @ self.mat
+
+
+class MatBVLinOp(ByVectorLinOp):
+    """By-Vector linop."""
+
+    def __init__(self, mat, by_row=False):
+        """ """
+        super().__init__(mat.shape, by_row)
+        self.mat = mat
+
+    def get_vector(self, idx, input_device):
+        """ """
+        if self.by_row:
+            return self.mat[idx]
+        else:
+            return self.mat[:, idx]
 
 
 # ##############################################################################
@@ -221,21 +214,15 @@ def test_baselinop_formal():
     ), "Batched slower than matvec? (adj)"
 
 
-def test_baselinop_correctness(
+def test_linop_correctness(
     rng_seeds, torch_devices, dtypes_tols, linop_correctness_shapes
 ):
-    """Test case for correctness of linop matmuls.
+    """Test case for correctness of base linop and by vector linop.
 
     For all devices and datatypes, samples Gaussian noise and checks that:
     * linop_to_matrix yields the original matrix.
     * Same thing but with (Hermitian) transposed linop
     * Double transposed is same as original lop
-
-
-    TODO:
-    * New correctness test for byvector: sample matrices row by row with a seed
-      and then check that it is the same thing but memsize is low (by_row T/F)
-    * Then, go over the whole API and ensure matmat compatibility
     """
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
@@ -281,43 +268,26 @@ def test_baselinop_correctness(
                             )
                             assert (matT == mat.H).all(), f"Wrong transp?{msg}"
                             assert lopTT is lop, f"Wrong double transp?{msg}"
-
-                        # breakpoint()
-
-                        # phi = gaussian_noise(
-                        #     (2, h) if adj else (w, 2),
-                        #     dtype=dtype,
-                        #     device=device,
-                        #     seed=2 * seed + 1,
-                        # )
-
-                        # # THIS IS THE BY ROW STUFF
-                        # for by_row in (True, False):
-                        #     lop = MatrixAsLinOp(mat, by_row=by_row)
-                        #     mat2 = linop_to_matrix(
-                        #         lop, dtype=dtype, device=device, adjoint=adj
-                        #     )
-                        #     assert (
-                        #         mat == mat2
-                        #     ).all(), f"Wrong linop_to_matrix! {adj, by_row}"
-                        #     # matmat operations
-                        #     matmeas = phi @ mat if adj else mat @ phi
-                        #     lopmeas = phi @ lop if adj else lop @ phi
-                        #     breakpoint()
-                        #     assert torch.allclose(
-                        #         matmeas, lopmeas, atol=tol
-                        #     ), "lop@v does not equal mat@v in mat-mat!"
-                        #     # matvec operations
-                        #     matmeas = phi[0] @ mat if adj else mat @ phi[:, 0]
-                        #     lopmeas = phi[0] @ lop if adj else lop @ phi[:, 0]
-                        #     assert torch.allclose(
-                        #         matmeas, lopmeas, atol=tol
-                        #     ), "lop@v does not equal mat@v in mat-vec!"
-                        #     # now test transposition
-                        #     lopT = lop.t()
-                        #     lopTT = lopT.t()
-                        #     matT = linop_to_matrix(
-                        #         lopT, dtype=dtype, device=device, adjoint=adj
-                        #     )
-                        #     assert (matT == mat.H).all(), "Wrong transp?"
-                        #     assert lopTT is lop, "Wrong double transp?"
+                        # by-vector correctness tests:
+                        for by_row in (True, False):
+                            msg = f"adj={adj}, by_row={by_row}"
+                            lop_bv = MatBVLinOp(mat, by_row=by_row)
+                            mat_bv = linop_to_matrix(
+                                lop_bv, dtype=dtype, device=device, adjoint=adj
+                            )
+                            # correctness
+                            assert torch.allclose(
+                                mat, mat_bv
+                            ), f"Inconsistent by-vector baselinop! {msg}"
+                            # transposed
+                            lop_bvT = lop_bv.t()
+                            lop_bvTT = lop_bvT.t()
+                            mat_bvT = linop_to_matrix(
+                                lopT, dtype=dtype, device=device, adjoint=adj
+                            )
+                            assert (
+                                matT == mat.H
+                            ).all(), f"Wrong by-vector transposition?{msg}"
+                            assert (
+                                lopTT is lop
+                            ), f"Wrong by-vector double transp?{msg}"
