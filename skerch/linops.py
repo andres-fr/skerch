@@ -42,6 +42,28 @@ def linop_to_matrix(lop, dtype=torch.float32, device="cpu", adjoint=False):
     return result
 
 
+def check_linop_input(x, lop_shape, adjoint):
+    """Checking that input is a mat/vec of the right shape.
+
+    :param x: The input to this linear operator. It should be either a
+      vector or a matrix of matching shape.
+    :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
+      ``self @ x``.
+    """
+    if not len(x.shape) in {1, 2}:
+        raise BadShapeError("Only vector or matrix supported!")
+    if adjoint:
+        if x.shape[-1] != lop_shape[0]:
+            raise BadShapeError(
+                f"Mismatching shapes! {x.shape} <--> {lop_shape}"
+            )
+    if not adjoint:
+        if x.shape[0] != lop_shape[1]:
+            raise BadShapeError(
+                f"Mismatching shapes! {lop_shape} <--> {x.shape}"
+            )
+
+
 class BaseLinOp:
     """Base class for linear operators.
 
@@ -82,28 +104,6 @@ class BaseLinOp:
         s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}>"
         return s
 
-    @staticmethod
-    def check_input(x, lop_shape, adjoint):
-        """Checking that input is a mat/vec of the right shape.
-
-        :param x: The input to this linear operator. It should be either a
-          vector or a matrix of matching shape.
-        :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
-          ``self @ x``.
-        """
-        if not len(x.shape) in {1, 2}:
-            raise BadShapeError("Only vector or matrix supported!")
-        if adjoint:
-            if x.shape[-1] != lop_shape[0]:
-                raise BadShapeError(
-                    f"Mismatching shapes! {x.shape} <--> {lop_shape}"
-                )
-        if not adjoint:
-            if x.shape[0] != lop_shape[1]:
-                raise BadShapeError(
-                    f"Mismatching shapes! {lop_shape} <--> {x.shape}"
-                )
-
     def __matmul_vectorizer(self, x, adjoint=False):
         """Helper method to run ``vecmul``s, one vector of ``x`` at a time.
 
@@ -129,7 +129,7 @@ class BaseLinOp:
 
     def __matmul_batcher(self, x, adjoint=False, batch=None):
         """Helper to dispatch between (batched) ``matmul`` and ``vecmul``."""
-        self.check_input(x, self.shape, adjoint)
+        check_linop_input(x, self.shape, adjoint)
         # if x is a vector, just run vecmul
         if len(x.shape) == 1:
             result = self.rvecmul(x) if adjoint else self.vecmul(x)
@@ -459,7 +459,7 @@ class SumLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, self.shape, adjoint=False)
+        check_linop_input(x, self.shape, adjoint=False)
         result = self.operators[0] @ (x if self.signs[0] else -x)
         for o, s in zip(self.operators[1:], self.signs[1:]):
             if s:
@@ -473,7 +473,7 @@ class SumLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, self.shape, adjoint=True)
+        check_linop_input(x, self.shape, adjoint=True)
         result = x @ self.operators[0]
         for o, s in zip(self.operators[1:], self.signs[1:]):
             if s:
@@ -519,7 +519,7 @@ class DiagonalLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, self.shape, adjoint=False)
+        check_linop_input(x, self.shape, adjoint=False)
         if len(x.shape) == 2:
             result = (x.T * self.diag).T
         else:
@@ -532,7 +532,7 @@ class DiagonalLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, self.shape, adjoint=True)
+        check_linop_input(x, self.shape, adjoint=True)
         result = x * self.diag
         return result
 
@@ -657,7 +657,7 @@ class BandedLinOp(BaseLinOp):
 
     def __matmul_helper(self, x, adjoint=False):
         """Helper method to perform multiple diagonal matmuls."""
-        self.check_input(x, self.shape, adjoint=adjoint)
+        check_linop_input(x, self.shape, adjoint=adjoint)
         #
         diags = {}
         for idx, diag in self.diags.items():
