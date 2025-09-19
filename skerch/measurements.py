@@ -3,6 +3,41 @@
 
 
 """
+TODO:
+
+this section is strongly biased towards matvec, since I was thinking about
+multimachine parallelization.
+
+Currently, users provide max_mp_workers. If none, it is matvec, and if given,
+the for loop is distributed across machines.
+
+Before anything:
+* show that MP is reliable and useful in an integration test case
+  - create a smal NN and problem, where HVP takes like 1 sec
+  - 20 measurements should take 20 seconds
+  - distribute across 5 cores, now it should take around 4 sec.
+
+Even if we keep MP, the meas_fn pattern is ugly AF and prevents batching.
+How to enable batching while being MP compatible?
+
+
+---
+ok, so given lop could be anything! so we need to support that.
+* use cases:
+  - just run everything in baselinop mode (give batch=None or int)
+    useful if the linop supports batching and is just a plain @ call really
+  - user specifies which measurement idxs should be run (i.e. @ is not
+    precise enough). In this case we also have batch, which means that
+    a bunch of vectors are gathered at once.
+
+---
+SO:
+
+*
+
+* add batch to by_vector get_measvec
+
+
 """
 
 from concurrent.futures import ProcessPoolExecutor
