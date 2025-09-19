@@ -6,6 +6,7 @@
 * Add support for batched matmat, with a param:
   - if None, default is matmat, and if crashes, warn and do matvec
   - If N (e.g. 3), try matmat by 3, and if crashes, also crash
+  - utest: create matvec-only linop, and check that it does trigger and slower
 * Add sketchlord(h) facilities
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
@@ -35,6 +36,7 @@ Triang correctness:
 
 
 CHANGELOG:
+* Better test coverage -> less bugs
 * support for complex datatypes
 * Support for (approximately) low-rank plus diagonal synthetic matrices
 * Linop API:
@@ -42,10 +44,11 @@ CHANGELOG:
   - New measurement linops: Rademacher, Gaussian, Phase, SSRFT
 * Sketching API:
   - Modular measurement API supporting multiprocessing and HDF5
+  - Support for matrix-matrix parallelization
   - Modular recovery methods (singlepass, Nystrom, oversampled) for
     general and symmetric low-rank matrices
 * Algorithm API:
-  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Sketchlord, Triangular
+  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Sketchlord, Triangular, Norm
   - Efficient support for Hermitian versions
   - Dispatcher for modularized use of noise sources and recovery types
   - Matrix-free a-posteriori error verification
@@ -124,7 +127,8 @@ class SketchedAlgorithmDispatcher:
             supported = "singlepass, nystrom, oversampled_12345"
             warnings.warn(
                 f"Unknown recovery type! {recovery_type}! "
-                "Supported: {supported}"
+                "Supported: {supported}",
+                RuntimeWarning,
             )
             recovery_fn = None
         #
@@ -156,7 +160,8 @@ class SketchedAlgorithmDispatcher:
             supported = "rademacher, gaussian, ssrft, phase"
             warnings.warn(
                 f"Unknown recovery type! {recovery_type} "
-                "Supported: {supported}"
+                "Supported: {supported}",
+                RuntimeWarning,
             )
             mop = None
         #

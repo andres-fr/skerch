@@ -13,6 +13,7 @@ default linear operators (composite, diagonal...).
 """
 
 
+import warnings
 import torch
 
 from .utils import BadShapeError, htr, COMPLEX_DTYPES
@@ -46,12 +47,22 @@ class BaseLinOp:
 
     Implements the ``.shape`` attribute and basic matmul functionality with
     vectors and matrices (also via the ``@`` operator). Intended to be
-    extended with further functionality via :meth:`vecmul` and :meth:`rvecmul`.
+    extended with further functionality via :meth:`.matmul` and
+    :meth:`.rmatmul` (:meth:`.vecmul` and :meth:`.rvecmul` also possible, but
+    matrix-matrix multiplications should be prefered to leverage
+    parallelization).
 
     :param shape: ``(height, width)`` of linear operator.
+    :param batch: If ``matmul`` is implemented and we are e.g. multiplying
+      ``self @ x`` where ``x`` has ``k`` vectors, the default behaviour for
+       ``batch=None`` is to attempt a matmul with all ``k`` vectors at once,
+       and then go one-by-one if anything goes wrong. Setting an integer
+       ``batch`` size allows users to overcome memory errors by limiting the
+       matmul operation to at most ``batch`` at once, while keeping
+       parallelization within that batch.
     """
 
-    def __init__(self, shape):
+    def __init__(self, shape, batch=None):
         """Initializer. See class docstring."""
         try:
             h, w = shape
@@ -62,18 +73,21 @@ class BaseLinOp:
         if h <= 0 or w <= 0:
             raise BadShapeError(f"Empty linop with shape {shape}?")
         self.shape = shape
+        self.batch = batch
 
     def __repr__(self):
         """Returns a string in the form <classname(shape)>."""
         clsname = self.__class__.__name__
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]})>"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}>"
         return s
 
     @staticmethod
     def check_input(x, lop_shape, adjoint):
         """Checking that input is a mat/vec of the right shape.
 
-        :param x: The input to this linear operator.
+        :param x: The input to this linear operator. It should be either a
+          vector or a matrix of matching shape.
         :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
           ``self @ x``.
         """
@@ -90,58 +104,78 @@ class BaseLinOp:
                     f"Mismatching shapes! {lop_shape} <--> {x.shape}"
                 )
 
-    @classmethod
-    def matmul_vectorizer(cls, x, lop_shape, vecmul_fn, rvecmul_fn, adjoint):
-        """ """
-        lop_h, lop_w = lop_shape
-        cls.check_input(x, lop_shape, adjoint=adjoint)
-        if len(x.shape) == 1:
-            result = rvecmul_fn(x) if adjoint else vecmul_fn(x)
-        else:
-            x_h, x_w = x.shape
-            num_vecs = x_h if adjoint else x_w
-            result = torch.zeros(
-                (num_vecs, lop_w) if adjoint else (lop_h, num_vecs),
-                dtype=x.dtype,
-                device=x.device,
-            )
-            for i in range(num_vecs):
-                if adjoint:
-                    result[i, :] = rvecmul_fn(x[i, :])
-                else:
-                    result[:, i] = vecmul_fn(x[:, i])
+    def __matmul_vectorizer(self, x, adjoint=False):
+        """Helper method to run ``vecmul``s, one vector of ``x`` at a time.
+
+        :param x: Assumed to be a matrix of matching dimensions. If ``x`` is
+          a vector, call :meth:`.vecmul` or :meth:`.rvecmul` directly.
+        """
+        lop_h, lop_w = self.shape
+        x_h, x_w = x.shape
+        num_vecs = x_h if adjoint else x_w
+        #
+        result = torch.zeros(
+            (num_vecs, lop_w) if adjoint else (lop_h, num_vecs),
+            dtype=x.dtype,
+            device=x.device,
+        )
+        for i in range(num_vecs):
+            if adjoint:
+                result[i, :] = self.rvecmul(x[i, :])
+            else:
+                result[:, i] = self.vecmul(x[:, i])
+        #
         return result
 
-    def vecmul(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        :param x: Expected to be a vector of shape ``(w,)`` where this linop
-          has shape ``(h, w)``. Note that inputs of shape ``(w, k)`` will be
-          automatically passed to this method as ``k`` vectors of length ``w``.
-        :returns: A vector of shape ``(h,)`` equaling ``self @ x``.
-        """
-        raise NotImplementedError
-
-    def rvecmul(self, x):
-        """Adjoint (left) matrix-vector multiplication ``x @ self``.
-
-        Like :meth:`matmul`, but with adjoint shapes.
-        """
-        raise NotImplementedError
+    def __matmul_batcher(self, x, adjoint=False, batch=None):
+        """Helper to dispatch between (batched) ``matmul`` and ``vecmul``."""
+        self.check_input(x, self.shape, adjoint)
+        # if x is a vector, just run vecmul
+        if len(x.shape) == 1:
+            result = self.rvecmul(x) if adjoint else self.vecmul(x)
+        # if no batch given: try matmul, if any issue warn and try vecmul
+        elif batch is None:
+            try:
+                result = self.rmatmul(x) if adjoint else self.matmul(x)
+            except Exception as ee:
+                warnings.warn(
+                    f"{self} couldn't run matmat due to: '{ee}' "
+                    "Running matvec instead",
+                    RuntimeWarning,
+                )
+                result = self.__matmul_vectorizer(x, adjoint)
+        # if batch given: try matmul with that batch, if any issue raise error
+        # since desired batch is not possible
+        else:
+            num_vecs = x.shape[0 if adjoint else 1]
+            result = []
+            for beg in range(0, num_vecs, batch):
+                end = beg + batch
+                try:
+                    if adjoint:
+                        result.append(self.rmatmul(x[beg:end, :]))
+                    else:
+                        result.append(self.matmul(x[:, beg:end]))
+                except Exception as e:
+                    msg = (
+                        f"Couldn't perform batched matmat! Implement matmul "
+                        f"or set batch to None {self, x}"
+                    )
+                    raise RuntimeError(msg) from e
+            stack = torch.vstack if adjoint else torch.hstack
+            result = stack(result)
+        #
+        return result
 
     # operator interfaces
     def __matmul__(self, x):
         """Convenience wrapper to :meth:`.matmul` for vectors or matrices."""
-        result = self.matmul_vectorizer(
-            x, self.shape, self.vecmul, self.rvecmul, adjoint=False
-        )
+        result = self.__matmul_batcher(x, adjoint=False, batch=self.batch)
         return result
 
     def __rmatmul__(self, x):
         """Convenience wrapper to :meth:`.rmatmul` for vectors or matrices."""
-        result = self.matmul_vectorizer(
-            x, self.shape, self.vecmul, self.rvecmul, adjoint=True
-        )
+        result = self.__matmul_batcher(x, adjoint=True, batch=self.batch)
         return result
 
     def __imatmul__(self, x):
@@ -159,26 +193,58 @@ class BaseLinOp:
         """(Hermitian) transposition."""
         return TransposedLinOp(self)
 
+    # to-be-implemented in class extensions
+    def vecmul(self, x):
+        """Forward (right) matrix-vector multiplication ``self @ x``.
+
+        .. note::
+
+          If :meth:`.matmul` is implemented, ``@`` will try that first, to
+          leverage parallelization. If anything goes wrong, it will fallback to
+          this method, which processes a single vector each time.
+
+        :param x: Expected to be a vector of shape ``(w,)`` where this linop
+          has shape ``(h, w)``. Note that inputs of shape ``(w, k)`` will be
+          automatically passed to this method as ``k`` vectors of length ``w``.
+        :returns: A vector of shape ``(h,)`` equaling ``self @ x``.
+        """
+        return self.matmul(x)
+
+    def rvecmul(self, x):
+        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+
+        Like :meth:`.vecmul`, but with adjoint shapes.
+        """
+        return self.rmatmul(x)
+
+    def matmul(self, x):
+        """ """
+        raise NotImplementedError("Matmul not implemented!")
+
+    def rmatmul(self, x):
+        """ """
+        raise NotImplementedError("Rmatmul not implemented!")
+
 
 class ByVectorLinOp(BaseLinOp):
     """Matrix-free linop computed vector by vector.
 
     This matrix-free operator generates each row (or column) one by
-    one during matrix multiplication. Users can decide which modality to use
-    at instantiation via the ``by_row`` boolean flag.
+    one during matrix multiplication. Useful when memory is a bottleneck.
 
-    Extensions of this class should implement the :meth:`sample` method
+    Users can decide which modality to use at instantiation via the ``by_row``
+    boolean flag. Extensions of this class should implement :meth:`.get_vector`
     accordingly to return vectors of the right shape.
 
     .. note::
       The ``by_row`` flag has implications in terms of memory and runtime.
       If true, for a ``lop`` of shape ``(h, w)``, the ``lop @ x`` matrix-vector
-      multiplication will call :meth:`get_vector`` ``h`` times, and perform
+      multiplication will call :meth:`.get_vector`` ``h`` times, and perform
       ``h`` dot products of dimension ``w``. If false, it will perform ``w``
       scalar products of dimension ``h``. In the case of ``x @ lop``,
       the scalar and dot products are swapped.
 
-      Therefore, developers need to override :meth:`get_vector` taking this
+      Therefore, developers need to override :meth:`.get_vector` taking this
       flag into account, and users should set it to the scenario that is most
       efficient (e.g. by-column is generally more efficient when ``h > w``).
     """
