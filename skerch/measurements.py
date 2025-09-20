@@ -10,7 +10,22 @@ TODO:
   - update algorithms with new paradigm
 
 
+PROBLEM:
 
+as we know, pulling blocks of different sizes results in different randomness.
+
+with batched blocks, we may request a smaller range than the block size.
+currently, this is causing a mismatch in the noise.
+
+Ideally, we should only be able to retrieve full blocks, and then go
+from there.
+
+* SO GET_BLOCK SHOULD GET BLOCK_IDX, INSTEAD OF IDXS
+  - change this in byblock class
+  - then change it in all subclasses, tests should pass
+  - finally get_measblock should now be consistent (how to match with matrix then?)
+  - ready to use in algorithms...
+  -
 
 """
 
@@ -39,66 +54,79 @@ from .utils import (
 # ##############################################################################
 # # CONVENIENCE WRAPPERS
 # ##############################################################################
-def get_measvec(idx, meas_lop, device=None, dtype=None):
+def get_measblock(idxs, meas_lop, dtype, device):
     """ """
+    if isinstance(idxs, int):
+        idxs = range(idxs, idxs + 1)
+    #
     if isinstance(meas_lop, torch.Tensor):
-        measvec = meas_lop[:, idx]
-    elif isinstance(meas_lop, SsrftNoiseLinOp):
-        if device is None or dtype is None:
-            raise ValueError("SsrftNoiseLinop requires device and dtype!")
-        measvec = meas_lop.get_vector(idx, device, dtype, by_row=False)
+        block = meas_lop[:, idxs]
     else:
-        measvec = meas_lop.get_vector(idx, device)
+        block = meas_lop.get_block(idxs, dtype, device)
     #
-    return measvec
+    return block
 
 
-def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
-    """ """
-    measvec = get_measvec(idx, meas_lop, device, dtype)
-    result = (measvec.conj() @ lop) if adjoint else (lop @ measvec)
-    return idx, result
+# def get_measvec(idx, meas_lop, device=None, dtype=None):
+#     """ """
+#     if isinstance(meas_lop, torch.Tensor):
+#         measvec = meas_lop[:, idx]
+#     elif isinstance(meas_lop, SsrftNoiseLinOp):
+#         if device is None or dtype is None:
+#             raise ValueError("SsrftNoiseLinop requires device and dtype!")
+#         measvec = meas_lop.get_vector(idx, device, dtype, by_row=False)
+#     else:
+#         measvec = meas_lop.get_vector(idx, device)
+#     #
+#     return measvec
 
 
-def perform_measurements(
-    meas_fn,
-    meas_idxs,
-    adjoint=False,
-    parallel_mode=None,
-    compact=False,
-    max_mp_workers=None,
-):
-    """
-    :param meas_fn: Function callable with ``meas_fn(idx)`` that returns
-      the pair ``idx, v_idx``, where ``v_idx`` is a vector corresponding
-      to the desired measurement at given index.
-    """
-    result = {}
-    meas_fn = partial(meas_fn, adjoint=adjoint)
-    #
-    if parallel_mode is None:
-        warnings.warn(
-            "CPU measurements could be parallelized with parallel_mode=mp",
-            RuntimeWarning,
-        )
-        for idx in meas_idxs:
-            result[idx] = meas_fn(idx)[1]
-    #
-    elif parallel_mode == "mp":
-        # keep an eye on this, could hang
-        with ProcessPoolExecutor(max_workers=max_mp_workers) as pool:
-            result = dict(pool.map(meas_fn, meas_idxs))
-    #
-    else:
-        raise ValueError(f"Unknown parallel_mode! {parallel_mode}")
-    #
-    if compact:
-        sorted_idxs = sorted(result)
-        result = torch.stack(
-            [result[idx] for idx in sorted_idxs], dim=0 if adjoint else 1
-        )
-        result = (sorted_idxs, result)
-    return result
+# def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
+#     """ """
+#     measvec = get_measvec(idx, meas_lop, device, dtype)
+#     result = (measvec.conj() @ lop) if adjoint else (lop @ measvec)
+#     return idx, result
+
+
+# def perform_measurements(
+#     meas_fn,
+#     meas_idxs,
+#     adjoint=False,
+#     parallel_mode=None,
+#     compact=False,
+#     max_mp_workers=None,
+# ):
+#     """
+#     :param meas_fn: Function callable with ``meas_fn(idx)`` that returns
+#       the pair ``idx, v_idx``, where ``v_idx`` is a vector corresponding
+#       to the desired measurement at given index.
+#     """
+#     result = {}
+#     meas_fn = partial(meas_fn, adjoint=adjoint)
+#     #
+#     if parallel_mode is None:
+#         warnings.warn(
+#             "CPU measurements could be parallelized with parallel_mode=mp",
+#             RuntimeWarning,
+#         )
+#         for idx in meas_idxs:
+#             result[idx] = meas_fn(idx)[1]
+#     #
+#     elif parallel_mode == "mp":
+#         # keep an eye on this, could hang
+#         with ProcessPoolExecutor(max_workers=max_mp_workers) as pool:
+#             result = dict(pool.map(meas_fn, meas_idxs))
+#     #
+#     else:
+#         raise ValueError(f"Unknown parallel_mode! {parallel_mode}")
+#     #
+#     if compact:
+#         sorted_idxs = sorted(result)
+#         result = torch.stack(
+#             [result[idx] for idx in sorted_idxs], dim=0 if adjoint else 1
+#         )
+#         result = (sorted_idxs, result)
+#     return result
 
 
 # ##############################################################################
@@ -301,7 +329,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
             or idxs.stop > (h if self.by_row else w)
         ):
             raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
-        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        out_shape = (w, blocksize) if self.by_row else (h, blocksize)
         result = phase_noise(  # device always CPU to ensure determinism
             out_shape, self.seed + idxs.start, input_dtype, device="cpu"
         ).to(input_device)

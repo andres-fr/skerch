@@ -3,10 +3,6 @@
 
 
 """
-* Add support for batched matmat, with a param:
-  - if None, default is matmat, and if crashes, warn and do matvec
-  - If N (e.g. 3), try matmat by 3, and if crashes, also crash
-  - utest: create matvec-only linop, and check that it does trigger and slower
 * Add sketchlord(h) facilities
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
