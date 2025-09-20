@@ -423,52 +423,33 @@ def test_iid_measurements_formal(
     """
     # correct string conversion
     hw = (3, 3)  # only matters for strings
-    lop = RademacherNoiseLinOp(
-        hw, 0, torch.float32, by_row=False, register=False
-    )
-    s = (
-        "<RademacherNoiseLinOp(3x3, seed=0, "
-        "dtype=torch.float32, by_row=False)>"
-    )
+    lop = RademacherNoiseLinOp(hw, 0, by_row=False, register=False)
+    s = "<RademacherNoiseLinOp(3x3, seed=0, by_row=False)>"
     assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
-    lop = GaussianNoiseLinOp(
-        hw, 0, torch.float32, by_row=False, register=False
-    )
-    s = (
-        "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, "
-        + "dtype=torch.float32, by_row=False)>"
-    )
+    lop = GaussianNoiseLinOp(hw, 0, by_row=False, register=False)
+    s = "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, by_row=False)>"
     assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
-    lop = PhaseNoiseLinOp(hw, 0, torch.complex64, by_row=False, register=False)
-    s = (
-        "<PhaseNoiseLinOp(3x3, conj=False, seed=0, "
-        + "dtype=torch.complex64, by_row=False)>"
-    )
+    lop = PhaseNoiseLinOp(hw, 0, by_row=False, register=False)
+    s = "<PhaseNoiseLinOp(3x3, conj=False, seed=0, by_row=False)>"
     assert str(lop) == s, "Unexpected repr for Phase noise linop!"
     #
     for lop_type, complex_only in iid_noise_linop_types:
-        if complex_only:
-            dtype1, dtype2 = torch.complex64, torch.complex128
-        else:
-            dtype1, dtype2 = torch.float32, torch.float64
-        lop = lop_type((5, 5), seed=0, dtype=dtype1, by_row=False)
+        lop = lop_type((5, 5), seed=0, by_row=False)
         # register triggers for overlapping seeds regardless of other factors
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=0, dtype=dtype1, by_row=False)
+            _ = lop_type((5, 5), seed=0, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=dtype1, by_row=False)
+            _ = lop_type((5, 5), seed=1, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((20, 5), seed=1, dtype=dtype1, by_row=False)
+            _ = lop_type((20, 5), seed=1, by_row=False)
         with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=dtype2, by_row=False)
-        with pytest.raises(BadSeedError):
-            _ = lop_type((5, 5), seed=1, dtype=dtype1, by_row=True)
+            _ = lop_type((5, 5), seed=1, by_row=True)
         lop_type.REGISTER.clear()  # clear register for this lop_type
         # invalid index triggers error
         with pytest.raises(ValueError):
-            lop.get_vector(idx=-1, device="cpu")
+            lop.get_block(range(-1), torch.float32, "cpu")
         with pytest.raises(ValueError):
-            lop.get_vector(idx=5, device="cpu")
+            lop.get_block(5, torch.float32, "cpu")
         #
         hw = (100, 2)
         for seed in rng_seeds:
@@ -480,13 +461,12 @@ def test_iid_measurements_formal(
                     torch.complex128,
                 }:
                     with pytest.raises(ValueError):
-                        _ = lop_type(hw, 0, dtype, register=False)
+                        clop = lop_type(hw, 0, register=False)
+                        _ = clop @ torch.ones(hw[1], dtype=dtype)
                     continue
                 # seed consistency across devices (if CUDA is available)
                 if torch.cuda.is_available():
-                    lop = lop_type(
-                        hw, seed, dtype, by_row=False, register=False
-                    )
+                    lop = lop_type(hw, seed, by_row=False, register=False)
                     mat1 = linop_to_matrix(lop, dtype, "cpu", adjoint=False)
                     mat2 = linop_to_matrix(lop, dtype, "cuda", adjoint=False)
                     mat3 = linop_to_matrix(lop, dtype, "cpu", adjoint=True)
@@ -507,30 +487,14 @@ def test_iid_measurements_formal(
                     )
                 # deterministic behaviour and seed consistency
                 for device in torch_devices:
-                    lop1 = lop_type(
-                        hw, seed, dtype, by_row=False, register=False
-                    )
-                    lop2 = lop_type(
-                        hw, seed, dtype, by_row=False, register=False
-                    )
-                    lop3 = lop_type(
-                        hw, seed + 5, dtype, by_row=False, register=False
-                    )
-                    mat1a = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
-                    mat1b = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
-                    mat1c = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=True
-                    )
-                    mat2 = linop_to_matrix(
-                        lop2, lop1.dtype, device, adjoint=False
-                    )
-                    mat3 = linop_to_matrix(
-                        lop3, lop1.dtype, device, adjoint=False
-                    )
+                    lop1 = lop_type(hw, seed, by_row=False, register=False)
+                    lop2 = lop_type(hw, seed, by_row=False, register=False)
+                    lop3 = lop_type(hw, seed + 5, by_row=False, register=False)
+                    mat1a = linop_to_matrix(lop1, dtype, device, adjoint=False)
+                    mat1b = linop_to_matrix(lop1, dtype, device, adjoint=False)
+                    mat1c = linop_to_matrix(lop1, dtype, device, adjoint=True)
+                    mat2 = linop_to_matrix(lop2, dtype, device, adjoint=False)
+                    mat3 = linop_to_matrix(lop3, dtype, device, adjoint=False)
                     assert (
                         mat1a == mat1b
                     ).all(), f"Nondeterministic linop? {lop1}"
@@ -582,7 +546,6 @@ def test_iid_measurements_correctness(
                     lop1 = lop_type(
                         hw,
                         seed,
-                        dtype,
                         by_row=False,
                         register=False,
                         blocksize=max(hw),
@@ -590,7 +553,6 @@ def test_iid_measurements_correctness(
                     lop2 = lop_type(
                         hw,
                         seed,
-                        dtype,
                         by_row=True,
                         register=False,
                         blocksize=max(hw),
@@ -647,15 +609,13 @@ def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in complex_dtypes_tols.items():
-                lop = PhaseNoiseLinOp(
-                    (5, 5), seed, dtype, conj=False, register=False
-                )
+                lop = PhaseNoiseLinOp((5, 5), seed, conj=False, register=False)
                 lop_conj = PhaseNoiseLinOp(
-                    (5, 5), seed, dtype, conj=True, register=False
+                    (5, 5), seed, conj=True, register=False
                 )
-                mat = linop_to_matrix(lop, lop.dtype, device, adjoint=False)
+                mat = linop_to_matrix(lop, dtype, device, adjoint=False)
                 mat_conj = linop_to_matrix(
-                    lop_conj, lop.dtype, device, adjoint=False
+                    lop_conj, dtype, device, adjoint=False
                 )
                 assert (mat.conj() == mat_conj).all(), "Wrong conj linop?"
                 #

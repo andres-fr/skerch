@@ -5,43 +5,11 @@
 """
 TODO:
 
-* Adapt SSRFT linop to by-block paradigm
 * adapt the measurement API to this new paradigm
   - get rid of MP and the meas_fn
-  -
+  - update algorithms with new paradigm
 
 
-this section is strongly biased towards matvec, since I was thinking about
-multimachine parallelization.
-
-Currently, users provide max_mp_workers. If none, it is matvec, and if given,
-the for loop is distributed across machines.
-
-Before anything:
-* show that MP is reliable and useful in an integration test case
-  - create a smal NN and problem, where HVP takes like 1 sec
-  - 20 measurements should take 20 seconds
-  - distribute across 5 cores, now it should take around 4 sec.
-
-Even if we keep MP, the meas_fn pattern is ugly AF and prevents batching.
-How to enable batching while being MP compatible?
-
-
----
-ok, so given lop could be anything! so we need to support that.
-* use cases:
-  - just run everything in baselinop mode (give batch=None or int)
-    useful if the linop supports batching and is just a plain @ call really
-  - user specifies which measurement idxs should be run (i.e. @ is not
-    precise enough). In this case we also have batch, which means that
-    a bunch of vectors are gathered at once.
-
----
-SO:
-
-*
-
-* add batch to by_vector get_measvec
 
 
 """
@@ -203,8 +171,12 @@ class RademacherNoiseLinOp(ByBlockLinOp):
             idxs = range(idxs, idxs + 1)
         h, w = self.shape
         blocksize = len(idxs)
-        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
-            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        if (
+            idxs.start < 0
+            or idxs.stop < 0
+            or idxs.stop > (h if self.by_row else w)
+        ):
+            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
         result = (  # device always CPU to ensure determinism across devices
             rademacher_noise(
@@ -258,8 +230,12 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
             idxs = range(idxs, idxs + 1)
         h, w = self.shape
         blocksize = len(idxs)
-        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
-            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        if (
+            idxs.start < 0
+            or idxs.stop < 0
+            or idxs.stop > (h if self.by_row else w)
+        ):
+            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
         result = gaussian_noise(  # device always CPU to ensure determinism
             out_shape,
@@ -319,8 +295,12 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         #
         h, w = self.shape
         blocksize = len(idxs)
-        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
-            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        if (
+            idxs.start < 0
+            or idxs.stop < 0
+            or idxs.stop > (h if self.by_row else w)
+        ):
+            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
         result = phase_noise(  # device always CPU to ensure determinism
             out_shape, self.seed + idxs.start, input_dtype, device="cpu"
@@ -586,7 +566,7 @@ class SsrftNoiseLinOp(ByBlockLinOp):
             or idxs.stop < 0
             or idxs.stop > (h if self.by_row else w)
         ):
-            raise ValueError(f"Invalid range {idxs} for shape {self.shape}!")
+            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
         #
         onehot_mat = torch.zeros(
             (blocksize, w), dtype=input_dtype, device=input_device
