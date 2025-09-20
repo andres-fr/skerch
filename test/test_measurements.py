@@ -585,7 +585,7 @@ def test_iid_measurements_correctness(
                         dtype,
                         by_row=False,
                         register=False,
-                        blocksize=max(hw),
+                        blocksize=7,  # max(hw),
                     )
                     lop2 = lop_type(
                         hw,

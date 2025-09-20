@@ -5,6 +5,13 @@
 """
 TODO:
 
+* finish properly batched SSRFT so we have get_block there
+  - then, the ssrft linop should also allow for blocks and matmat
+* adapt the measurement API to this new paradigm
+  - get rid of MP and the meas_fn
+  -
+
+
 this section is strongly biased towards matvec, since I was thinking about
 multimachine parallelization.
 
@@ -199,25 +206,18 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         See base class definition for details.
         """
         h, w = self.shape
-        n, dims = len(idxs), w if self.by_row else h
-        result = torch.empty(
-            (n, w) if self.by_row else (h, n),
-            dtype=self.dtype,
-            device=input_device,
-        )
-        for i, idx in enumerate(idxs):
-            if i < 0 or i >= (h if self.by_row else w):
-                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
-            v = (  # device always CPU to ensure determinism across devices
-                rademacher_noise(dims, seed=self.seed + idx, device="cpu")
-                .to(self.dtype)
-                .to(input_device)
+        blocksize = len(idxs)
+        # n, dims = len(idxs), w if self.by_row else h
+        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
+            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        result = (  # device always CPU to ensure determinism across devices
+            rademacher_noise(
+                out_shape, seed=self.seed + idxs.start, device="cpu"
             )
-            if self.by_row:
-                result[i, :] = v
-            else:
-                result[:, i] = v
-        #
+            .to(self.dtype)
+            .to(input_device)
+        )
         return result
 
     def __repr__(self):
@@ -258,34 +258,24 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         self.std = std
 
     def get_block(self, idxs, input_device):
-        """Samples a vector with Gaussian i.i.d. noise.
+        """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
-        n, dims = len(idxs), w if self.by_row else h
-        result = torch.empty(
-            (n, w) if self.by_row else (h, n),
+        blocksize = len(idxs)
+        # n, dims = len(idxs), w if self.by_row else h
+        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
+            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        result = gaussian_noise(  # device always CPU to ensure determinism
+            out_shape,
+            self.mean,
+            self.std,
+            seed=self.seed + idxs.start,
             dtype=self.dtype,
-            device=input_device,
-        )
-        for i, idx in enumerate(idxs):
-            if i < 0 or i >= (h if self.by_row else w):
-                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
-            v = gaussian_noise(  # device always CPU to ensure determinism
-                dims,
-                self.mean,
-                self.std,
-                seed=self.seed + idx,
-                dtype=self.dtype,
-                device="cpu",
-            ).to(input_device)
-            #
-            if self.by_row:
-                result[i, :] = v
-            else:
-                result[:, i] = v
-        #
+            device="cpu",
+        ).to(input_device)
         return result
 
     def __repr__(self):
@@ -330,28 +320,19 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         self.conj = conj
 
     def get_block(self, idxs, input_device):
-        """Samples a vector with Gaussian i.i.d. noise.
+        """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
-        n, dims = len(idxs), w if self.by_row else h
-        result = torch.empty(
-            (n, w) if self.by_row else (h, n),
-            dtype=self.dtype,
-            device=input_device,
-        )
-        for i, idx in enumerate(idxs):
-            if i < 0 or i >= (h if self.by_row else w):
-                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
-            v = phase_noise(  # device always CPU to ensure determinism
-                dims, self.seed + idx, self.dtype, device="cpu"
-            ).to(input_device)
-            #
-            if self.by_row:
-                result[i, :] = v
-            else:
-                result[:, i] = v
+        blocksize = len(idxs)
+        # n, dims = len(idxs), w if self.by_row else h
+        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
+            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        result = phase_noise(  # device always CPU to ensure determinism
+            out_shape, self.seed + idxs.start, self.dtype, device="cpu"
+        ).to(input_device)
         #
         if self.conj:
             result = result.conj()
@@ -371,6 +352,130 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # ##############################################################################
 # # SSRFT
 # ##############################################################################
+# class SSRFT:
+#     """ """
+
+#     @staticmethod
+#     def ssrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
+#         r"""Forward SSRFT.
+
+#         This function implements a matrix-free, right-matmul operator of the
+#         Scrambled Subsampled Randomized Fourier Transform (SSRFT), see e.g.
+#         `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
+
+#         .. math::
+
+#           \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
+
+#         Where :math:`R` is a random index-picker, \mathcal{F} is either a
+#         DCT or a FFT (if ``x`` is complex), and :math:`\Pi, \Pi'` are
+#         random permutations which also multiply entries by Rademacher or
+#         phase noise (if ``x`` is complex).
+
+#         :param x: Vector to be projected, such that ``y = SSRFT @ x``
+#         :param out_dims: Dimensions of output ``y`` with ``out_dims <= dim(x)``
+#         :param seed: Random seed
+#         :param norm: Norm for the FFT and DCT. Currently only ``ortho`` is
+#           supported to ensure orthogonality.
+#         """
+#         if norm != "ortho":
+#             raise NotImplementedError("Unsupported norm! use ortho")
+#         if len(x.shape) != 1 or x.numel() <= 0:
+#             raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
+#         x_len = len(x)
+#         if out_dims > x_len or out_dims <= 0:
+#             raise ValueError(
+#                 "out_dims can't be larger than input dimension or <=0!"
+#             )
+#         # make sure all sources of randomness are CPU, to ensure cross-device
+#         # consistency of the operator
+#         seeds = [seed + i for i in range(5)]
+#         if x.dtype in COMPLEX_DTYPES:
+#             # first scramble: permute, phase noise, and FFT
+#             x = x[randperm(x_len, seed=seeds[0], device="cpu")]
+#             phase_shift(
+#                 x, seed=seeds[1], inplace=True, rng_device="cpu", conj=False
+#             )
+#             x = torch.fft.fft(x, norm=norm)
+#             # second scramble: permute, phase noise, and FFT
+#             x = x[randperm(x_len, seed=seeds[2], device="cpu")]
+#             phase_shift(
+#                 x, seed=seeds[3], inplace=True, rng_device="cpu", conj=False
+#             )
+#             x = torch.fft.fft(x, norm=norm)
+#         else:
+#             # first scramble: permute, rademacher, and DCT
+#             x = x[randperm(x_len, seed=seeds[0], device="cpu")]
+#             rademacher_flip(x, seed=seeds[1], inplace=True, rng_device="cpu")
+#             x = dct.dct(x, norm=norm)
+#             # second scramble: permute, rademacher and DCT
+#             x = x[randperm(x_len, seed=seeds[2], device="cpu")]
+#             rademacher_flip(x, seed=seeds[3], inplace=True, rng_device="cpu")
+#             x = dct.dct(x, norm=norm)
+#         # extract random indices and return
+#         x = x[randperm(x_len, seed=seeds[4], device="cpu")[:out_dims]]
+#         return x
+
+#     @staticmethod
+#     def issrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
+#         r"""Inverse SSRFT.
+
+#         Inversion of the SSRFT, such that for a square ssrft,
+#         ``x == issrft(ssrft(x))`` holds.
+#         Note that this means that, for complex ``x``, the adjoint operation
+#         involves complex conjugation as well.
+#         See :meth:`.ssrft` for more details.
+
+#         :param out_dims: In this case, instead of random index-picker, which
+#           reduces dimension, we have an index embedding, which increases
+#           dimension by placing the ``x`` entries in the corresponding indices
+#           (and leaving the rest to zeros). For this reason,
+#           ``out_dims >= len(x)`` is required.
+#         """
+#         if norm != "ortho":
+#             raise NotImplementedError("Unsupported norm! use ortho")
+#         if len(x.shape) != 1 or x.numel() <= 0:
+#             raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
+#         x_len = len(x)
+#         if out_dims < x_len:
+#             raise ValueError("out_dims can't be smaller than input dimension!")
+#         # make sure all sources of randomness are CPU, to ensure cross-device
+#         # consistency of the operator
+#         seeds = [seed + i for i in range(5)]
+#         # create output and embed random indices
+#         out = torch.zeros(out_dims, dtype=x.dtype, device=x.device)
+#         out[randperm(out_dims, seed=seeds[4], device="cpu")[:x_len]] = x
+#         #
+#         if x.dtype in COMPLEX_DTYPES:
+#             # invert second scramble: iFFT, rademacher, and inverse permutation
+#             out = torch.fft.ifft(out, norm=norm)
+#             phase_shift(out, seed=seeds[3], inplace=True, conj=True)
+#             out = out[
+#                 randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
+#             ]
+#             # invert first scramble: iFFT, rademacher, and inverse permutation
+#             out = torch.fft.ifft(out, norm=norm)
+#             phase_shift(out, seed=seeds[1], inplace=True, conj=True)
+#             out = out[
+#                 randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
+#             ]
+#         else:
+#             # invert second scramble: iDCT, rademacher, and inverse permutation
+#             out = dct.idct(out, norm=norm)
+#             rademacher_flip(out, seed=seeds[3], inplace=True)
+#             out = out[
+#                 randperm(out_dims, seed=seeds[2], device="cpu", inverse=True)
+#             ]
+#             # invert first scramble: iDCT, rademacher, and inverse permutation
+#             out = dct.idct(out, norm=norm)
+#             rademacher_flip(out, seed=seeds[1], inplace=True)
+#             out = out[
+#                 randperm(out_dims, seed=seeds[0], device="cpu", inverse=True)
+#             ]
+#         #
+#         return out
+
+
 class SSRFT:
     """ """
 
