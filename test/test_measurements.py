@@ -843,6 +843,7 @@ def test_ssrft_correctness(
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
                 lop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                linop_to_matrix(lop, dtype, device, adjoint=True)
                 mat = linop_to_matrix(lop, dtype, device, adjoint=False)
                 # Columns/rows behave like iid noise (delta autocorr)
                 for x in mat:  # x is a row

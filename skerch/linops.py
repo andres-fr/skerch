@@ -102,69 +102,6 @@ class BaseLinOp:
         s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}>"
         return s
 
-    # def __vectorizer(self, x, adjoint=False):
-    #     """Helper method to run ``matvec``s, one vector of ``x`` at a time.
-
-    #     :param x: Assumed to be a matrix of matching dimensions. If ``x`` is
-    #       a vector, call :meth:`.matvec` or :meth:`.rmatvec` directly.
-    #     """
-    #     lop_h, lop_w = self.shape
-    #     x_h, x_w = x.shape
-    #     num_vecs = x_h if adjoint else x_w
-    #     #
-    #     result = torch.zeros(
-    #         (num_vecs, lop_w) if adjoint else (lop_h, num_vecs),
-    #         dtype=x.dtype,
-    #         device=x.device,
-    #     )
-    #     for i in range(num_vecs):
-    #         if adjoint:
-    #             result[i, :] = self.rmatvec(x[i, :])
-    #         else:
-    #             result[:, i] = self.matvec(x[:, i])
-    #     #
-    #     return result
-
-    # def __matmul_batcher(self, x, adjoint=False, batch=None):
-    #     """Helper to dispatch between (batched) ``matmat`` and ``matvec``."""
-    #     check_linop_input(x, self.shape, adjoint)
-    #     # if x is a vector, just run matvec
-    #     if len(x.shape) == 1:
-    #         result = self.rmatvec(x) if adjoint else self.matvec(x)
-    #     # if no batch given: try matmat, if any issue warn and try matvec
-    #     elif batch is None:
-    #         try:
-    #             result = self.rmatmat(x) if adjoint else self.matmat(x)
-    #         except Exception as ee:
-    #             warnings.warn(
-    #                 f"{self} couldn't run matmat due to: '{ee}' "
-    #                 "Running matvec instead",
-    #                 RuntimeWarning,
-    #             )
-    #             result = self.__vectorizer(x, adjoint)
-    #     # if batch given: try matmat with that batch, if any issue raise error
-    #     # since desired batch is not possible
-    #     else:
-    #         num_vecs = x.shape[0 if adjoint else 1]
-    #         result = []
-    #         for beg in range(0, num_vecs, batch):
-    #             end = beg + batch
-    #             try:
-    #                 if adjoint:
-    #                     result.append(self.rmatmat(x[beg:end, :]))
-    #                 else:
-    #                     result.append(self.matmat(x[:, beg:end]))
-    #             except Exception as e:
-    #                 msg = (
-    #                     f"Couldn't perform batched matmat! Implement matmat "
-    #                     f"or set batch to None {self, x}"
-    #                 )
-    #                 raise RuntimeError(msg) from e
-    #         stack = torch.vstack if adjoint else torch.hstack
-    #         result = stack(result)
-    #     #
-    #     return result
-
     def __matmul_helper(self, x, adjoint=False):
         """ """
         check_linop_input(x, self.shape, adjoint)
