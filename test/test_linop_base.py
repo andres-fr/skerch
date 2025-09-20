@@ -82,12 +82,12 @@ class MatBBLinOp(ByBlockLinOp):
         super().__init__(mat.shape, by_row, batch, blocksize)
         self.mat = mat
 
-    def get_block(self, idxs, input_device):
+    def get_block(self, idxs, input_dtype, input_device):
         """ """
         if self.by_row:
-            return self.mat[idxs, :]
+            return self.mat[idxs, :].to(input_device)
         else:
-            return self.mat[:, idxs]
+            return self.mat[:, idxs].to(input_device)
 
 
 # ##############################################################################

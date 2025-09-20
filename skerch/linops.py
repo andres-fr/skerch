@@ -102,7 +102,7 @@ class BaseLinOp:
         s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}>"
         return s
 
-    def __matmul_helper(self, x, adjoint=False):
+    def _matmul_helper(self, x, adjoint=False):
         """ """
         check_linop_input(x, self.shape, adjoint)
         xvec = len(x.shape) == 1
@@ -130,15 +130,12 @@ class BaseLinOp:
     # operator interfaces
     def __matmul__(self, x):
         """Convenience wrapper to perform matmul on vectors or matrices."""
-        result = self.__matmul_helper(x, adjoint=False)
-        #
-        # result = self.__matmul_batcher(x, adjoint=False, batch=self.batch)
+        result = self._matmul_helper(x, adjoint=False)
         return result
 
     def __rmatmul__(self, x):
         """Convenience wrapper to perform rmatmul on vectors or matrices."""
-        result = self.__matmul_helper(x, adjoint=True)
-        # result = self.__matmul_batcher(x, adjoint=True, batch=self.batch)
+        result = self._matmul_helper(x, adjoint=True)
         return result
 
     def __imatmul__(self, x):
@@ -199,7 +196,7 @@ class ByBlockLinOp(BaseLinOp):
         self.by_row = by_row
         self.blocksize = blocksize
 
-    def get_block(self, idxs, input_device):
+    def get_block(self, idxs, input_dtype, input_device):
         """Method to gather vector entries for this linear operator.
 
         Override this method with the desired behaviour. For a shape of
@@ -210,13 +207,16 @@ class ByBlockLinOp(BaseLinOp):
         :param idxs: Range object representing the indices of the row/column to
           be retrieved. It will be between 0 and ``dims - 1``, both included,
           where ``dims`` is ``h`` if ``self.by_row``, and ``w`` otherwise.
+        :param input_dtype: The dtype of the input tensor that this linop
+          was called on. The output of this method should generally be in the
+          same device.
         :param input_device: The device of the input tensor that this linop
           was called on. The output of this method should generally be in the
           same device.
         """
         raise NotImplementedError
 
-    def __bb_matmul_helper(self, x, adjoint=False):
+    def _bb_matmul_helper(self, x, adjoint=False):
         """ """
         h, w = self.shape
         if adjoint:
@@ -231,13 +231,13 @@ class ByBlockLinOp(BaseLinOp):
             idxs = range(beg, min(limit, beg + self.blocksize))
             #
             if adjoint and self.by_row:
-                result += x[:, idxs] @ self.get_block(idxs, x.device)
+                result += x[:, idxs] @ self.get_block(idxs, x.dtype, x.device)
             elif adjoint and not self.by_row:
-                result[:, idxs] = x @ self.get_block(idxs, x.device)
+                result[:, idxs] = x @ self.get_block(idxs, x.dtype, x.device)
             elif not adjoint and self.by_row:
-                result[idxs, :] = self.get_block(idxs, x.device) @ x
+                result[idxs, :] = self.get_block(idxs, x.dtype, x.device) @ x
             elif not adjoint and not self.by_row:
-                result += self.get_block(idxs, x.device) @ x[idxs, :]
+                result += self.get_block(idxs, x.dtype, x.device) @ x[idxs, :]
             else:
                 raise RuntimeError("This should never happen!")
         #
@@ -245,11 +245,11 @@ class ByBlockLinOp(BaseLinOp):
 
     def matmul(self, x):
         """ """
-        return self.__bb_matmul_helper(x, adjoint=False)
+        return self._bb_matmul_helper(x, adjoint=False)
 
     def rmatmul(self, x):
         """ """
-        return self.__bb_matmul_helper(x, adjoint=True)
+        return self._bb_matmul_helper(x, adjoint=True)
 
 
 class TransposedLinOp:

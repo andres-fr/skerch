@@ -5,8 +5,7 @@
 """
 TODO:
 
-* finish properly batched SSRFT so we have get_block there
-  - then, the ssrft linop should also allow for blocks and matmat
+* Adapt SSRFT linop to by-block paradigm
 * adapt the measurement API to this new paradigm
   - get rid of MP and the meas_fn
   -
@@ -181,7 +180,6 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         self,
         shape,
         seed,
-        dtype,
         by_row=False,
         batch=None,
         blocksize=1,
@@ -190,24 +188,19 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         """Initializer. See class docstring."""
         super().__init__(shape, by_row, batch, blocksize)
         self.seed = seed
-        self.dtype = dtype
         #
         if register:
-            seed_beg = self.seed
-            seed_end = seed_beg + (
-                self.shape[0] if self.by_row else self.shape[1]
-            )
-            self.__class__.REGISTER["default"].append((seed_beg, seed_end))
+            seed_end = seed + (self.shape[0] if self.by_row else self.shape[1])
+            self.__class__.REGISTER["default"].append((seed, seed_end))
             self.check_register()
 
-    def get_block(self, idxs, input_device):
+    def get_block(self, idxs, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
         blocksize = len(idxs)
-        # n, dims = len(idxs), w if self.by_row else h
         if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
             raise ValueError("Invalid range {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
@@ -215,7 +208,7 @@ class RademacherNoiseLinOp(ByBlockLinOp):
             rademacher_noise(
                 out_shape, seed=self.seed + idxs.start, device="cpu"
             )
-            .to(self.dtype)
+            .to(input_dtype)
             .to(input_device)
         )
         return result
@@ -225,7 +218,7 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         clsname = self.__class__.__name__
         s = (
             f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
+            + f"seed={self.seed}, by_row={self.by_row})>"
         )
         return s
 
@@ -242,7 +235,6 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         self,
         shape,
         seed,
-        dtype,
         by_row=False,
         batch=None,
         blocksize=1,
@@ -251,20 +243,17 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         std=1.0,
     ):
         """Initializer. See class docstring."""
-        super().__init__(
-            shape, seed, dtype, by_row, batch, blocksize, register
-        )
+        super().__init__(shape, seed, by_row, batch, blocksize, register)
         self.mean = mean
         self.std = std
 
-    def get_block(self, idxs, input_device):
+    def get_block(self, idxs, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
         blocksize = len(idxs)
-        # n, dims = len(idxs), w if self.by_row else h
         if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
             raise ValueError("Invalid range {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
@@ -273,7 +262,7 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
             self.mean,
             self.std,
             seed=self.seed + idxs.start,
-            dtype=self.dtype,
+            dtype=input_dtype,
             device="cpu",
         ).to(input_device)
         return result
@@ -284,7 +273,7 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         s = (
             f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
             + f"mean={self.mean}, std={self.std}, "
-            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
+            + f"seed={self.seed}, by_row={self.by_row})>"
         )
         return s
 
@@ -304,7 +293,6 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         self,
         shape,
         seed,
-        dtype,
         by_row=False,
         batch=None,
         blocksize=1,
@@ -312,26 +300,24 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         conj=False,
     ):
         """Initializer. See class docstring."""
-        super().__init__(
-            shape, seed, dtype, by_row, batch, blocksize, register
-        )
-        if dtype not in COMPLEX_DTYPES:
-            raise ValueError(f"Dtype must be complex! was {dtype}")
+        super().__init__(shape, seed, by_row, batch, blocksize, register)
         self.conj = conj
 
-    def get_block(self, idxs, input_device):
+    def get_block(self, idxs, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
+        if input_dtype not in COMPLEX_DTYPES:
+            raise ValueError(f"Input dtype must be complex! was {input_dtype}")
+        #
         h, w = self.shape
         blocksize = len(idxs)
-        # n, dims = len(idxs), w if self.by_row else h
         if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
             raise ValueError("Invalid range {idxs} for shape {self.shape}!")
         out_shape = (blocksize, w) if self.by_row else (h, blocksize)
         result = phase_noise(  # device always CPU to ensure determinism
-            out_shape, self.seed + idxs.start, self.dtype, device="cpu"
+            out_shape, self.seed + idxs.start, input_dtype, device="cpu"
         ).to(input_device)
         #
         if self.conj:
@@ -344,7 +330,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         s = (
             f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
             + f"conj={self.conj}, "
-            + f"seed={self.seed}, dtype={self.dtype}, by_row={self.by_row})>"
+            + f"seed={self.seed}, by_row={self.by_row})>"
         )
         return s
 
@@ -481,7 +467,7 @@ class SSRFT:
         return out
 
 
-class SsrftNoiseLinOp(BaseLinOp):
+class SsrftNoiseLinOp(ByBlockLinOp):
     """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
     This class encapsulates the forward and adjoint SSRFT transforms into a
@@ -509,9 +495,36 @@ class SsrftNoiseLinOp(BaseLinOp):
     facilitate parallel measurements via :func:`perform_measurements`.
     """
 
-    def __init__(self, shape, seed, norm="ortho"):
+    REGISTER = defaultdict(list)
+
+    @classmethod
+    def check_register(cls):
+        """Checks if two different-seeded linops have overlapping seeds."""
+        for reg_type, reg in cls.REGISTER.items():
+            sorted_reg = sorted(reg, key=lambda x: x[0])
+            for (beg1, end1), (beg2, end2) in zip(
+                sorted_reg[:-1], sorted_reg[1:]
+            ):
+                if end1 >= beg2:
+                    clsname = cls.__name__
+                    msg = (
+                        f"Overlapping seeds when creating {clsname}! "
+                        f"({reg_type}, {sorted_reg}). This is not necessarily "
+                        "an issue, but may lead to different-seeded random "
+                        "linops generating the same rows or columns. To "
+                        "prevent this, ensure that the random seeds of "
+                        "different noise linops are separated by more than the "
+                        "number of rows/columns. To disable this behaviour, "
+                        "initialize with register=False."
+                    )
+                    raise BadSeedError(msg)
+
+    def __init__(
+        self, shape, seed, batch=None, blocksize=1, norm="ortho", register=True
+    ):
         """Initializer. See class docstring."""
-        super().__init__(shape)
+        by_row = False
+        super().__init__(shape, by_row, batch, blocksize)
         h, w = shape
         if w > h:
             raise BadShapeError(
@@ -520,52 +533,108 @@ class SsrftNoiseLinOp(BaseLinOp):
             )
         self.seed = seed
         self.norm = norm
+        #
+        if register:
+            seed_end = seed + (self.shape[0] if self.by_row else self.shape[1])
+            self.__class__.REGISTER["default"].append((seed, seed_end))
+            self.check_register()
 
-    def matmul(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
+    # def matmul(self, x):
+    #     """Forward (right) matrix-vector multiplication ``self @ x``.
 
-        See class docstring and parent class for more details.
-        """
-        # note that the issrft acts like the Hermitian transpose of A, but here
-        # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
-        # which equals (x @ A).H.H = x@A.
-        x = x.transpose(0, -1)
-        result = SSRFT.issrft(
-            x.conj(), self.shape[0], seed=self.seed, norm=self.norm
-        ).conj()
-        result = result.transpose(0, -1)
-        return result
+    #     See class docstring and parent class for more details.
+    #     """
+    #     # note that the issrft acts like the Hermitian transpose of A, but here
+    #     # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
+    #     # which equals (x @ A).H.H = x@A.
+    #     x = x.transpose(0, -1)
+    #     result = SSRFT.issrft(
+    #         x.conj(), self.shape[0], seed=self.seed, norm=self.norm
+    #     ).conj()
+    #     result = result.transpose(0, -1)
+    #     return result
 
-    def rmatmul(self, x):
-        """Left matrix-vector multiplication ``x @ self``.
+    # def rmatmul(self, x):
+    #     """Left matrix-vector multiplication ``x @ self``.
 
-        See class docstring and parent class for more details.
-        """
-        return SSRFT.ssrft(x, self.shape[1], seed=self.seed, norm=self.norm)
+    #     See class docstring and parent class for more details.
+    #     """
+    #     return SSRFT.ssrft(x, self.shape[1], seed=self.seed, norm=self.norm)
 
-    def get_vector(self, idx, device, dtype, by_row=False):
-        """Samples a SSRFT row or column.
+    # def get_vector(self, idx, device, dtype, by_row=False):
+    #     """Samples a SSRFT row or column.
 
-        :param idx: Number between 0 and below number of columns (resp. rows),
-          indicating the corresponding vector to be sampled.
-        :param by_row: If false, the ``idx`` column (zero-indexed) will be
-          sampled. Otherwise the column.
+    #     :param idx: Number between 0 and below number of columns (resp. rows),
+    #       indicating the corresponding vector to be sampled.
+    #     :param by_row: If false, the ``idx`` column (zero-indexed) will be
+    #       sampled. Otherwise the column.
+    #     """
+    #     h, w = self.shape
+    #     in_dims = h if by_row else w
+    #     out_dims = w if by_row else h
+    #     if idx < 0 or idx >= (h if by_row else w):
+    #         raise ValueError(
+    #             f"Invalid index {idx} for shape {self.shape} "
+    #             f"and by_row={by_row}!"
+    #         )
+    #     oh = torch.zeros(in_dims, dtype=dtype, device=device)
+    #     oh[idx] = 1
+    #     result = oh @ self if by_row else self @ oh
+    #     return result
+
+    def get_block(self, idxs, input_dtype, input_device):
+        """Samples a SSRFT block.
+
+        See base class definition for details.
         """
         h, w = self.shape
-        in_dims = h if by_row else w
-        out_dims = w if by_row else h
-        if idx < 0 or idx >= (h if by_row else w):
-            raise ValueError(
-                f"Invalid index {idx} for shape {self.shape} "
-                f"and by_row={by_row}!"
-            )
-        oh = torch.zeros(in_dims, dtype=dtype, device=device)
-        oh[idx] = 1
-        result = oh @ self if by_row else self @ oh
+        blocksize = len(idxs)
+        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
+            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        #
+        onehot_mat = torch.zeros(
+            (blocksize, w), dtype=input_dtype, device=input_device
+        )
+        onehot_mat[range(blocksize), idxs] = 1
+        #
+        result = (
+            SSRFT.issrft(
+                onehot_mat,
+                self.shape[0],
+                seed=self.seed + idxs.start,
+                norm=self.norm,
+            ).transpose(0, 1)
+            # .conj()
+        )
         return result
+
+    def matmul(self, x):
+        """ """
+        ### return self._bb_matmul_helper(x, adjoint=False)
+        return self._bb_matmul_helper(x.conj(), adjoint=False).conj()
+
+        #     x = x.transpose(0, -1)
+        #     result = SSRFT.issrft(
+        #         x.conj(), self.shape[0], seed=self.seed, norm=self.norm
+        #     ).conj()
+        #     result = result.transpose(0, -1)
+        #     return result
+
+    def rmatmul(self, x):
+        """ """
+        return self._bb_matmul_helper(x, adjoint=True)
 
     def __repr__(self):
         """Returns a string: <classname(shape, seed=..., by_row=...)>."""
         clsname = self.__class__.__name__
         s = f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed})>"
+        return s
+
+    def __repr__(self):
+        """Returns a string: <classname(shape, seed=...)>."""
+        clsname = self.__class__.__name__
+        s = (
+            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
+            + f"seed={self.seed})>"
+        )
         return s

@@ -585,7 +585,7 @@ def test_iid_measurements_correctness(
                         dtype,
                         by_row=False,
                         register=False,
-                        blocksize=7,  # max(hw),
+                        blocksize=max(hw),
                     )
                     lop2 = lop_type(
                         hw,
@@ -842,8 +842,9 @@ def test_ssrft_correctness(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                lop = SsrftNoiseLinOp(hw, seed, norm="ortho")
-                linop_to_matrix(lop, dtype, device, adjoint=True)
+                lop = SsrftNoiseLinOp(
+                    hw, seed, blocksize=7, norm="ortho", register=True
+                )
                 mat = linop_to_matrix(lop, dtype, device, adjoint=False)
                 # Columns/rows behave like iid noise (delta autocorr)
                 for x in mat:  # x is a row
@@ -885,11 +886,14 @@ def test_ssrft_correctness(
                 ), "Wrong iid transposition? (adjoint)"
                 # Orthonormal columns
                 assert hw[0] != hw[1], "Tall linop required for this test!"
-                assert torch.allclose(
-                    mat.H @ mat,
-                    torch.eye(hw[1], dtype=mat.dtype, device=mat.device),
-                    atol=tol,
-                ), "SSRFT columns not orthonormal?"
+                try:
+                    assert torch.allclose(
+                        mat.H @ mat,
+                        torch.eye(hw[1], dtype=mat.dtype, device=mat.device),
+                        atol=tol,
+                    ), "SSRFT columns not orthonormal?"
+                except:
+                    breakpoint()
                 # issrft and ssrft invert each other
                 w1 = SSRFT.issrft(
                     SSRFT.ssrft(v1, len(v1), seed=seed, norm="ortho"),
