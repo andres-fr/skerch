@@ -199,6 +199,8 @@ class RademacherNoiseLinOp(ByBlockLinOp):
 
         See base class definition for details.
         """
+        if isinstance(idxs, int):
+            idxs = range(idxs, idxs + 1)
         h, w = self.shape
         blocksize = len(idxs)
         if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
@@ -252,6 +254,8 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
 
         See base class definition for details.
         """
+        if isinstance(idxs, int):
+            idxs = range(idxs, idxs + 1)
         h, w = self.shape
         blocksize = len(idxs)
         if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
@@ -308,6 +312,8 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 
         See base class definition for details.
         """
+        if isinstance(idxs, int):
+            idxs = range(idxs, idxs + 1)
         if input_dtype not in COMPLEX_DTYPES:
             raise ValueError(f"Input dtype must be complex! was {input_dtype}")
         #
@@ -378,24 +384,37 @@ class SSRFT:
         if x.dtype in COMPLEX_DTYPES:
             # first scramble: permute, phase noise, and FFT
             x = x[..., randperm(n, seed=seeds[0], device="cpu")]
-            phase_shift(
-                x, seed=seeds[1], inplace=True, rng_device="cpu", conj=False
-            )
+            x = x * phase_noise(
+                x.shape[-1],
+                seed=seeds[1],
+                dtype=x.dtype,
+                device="cpu",
+                conj=False,
+            ).to(x.device)
             x = torch.fft.fft(x, norm=norm)
             # second scramble: permute, phase noise, and FFT
             x = x[..., randperm(n, seed=seeds[2], device="cpu")]
-            phase_shift(
-                x, seed=seeds[3], inplace=True, rng_device="cpu", conj=False
-            )
+            x = x * phase_noise(
+                x.shape[-1],
+                seed=seeds[3],
+                dtype=x.dtype,
+                device="cpu",
+                conj=False,
+            ).to(x.device)
+
             x = torch.fft.fft(x, norm=norm)
         else:
             # first scramble: permute, rademacher, and DCT
             x = x[..., randperm(n, seed=seeds[0], device="cpu")]
-            rademacher_flip(x, seed=seeds[1], inplace=True, rng_device="cpu")
+            x = x * rademacher_noise(x.shape[-1], seeds[1], device="cpu").to(
+                x.device
+            )
             x = dct.dct(x, norm=norm)
             # second scramble: permute, rademacher and DCT
             x = x[..., randperm(n, seed=seeds[2], device="cpu")]
-            rademacher_flip(x, seed=seeds[3], inplace=True, rng_device="cpu")
+            x = x * rademacher_noise(x.shape[-1], seeds[3], device="cpu").to(
+                x.device
+            )
             x = dct.dct(x, norm=norm)
         # extract random indices and return
         x = x[..., randperm(n, seed=seeds[4], device="cpu")[:out_dims]]
@@ -419,8 +438,6 @@ class SSRFT:
         """
         if norm != "ortho":
             raise NotImplementedError("Unsupported norm! use ortho")
-        # if len(x.shape) != 1 or x.numel() <= 0:
-        #     raise BadShapeError(f"Input must be a nonempty vector! {x.shape}")
         n = x.shape[-1]
         if out_dims < n:
             raise ValueError("out_dims can't be smaller than input dimension!")
@@ -436,14 +453,26 @@ class SSRFT:
         if x.dtype in COMPLEX_DTYPES:
             # invert second scramble: iFFT, rademacher, and inverse permutation
             out = torch.fft.ifft(out, norm=norm)
-            phase_shift(out, seed=seeds[3], inplace=True, conj=True)
+            out = out * phase_noise(
+                out.shape[-1],
+                seed=seeds[3],
+                dtype=x.dtype,
+                device="cpu",
+                conj=True,
+            ).to(x.device)
             out = out[
                 ...,
                 randperm(out_dims, seed=seeds[2], device="cpu", inverse=True),
             ]
             # invert first scramble: iFFT, rademacher, and inverse permutation
             out = torch.fft.ifft(out, norm=norm)
-            phase_shift(out, seed=seeds[1], inplace=True, conj=True)
+            out = out * phase_noise(
+                out.shape[-1],
+                seed=seeds[1],
+                dtype=x.dtype,
+                device="cpu",
+                conj=True,
+            ).to(x.device)
             out = out[
                 ...,
                 randperm(out_dims, seed=seeds[0], device="cpu", inverse=True),
@@ -451,14 +480,18 @@ class SSRFT:
         else:
             # invert second scramble: iDCT, rademacher, and inverse permutation
             out = dct.idct(out, norm=norm)
-            rademacher_flip(out, seed=seeds[3], inplace=True)
+            out = out * rademacher_noise(
+                out.shape[-1], seeds[3], device="cpu"
+            ).to(x.device)
             out = out[
                 ...,
                 randperm(out_dims, seed=seeds[2], device="cpu", inverse=True),
             ]
             # invert first scramble: iDCT, rademacher, and inverse permutation
             out = dct.idct(out, norm=norm)
-            rademacher_flip(out, seed=seeds[1], inplace=True)
+            out = out * rademacher_noise(
+                out.shape[-1], seeds[1], device="cpu"
+            ).to(x.device)
             out = out[
                 ...,
                 randperm(out_dims, seed=seeds[0], device="cpu", inverse=True),
@@ -539,90 +572,34 @@ class SsrftNoiseLinOp(ByBlockLinOp):
             self.__class__.REGISTER["default"].append((seed, seed_end))
             self.check_register()
 
-    # def matmul(self, x):
-    #     """Forward (right) matrix-vector multiplication ``self @ x``.
-
-    #     See class docstring and parent class for more details.
-    #     """
-    #     # note that the issrft acts like the Hermitian transpose of A, but here
-    #     # we don't want A.H@x, but x@A. We achieve this via (A.H @ x.H).H,
-    #     # which equals (x @ A).H.H = x@A.
-    #     x = x.transpose(0, -1)
-    #     result = SSRFT.issrft(
-    #         x.conj(), self.shape[0], seed=self.seed, norm=self.norm
-    #     ).conj()
-    #     result = result.transpose(0, -1)
-    #     return result
-
-    # def rmatmul(self, x):
-    #     """Left matrix-vector multiplication ``x @ self``.
-
-    #     See class docstring and parent class for more details.
-    #     """
-    #     return SSRFT.ssrft(x, self.shape[1], seed=self.seed, norm=self.norm)
-
-    # def get_vector(self, idx, device, dtype, by_row=False):
-    #     """Samples a SSRFT row or column.
-
-    #     :param idx: Number between 0 and below number of columns (resp. rows),
-    #       indicating the corresponding vector to be sampled.
-    #     :param by_row: If false, the ``idx`` column (zero-indexed) will be
-    #       sampled. Otherwise the column.
-    #     """
-    #     h, w = self.shape
-    #     in_dims = h if by_row else w
-    #     out_dims = w if by_row else h
-    #     if idx < 0 or idx >= (h if by_row else w):
-    #         raise ValueError(
-    #             f"Invalid index {idx} for shape {self.shape} "
-    #             f"and by_row={by_row}!"
-    #         )
-    #     oh = torch.zeros(in_dims, dtype=dtype, device=device)
-    #     oh[idx] = 1
-    #     result = oh @ self if by_row else self @ oh
-    #     return result
-
     def get_block(self, idxs, input_dtype, input_device):
         """Samples a SSRFT block.
 
         See base class definition for details.
         """
+        if isinstance(idxs, int):
+            idxs = range(idxs, idxs + 1)
         h, w = self.shape
         blocksize = len(idxs)
-        if idxs.start < 0 or idxs.stop > (h if self.by_row else w):
-            raise ValueError("Invalid range {idxs} for shape {self.shape}!")
+        if (
+            idxs.start < 0
+            or idxs.stop < 0
+            or idxs.stop > (h if self.by_row else w)
+        ):
+            raise ValueError(f"Invalid range {idxs} for shape {self.shape}!")
         #
         onehot_mat = torch.zeros(
             (blocksize, w), dtype=input_dtype, device=input_device
         )
         onehot_mat[range(blocksize), idxs] = 1
         #
-        result = (
-            SSRFT.issrft(
-                onehot_mat,
-                self.shape[0],
-                seed=self.seed + idxs.start,
-                norm=self.norm,
-            ).transpose(0, 1)
-            # .conj()
-        )
+        result = SSRFT.issrft(
+            onehot_mat,
+            self.shape[0],
+            seed=self.seed,
+            norm=self.norm,
+        ).transpose(0, 1)
         return result
-
-    def matmul(self, x):
-        """ """
-        ### return self._bb_matmul_helper(x, adjoint=False)
-        return self._bb_matmul_helper(x.conj(), adjoint=False).conj()
-
-        #     x = x.transpose(0, -1)
-        #     result = SSRFT.issrft(
-        #         x.conj(), self.shape[0], seed=self.seed, norm=self.norm
-        #     ).conj()
-        #     result = result.transpose(0, -1)
-        #     return result
-
-    def rmatmul(self, x):
-        """ """
-        return self._bb_matmul_helper(x, adjoint=True)
 
     def __repr__(self):
         """Returns a string: <classname(shape, seed=..., by_row=...)>."""

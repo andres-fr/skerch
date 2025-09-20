@@ -675,7 +675,6 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     For the SSRFT transform and/or linop (wherever applicable), tests:
     * Repr creates correct strings
     * Non-orthogonal normalization raises NotImplementederror
-    * Non-vector or empty imput to ssrft raises BadShapeError
     * Too large or too small out_dims for ssrft
     * Invalid shape to SSRFT linop triggers error (must be square or fat)
     * Get_vector triggers error for invalid index, and returns right dtype and
@@ -686,7 +685,7 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     """
     hw = (10, 10)
     # correct string conversion (linop)
-    lop = SsrftNoiseLinOp(hw, 0, norm="ortho")
+    lop = SsrftNoiseLinOp(hw, 0, norm="ortho", register=False)
     assert (
         str(lop) == "<SsrftNoiseLinOp(10x10, seed=0)>"
     ), "Unexpected repr for SSRFT noise linop!"
@@ -697,26 +696,13 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
         SSRFT.issrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
     # non-orthogonal norm raises error (linop)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX")
+        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX", register=False)
         lop @ torch.ones(10)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX")
+        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX", register=False)
         torch.ones(10) @ lop
-    # non-vector or empty input raises BadShapeError (transform)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft(torch.zeros(5, 5), 5)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft(torch.tensor(0), 0)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.ssrft(torch.zeros(0), 0)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.issrft(torch.zeros(5, 5), 5)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.issrft(torch.tensor(0), 0)
-    with pytest.raises(BadShapeError):
-        _ = SSRFT.issrft(torch.zeros(0), 0)
     # empty input raises BadShapeError (linop)
-    lop = SsrftNoiseLinOp(hw, 0)
+    lop = SsrftNoiseLinOp(hw, 0, register=False)
     with pytest.raises(BadShapeError):
         lop @ torch.tensor(0)
     with pytest.raises(BadShapeError):
@@ -736,34 +722,27 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
         SSRFT.issrft(torch.ones(10), out_dims=9)
     # invalid shapes raise error (linop)
     with pytest.raises(BadShapeError):
-        _ = SsrftNoiseLinOp((0, 0), 0)
+        _ = SsrftNoiseLinOp((0, 0), 0, register=False)
     with pytest.raises(BadShapeError):
-        _ = SsrftNoiseLinOp((5, 10), 0)  # fat
+        _ = SsrftNoiseLinOp((5, 10), 0, register=False)  # fat
     lop = SsrftNoiseLinOp(hw, 0)
     with pytest.raises(BadShapeError):
         lop @ torch.ones(4)
     with pytest.raises(BadShapeError):
         torch.ones(4) @ lop
-    # get_vector errors for invalid index
-    lop = SsrftNoiseLinOp((5, 3), 0)
+    # get_block errors for invalid index
+    lop = SsrftNoiseLinOp((5, 3), 0, blocksize=2, register=False)
     with pytest.raises(ValueError):
-        lop.get_vector(-1, "cpu", torch.float32, by_row=False)
+        lop.get_block(range(-1), torch.float32, "cpu")
     with pytest.raises(ValueError):
-        lop.get_vector(3, "cpu", torch.float32, by_row=False)
-    with pytest.raises(ValueError):
-        lop.get_vector(-1, "cpu", torch.float32, by_row=True)
-    with pytest.raises(ValueError):
-        lop.get_vector(5, "cpu", torch.float32, by_row=True)
-    # get_vector and matmul provide right dtype and device
-    lop = SsrftNoiseLinOp((5, 3), 0)
+        lop.get_block(range(4), torch.float32, "cpu")
+    # get_block and matmul provide right dtype and device
+    lop = SsrftNoiseLinOp((5, 3), 0, register=False)
     for device in torch_devices:
         for dtype in dtypes_tols.keys():
-            v = lop.get_vector(0, device, dtype, by_row=True)
-            assert v.dtype == dtype, "Invalid get_vector dtype by_row!"
-            assert v.device.type == device, "Invalid get_vector device by_row!"
-            v = lop.get_vector(0, device, dtype, by_row=False)
-            assert v.dtype == dtype, "Invalid get_vector dtype by_col!"
-            assert v.device.type == device, "Invalid get_vector device by_col!"
+            v = lop.get_block(1, dtype, device)
+            assert v.dtype == dtype, "Invalid get_block dtype!"
+            assert v.device.type == device, "Invalid get_block device!"
             # output is of same dtype and device as input
             w = lop @ torch.ones(3, dtype=dtype, device=device)
             assert w.dtype == dtype, "Mismatching output dtype!"
@@ -776,21 +755,36 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
             for device in torch_devices:
-                lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho")
-                lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho")
-                lop3 = SsrftNoiseLinOp(hw, seed + 1, norm="ortho")
+                Ileft = torch.eye(hw[1], dtype=dtype, device=device)
+                Iright = torch.eye(hw[0], dtype=dtype, device=device)
+                lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho", register=False)
+                lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho", register=False)
+                lop3 = SsrftNoiseLinOp(
+                    hw, seed + 1, norm="ortho", register=False
+                )
                 mat1a = linop_to_matrix(lop1, dtype, device, adjoint=False)
                 mat1b = linop_to_matrix(lop1, dtype, device, adjoint=False)
                 mat1c = linop_to_matrix(lop1, dtype, device, adjoint=True)
+                mat1d = lop1.get_block(range(hw[1]), dtype, device)
+                mat1e = lop1 @ Iright
+                mat1f = Ileft @ lop1
                 mat2 = linop_to_matrix(lop2, dtype, device, adjoint=False)
                 mat3 = linop_to_matrix(lop3, dtype, device, adjoint=False)
-
                 assert torch.allclose(
                     mat1a, mat1b, atol=tol
                 ), f"Nondeterministic linop? {lop1}"
                 assert torch.allclose(
                     mat1a, mat1c, atol=tol
                 ), f"Different fwd and adjoint? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1d, atol=tol
+                ), f"Wrong get_block? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1e, atol=tol
+                ), f"Wrong matmul? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1f, atol=tol
+                ), f"Wrong adjoint matmul? {lop1}"
                 assert torch.allclose(
                     mat1a, mat2, atol=tol
                 ), f"Same seed, differentl linop? {lop1}"
@@ -802,7 +796,7 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
                     ).all(), "Different seeds, similar vectors? {lop1}"
             # seed consistency across devices (if CUDA is available)
             if torch.cuda.is_available():
-                lop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+                lop = SsrftNoiseLinOp(hw, seed, norm="ortho", register=False)
                 mat1 = linop_to_matrix(lop, dtype, "cpu", adjoint=False)
                 mat2 = linop_to_matrix(lop, dtype, "cuda", adjoint=False)
                 mat3 = linop_to_matrix(lop, dtype, "cpu", adjoint=True)
@@ -843,7 +837,7 @@ def test_ssrft_correctness(
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
                 lop = SsrftNoiseLinOp(
-                    hw, seed, blocksize=7, norm="ortho", register=True
+                    hw, seed, blocksize=7, norm="ortho", register=False
                 )
                 mat = linop_to_matrix(lop, dtype, device, adjoint=False)
                 # Columns/rows behave like iid noise (delta autocorr)
@@ -886,14 +880,11 @@ def test_ssrft_correctness(
                 ), "Wrong iid transposition? (adjoint)"
                 # Orthonormal columns
                 assert hw[0] != hw[1], "Tall linop required for this test!"
-                try:
-                    assert torch.allclose(
-                        mat.H @ mat,
-                        torch.eye(hw[1], dtype=mat.dtype, device=mat.device),
-                        atol=tol,
-                    ), "SSRFT columns not orthonormal?"
-                except:
-                    breakpoint()
+                assert torch.allclose(
+                    mat.H @ mat,
+                    torch.eye(hw[1], dtype=mat.dtype, device=mat.device),
+                    atol=tol,
+                ), "SSRFT columns not orthonormal?"
                 # issrft and ssrft invert each other
                 w1 = SSRFT.issrft(
                     SSRFT.ssrft(v1, len(v1), seed=seed, norm="ortho"),
