@@ -18,7 +18,6 @@ import torch
 
 from skerch.linops import (
     linop_to_matrix,
-    ByVectorLinOp,
     TransposedLinOp,
     SumLinOp,
     CompositeLinOp,
@@ -77,22 +76,6 @@ def composite_sizes(request):
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-class MatrixAsLinOp(ByVectorLinOp):
-    """ """
-
-    def __init__(self, mat, by_row=False):
-        """ """
-        super().__init__(mat.shape, by_row)
-        self.mat = mat
-
-    def get_vector(self, idx, device):
-        """ """
-        if self.by_row:
-            return self.mat[idx]
-        else:
-            return self.mat[:, idx]
-
-
 class ScalarLinOp:
     """Basic scalar linop with shape and matmul, but is not a baselinop."""
 

@@ -47,7 +47,7 @@ from collections import defaultdict
 import warnings
 import torch
 import torch_dct as dct
-from .linops import BaseLinOp, ByVectorLinOp
+from .linops import BaseLinOp, ByBlockLinOp
 from .utils import (
     COMPLEX_DTYPES,
     BadShapeError,
@@ -130,7 +130,7 @@ def perform_measurements(
 # ##############################################################################
 # # IID NOISE LINOPS
 # ##############################################################################
-class RademacherNoiseLinOp(ByVectorLinOp):
+class RademacherNoiseLinOp(ByBlockLinOp):
     """Random linear operator with i.i.d. Rademacher entries.
 
     :param shape: Shape of the linop as ``(h, w)``.
@@ -139,7 +139,7 @@ class RademacherNoiseLinOp(ByVectorLinOp):
       for this reason is important that two different linops are instantiated
       with sufficiently distant seeds, to prevent overlaps.
     :param dtype: Dtype of the generated noise.
-    :param by_row: See :class:`ByVectorLinOp`.
+    :param by_row: See :class:`ByBlockLinOp`.
     :param register: If true, when the linop is created, its seed range is
       added to a global register, which checks if there are any overlapping
       ranges, in which case a ``BadSeedError`` is triggered. If false, this
@@ -170,9 +170,18 @@ class RademacherNoiseLinOp(ByVectorLinOp):
                     )
                     raise BadSeedError(msg)
 
-    def __init__(self, shape, seed, dtype, by_row=False, register=True):
+    def __init__(
+        self,
+        shape,
+        seed,
+        dtype,
+        by_row=False,
+        batch=None,
+        blocksize=1,
+        register=True,
+    ):
         """Initializer. See class docstring."""
-        super().__init__(shape, by_row)
+        super().__init__(shape, by_row, batch, blocksize)
         self.seed = seed
         self.dtype = dtype
         #
@@ -184,22 +193,31 @@ class RademacherNoiseLinOp(ByVectorLinOp):
             self.__class__.REGISTER["default"].append((seed_beg, seed_end))
             self.check_register()
 
-    def get_vector(self, idx, device):
+    def get_block(self, idxs, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
-        dims = w if self.by_row else h
-        if idx < 0 or idx >= (h if self.by_row else w):
-            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
-        result = (
-            rademacher_noise(  # device always CPU to ensure determinism
-                dims, seed=self.seed + idx, device="cpu"
-            )
-            .to(self.dtype)
-            .to(device)
+        n, dims = len(idxs), w if self.by_row else h
+        result = torch.empty(
+            (n, w) if self.by_row else (h, n),
+            dtype=self.dtype,
+            device=input_device,
         )
+        for i, idx in enumerate(idxs):
+            if i < 0 or i >= (h if self.by_row else w):
+                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
+            v = (  # device always CPU to ensure determinism across devices
+                rademacher_noise(dims, seed=self.seed + idx, device="cpu")
+                .to(self.dtype)
+                .to(input_device)
+            )
+            if self.by_row:
+                result[i, :] = v
+            else:
+                result[:, i] = v
+        #
         return result
 
     def __repr__(self):
@@ -226,32 +244,48 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         seed,
         dtype,
         by_row=False,
+        batch=None,
+        blocksize=1,
         register=True,
         mean=0.0,
         std=1.0,
     ):
         """Initializer. See class docstring."""
-        super().__init__(shape, seed, dtype, by_row, register)
+        super().__init__(
+            shape, seed, dtype, by_row, batch, blocksize, register
+        )
         self.mean = mean
         self.std = std
 
-    def get_vector(self, idx, device):
-        """Samples a vector with standard Gaussian i.i.d. noise.
+    def get_block(self, idxs, input_device):
+        """Samples a vector with Gaussian i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
-        dims = w if self.by_row else h
-        if idx < 0 or idx >= (h if self.by_row else w):
-            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
-        result = gaussian_noise(  # device always CPU to ensure determinism
-            dims,
-            self.mean,
-            self.std,
-            seed=self.seed + idx,
+        n, dims = len(idxs), w if self.by_row else h
+        result = torch.empty(
+            (n, w) if self.by_row else (h, n),
             dtype=self.dtype,
-            device="cpu",
-        ).to(device)
+            device=input_device,
+        )
+        for i, idx in enumerate(idxs):
+            if i < 0 or i >= (h if self.by_row else w):
+                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
+            v = gaussian_noise(  # device always CPU to ensure determinism
+                dims,
+                self.mean,
+                self.std,
+                seed=self.seed + idx,
+                dtype=self.dtype,
+                device="cpu",
+            ).to(input_device)
+            #
+            if self.by_row:
+                result[i, :] = v
+            else:
+                result[:, i] = v
+        #
         return result
 
     def __repr__(self):
@@ -277,26 +311,48 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
     REGISTER = defaultdict(list)
 
     def __init__(
-        self, shape, seed, dtype, by_row=False, register=True, conj=False
+        self,
+        shape,
+        seed,
+        dtype,
+        by_row=False,
+        batch=None,
+        blocksize=1,
+        register=True,
+        conj=False,
     ):
         """Initializer. See class docstring."""
-        super().__init__(shape, seed, dtype, by_row, register)
+        super().__init__(
+            shape, seed, dtype, by_row, batch, blocksize, register
+        )
         if dtype not in COMPLEX_DTYPES:
             raise ValueError(f"Dtype must be complex! was {dtype}")
         self.conj = conj
 
-    def get_vector(self, idx, device):
-        """Samples a vector with Rademacher i.i.d. noise.
+    def get_block(self, idxs, input_device):
+        """Samples a vector with Gaussian i.i.d. noise.
 
         See base class definition for details.
         """
         h, w = self.shape
-        dims = w if self.by_row else h
-        if idx < 0 or idx >= (h if self.by_row else w):
-            raise ValueError(f"Invalid index {idx} for shape {self.shape}!")
-        result = phase_noise(
-            dims, self.seed + idx, self.dtype, device="cpu"
-        ).to(device)
+        n, dims = len(idxs), w if self.by_row else h
+        result = torch.empty(
+            (n, w) if self.by_row else (h, n),
+            dtype=self.dtype,
+            device=input_device,
+        )
+        for i, idx in enumerate(idxs):
+            if i < 0 or i >= (h if self.by_row else w):
+                raise ValueError(f"Invalid idx {idx} for shape {self.shape}!")
+            v = phase_noise(  # device always CPU to ensure determinism
+                dims, self.seed + idx, self.dtype, device="cpu"
+            ).to(input_device)
+            #
+            if self.by_row:
+                result[i, :] = v
+            else:
+                result[:, i] = v
+        #
         if self.conj:
             result = result.conj()
         return result
@@ -460,7 +516,7 @@ class SsrftNoiseLinOp(BaseLinOp):
 
     .. note::
 
-    Unlike classes extending :class:`ByVectorLinOp`, in this case it is not
+    Unlike classes extending :class:`ByBlockLinOp`, in this case it is not
     efficient to apply this operator by row/column. Instead, this
     implementation applies the SSRFT directly to the input, by vector,
     but it also provides ``get_vector`` functionality via one-hot vecmul to

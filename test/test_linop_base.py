@@ -12,7 +12,7 @@ import torch
 from skerch.linops import (
     linop_to_matrix,
     BaseLinOp,
-    ByVectorLinOp,
+    ByBlockLinOp,
     TransposedLinOp,
 )
 from skerch.utils import BadShapeError, gaussian_noise
@@ -57,7 +57,7 @@ def linop_correctness_shapes(request):
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-class MatMatLinOp(BaseLinOp):
+class MatLinOp(BaseLinOp):
     """Implementing matmul."""
 
     def __init__(self, mat, batch=None):
@@ -74,37 +74,20 @@ class MatMatLinOp(BaseLinOp):
         return x @ self.mat
 
 
-class MatVecLinOp(BaseLinOp):
-    """Implementing matvec."""
-
-    def __init__(self, mat, batch=None):
-        """ """
-        super().__init__(mat.shape, batch)
-        self.mat = mat
-
-    def vecmul(self, x):
-        """ """
-        return self.mat @ x
-
-    def rvecmul(self, x):
-        """ """
-        return x @ self.mat
-
-
-class MatBVLinOp(ByVectorLinOp):
+class MatBBLinOp(ByBlockLinOp):
     """By-Vector linop."""
 
-    def __init__(self, mat, by_row=False):
+    def __init__(self, mat, by_row=False, batch=None, blocksize=1):
         """ """
-        super().__init__(mat.shape, by_row)
+        super().__init__(mat.shape, by_row, batch, blocksize)
         self.mat = mat
 
-    def get_vector(self, idx, input_device):
+    def get_block(self, idxs, input_device):
         """ """
         if self.by_row:
-            return self.mat[idx]
+            return self.mat[idxs, :]
         else:
-            return self.mat[:, idx]
+            return self.mat[:, idxs]
 
 
 # ##############################################################################
@@ -167,44 +150,33 @@ def test_baselinop_formal():
     lopT = TransposedLinOp(lop)
     with pytest.raises(ValueError):
         _ = TransposedLinOp(lopT)
-    # testing (batched) matmul and matvec
+    # testing (batched) matmul
     h, w, n, b = 100, 100, 5000, 11
     slow_factor = 5
     atol = 1e-5
     mat = gaussian_noise((h, w), dtype=torch.float32, device="cpu", seed=12345)
     v1, v2 = torch.ones(w), torch.ones(h)
     a1, a2 = torch.ones(w, n), torch.ones(n, h)
-    mmlop = MatMatLinOp(mat, batch=None)
-    mmlop2 = MatMatLinOp(mat, batch=b)
-    mvlop = MatVecLinOp(mat, batch=None)
-    mvlop2 = MatVecLinOp(mat, batch=b)
-    #  no matmat raises a warning when running against matrices
-    with pytest.warns(RuntimeWarning):
-        mvlop @ a1
-    with pytest.warns(RuntimeWarning):
-        a2 @ mvlop
-    # no matmat crashes when batch was requested
-    with pytest.raises(RuntimeError):
-        _ = mvlop2 @ a1
-    with pytest.raises(RuntimeError):
-        _ = a2 @ mvlop2
+    lop1 = MatLinOp(mat, batch=None)
+    lop2 = MatLinOp(mat, batch=b)
+    lop3 = MatLinOp(mat, batch=1)
     # matmat is fastest, matvec slowest, batched inbetween
     # also, all give same result
     t0 = time()
-    mmlop @ a1  # matmat
+    lop1 @ a1  # matmat
     t1 = time()
-    mmlop2 @ a1  # batched
+    lop2 @ a1  # batched
     t2 = time()
-    mvlop @ a1  # matvec
+    lop3 @ a1  # matvec
     t3 = time()
     assert (slow_factor * (t1 - t0)) < (t2 - t1), "Matmat slower than batched?"
     assert (slow_factor * (t2 - t1)) < (t3 - t2), "Batched slower than matvec?"
     t0 = time()
-    a2 @ mmlop  # matmat
+    a2 @ lop1  # matmat
     t1 = time()
-    a2 @ mmlop2  # batched
+    a2 @ lop2  # batched
     t2 = time()
-    a2 @ mvlop  # matvec
+    a2 @ lop3  # matvec
     t3 = time()
     assert (slow_factor * (t1 - t0)) < (
         t2 - t1
@@ -231,20 +203,16 @@ def test_linop_correctness(
                     mat = gaussian_noise(
                         (h, w), dtype=dtype, device=device, seed=seed
                     )
-                    lop1 = MatMatLinOp(mat, batch=None)
-                    lop2 = MatMatLinOp(mat, batch=3)
-                    lop3 = MatVecLinOp(mat, batch=None)
+                    lop1 = MatLinOp(mat, batch=None)
+                    lop2 = MatLinOp(mat, batch=3)
+                    lop3 = MatLinOp(mat, batch=1)
+                    Ileft = torch.eye(h, dtype=dtype, device=device)
+                    Iright = torch.eye(w, dtype=dtype, device=device)
                     for adj in (True, False):
                         msg = " (adj)" if adj else ""
-                        mat1 = linop_to_matrix(
-                            lop1, dtype=dtype, device=device, adjoint=adj
-                        )
-                        mat2 = linop_to_matrix(
-                            lop2, dtype=dtype, device=device, adjoint=adj
-                        )
-                        mat3 = linop_to_matrix(
-                            lop3, dtype=dtype, device=device, adjoint=adj
-                        )
+                        mat1 = Ileft @ lop1 if adj else lop1 @ Iright
+                        mat2 = Ileft @ lop2 if adj else lop2 @ Iright
+                        mat3 = Ileft @ lop3 if adj else lop3 @ Iright
                         assert torch.allclose(
                             mat, mat1
                         ), f"Inconsistent matmat baselinop!{msg}"
@@ -254,7 +222,6 @@ def test_linop_correctness(
                         assert torch.allclose(
                             mat, mat3
                         ), f"Inconsistent matvec baselinop!{msg}"
-                        #
                         # now test transposition
                         for lop, msg in (
                             (lop1, " matmat"),
@@ -271,23 +238,52 @@ def test_linop_correctness(
                         # by-vector correctness tests:
                         for by_row in (True, False):
                             msg = f"adj={adj}, by_row={by_row}"
-                            lop_bv = MatBVLinOp(mat, by_row=by_row)
-                            mat_bv = linop_to_matrix(
-                                lop_bv, dtype=dtype, device=device, adjoint=adj
+                            bb1 = MatBBLinOp(
+                                mat, by_row=by_row, batch=None, blocksize=1
+                            )
+                            bb2 = MatBBLinOp(
+                                mat, by_row=by_row, batch=None, blocksize=3
+                            )
+                            bb3 = MatBBLinOp(
+                                mat, by_row=by_row, batch=3, blocksize=1
+                            )
+                            bb4 = MatBBLinOp(
+                                mat, by_row=by_row, batch=3, blocksize=3
+                            )
+                            bb1mat = linop_to_matrix(
+                                bb1, dtype=dtype, device=device, adjoint=adj
+                            )
+                            bb2mat = linop_to_matrix(
+                                bb2, dtype=dtype, device=device, adjoint=adj
+                            )
+                            bb3mat = linop_to_matrix(
+                                bb3, dtype=dtype, device=device, adjoint=adj
+                            )
+                            bb4mat = linop_to_matrix(
+                                bb4, dtype=dtype, device=device, adjoint=adj
                             )
                             # correctness
                             assert torch.allclose(
-                                mat, mat_bv
-                            ), f"Inconsistent by-vector baselinop! {msg}"
+                                mat, bb1mat
+                            ), f"Inconsistent BB1/matrix! {msg}"
+                            assert torch.allclose(
+                                mat, bb2mat
+                            ), f"Inconsistent BB2/matrix! {msg}"
+                            assert torch.allclose(
+                                mat, bb3mat
+                            ), f"Inconsistent BB3/matrix! {msg}"
+                            assert torch.allclose(
+                                mat, bb4mat
+                            ), f"Inconsistent BB4/matrix! {msg}"
                             # transposed
-                            lop_bvT = lop_bv.t()
-                            lop_bvTT = lop_bvT.t()
-                            mat_bvT = linop_to_matrix(
-                                lopT, dtype=dtype, device=device, adjoint=adj
+                            bbT = bb1.t()
+                            bbTT = bbT.t()
+                            bbTmat = linop_to_matrix(
+                                bbT, dtype=dtype, device=device, adjoint=adj
                             )
                             assert (
-                                matT == mat.H
-                            ).all(), f"Wrong by-vector transposition?{msg}"
+                                bbTmat == mat.H
+                            ).all(), f"Wrong by-block transposition?{msg}"
                             assert (
-                                lopTT is lop
-                            ), f"Wrong by-vector double transp?{msg}"
+                                bbTT is bb1
+                            ), f"Wrong by-block double transp?{msg}"

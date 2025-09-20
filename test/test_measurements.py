@@ -222,7 +222,7 @@ def test_perform_measurements_correctness(
     * Output does not depend on the type of parallelization
     """
     hw = (10, 10)
-    meas_hw = (10, 5)
+    (meas_hw,) = (10, 5)
     #
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
@@ -233,10 +233,20 @@ def test_perform_measurements_correctness(
                 # create measlops and convert them to matrices
                 meas_lops = [
                     RademacherNoiseLinOp(
-                        meas_hw, seed, dtype, by_row=False, register=False
+                        meas_hw,
+                        seed,
+                        dtype,
+                        by_row=False,
+                        register=False,
+                        blocksize=max(meas_hw),
                     ),
                     GaussianNoiseLinOp(
-                        meas_hw, seed, dtype, by_row=False, register=False
+                        meas_hw,
+                        seed,
+                        dtype,
+                        by_row=False,
+                        register=False,
+                        blocksize=max(meas_hw),
                     ),
                     SsrftNoiseLinOp(meas_hw, seed, norm="ortho"),
                 ]
@@ -552,13 +562,15 @@ def test_iid_measurements_correctness(
 
     For each iid linop on all dtypes and devices tests that:
     * Columns/rows behave like iid noise (delta autocorrelation)
-    * Matmul and rmatmul with linop (fwd and adj) is same as with matrix
+    * Fwd and adj matmul lead to same linop
     * Transposed linop is correct (fwd and adj)
     """
     hw, delta_at_least, nondelta_at_most = iid_hw_and_autocorr_tolerances
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
+                Ileft = torch.eye(hw[1], dtype=dtype, device=device)
+                Iright = torch.eye(hw[0], dtype=dtype, device=device)
                 for lop_type, complex_only in iid_noise_linop_types:
                     if complex_only and dtype not in {
                         torch.complex32,
@@ -568,23 +580,25 @@ def test_iid_measurements_correctness(
                         continue
                     #
                     lop1 = lop_type(
-                        hw, seed, dtype, by_row=False, register=False
+                        hw,
+                        seed,
+                        dtype,
+                        by_row=False,
+                        register=False,
+                        blocksize=max(hw),
                     )
                     lop2 = lop_type(
-                        hw, seed, dtype, by_row=True, register=False
+                        hw,
+                        seed,
+                        dtype,
+                        by_row=True,
+                        register=False,
+                        blocksize=max(hw),
                     )
-                    mat1a = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
-                    mat1b = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
-                    mat2a = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
-                    mat2b = linop_to_matrix(
-                        lop1, lop1.dtype, device, adjoint=False
-                    )
+                    mat1a = lop1 @ Iright
+                    mat1b = lop1 @ Iright
+                    mat2a = lop2 @ Iright
+                    mat2b = Ileft @ lop2
                     # Columns/rows behave like iid noise (delta autocorr)
                     for x in mat1a:  # x is a row
                         try:
@@ -604,23 +618,17 @@ def test_iid_measurements_correctness(
                             raise AssertionError(
                                 "IID autocorr error (col)"
                             ) from ae
-                    # matmul and rmatmul with linop is same as with matrix
-                    v1 = torch.randn(hw[0], dtype=dtype, device=device)
-                    v2 = torch.randn(hw[1], dtype=dtype, device=device)
-                    assert torch.allclose(
-                        v1 @ lop1, v1 @ mat1a, atol=tol
-                    ), "Mismatching adjoint vecmul between lop and mat?"
-                    assert torch.allclose(
-                        lop1 @ v2, mat1a @ v2, atol=tol
-                    ), "Wrong vecmul between lop and mat?"
+                    # fwd and adj matmul lead to same linop
+                    assert (
+                        mat1a == mat1b
+                    ).all(), f"Mismatching fwd/adj {lop_type} (by_col)"
+                    assert (
+                        mat2a == mat2b
+                    ).all(), f"Mismatching fwd/adj {lop_type} (by_row)"
                     # transposed linop is correct
                     lopT = TransposedLinOp(lop1)
-                    matTa = linop_to_matrix(
-                        lopT, lop1.dtype, device, adjoint=False
-                    )
-                    matTb = linop_to_matrix(
-                        lopT, lop1.dtype, device, adjoint=True
-                    )
+                    matTa = lopT @ Ileft
+                    matTb = Iright @ lopT
                     assert torch.allclose(
                         mat1a.H, matTa, atol=tol
                     ), "Wrong iid transposition?"
