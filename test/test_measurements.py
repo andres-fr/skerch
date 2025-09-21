@@ -140,9 +140,7 @@ def test_get_measblock_correctness(
     torch_devices,
     dtypes_tols,
 ):
-    """
-    asdf
-    """
+    """ """
     meas_hw = (7, 5)
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
@@ -184,8 +182,10 @@ def test_get_measblock_correctness(
                 )
             for device in torch_devices:
                 meas_mats = [
-                    linop_to_matrix(l, dtype, device, adjoint=False)
+                    l.to_matrix(dtype, device)
                     for l in meas_lops
+                    # linop_to_matrix(l, dtype, device, adjoint=False)
+                    # for l in meas_lops
                 ]
                 #
                 for mat, lop in zip(meas_mats, meas_lops):

@@ -192,17 +192,52 @@ class ByBlockLinOp(BaseLinOp):
 
     def __init__(self, shape, by_row=False, batch=None, blocksize=1):
         """Initializer. See class docstring."""
+        if blocksize < 1:
+            raise ValueError("Block size must be positive!")
         super().__init__(shape, batch)
         self.by_row = by_row
         self.blocksize = blocksize
+        self.num_vecs = shape[0] if by_row else shape[1]
+        self.num_blocks = self.get_idx_coords(self.num_vecs - 1)[0] + 1
+
+    def get_vector_idxs(self, block_idx):
+        """Retrieve vector indices corresponding to a block.
+
+        :param block_idx: Integer between ``0`` and ``self.num_blocks - 1``.
+        :returns: ``range(beg, end)`` with the vector indices corresponding
+          to this block (``end`` is excluded).
+        """
+        if not (0 <= block_idx < self.num_blocks):
+            raise ValueError(f"Block idx out of bounds! {block_idx}")
+        #
+        beg = block_idx * self.blocksize
+        end = min(self.num_vecs, beg + self.blocksize)
+        return range(beg, end)
+
+    def get_idx_coords(self, idx):
+        """Retrieve vector index in block coordinates.
+
+        Useful if we want to retrieve a given vector: this method tells us
+        which block should we retrieve, and where to find the vector within
+        the retrieved block.
+
+        :param idx: Integer between ``0`` and ``N - 1``, where ``N`` is
+          the number of rows, if ``by_row`` is true, or columns otherwise.
+        :returns: Pair of ints ``(b, v)``, such that ``vec_idx`` is the
+          ``v``-th element of the ``b``-th block, e.g. in a by-row linop,
+          ``lop[idx] = lop.get_block(idxs, dtype, device)[idx]``.
+        """
+        if not (0 <= idx < self.num_vecs):
+            raise ValueError(f"Vector idx out of bounds! {idx}")
+        block_idx, vec_idx = divmod(idx, self.blocksize)
+        return (block_idx, vec_idx)
 
     def get_block(self, idxs, input_dtype, input_device):
         """Method to gather vector entries for this linear operator.
 
         Override this method with the desired behaviour. For a shape of
         ``(h, w)``, it should return matrices of shape ``(block, w)`` if
-        ``self.by_row`` is true, and ``(h, block)`` otherwise. For unit block
-        sizes, it may also return a vector.
+        ``self.by_row`` is true, and ``(h, block)`` otherwise.
 
         :param idxs: Range object representing the indices of the row/column to
           be retrieved. It will be between 0 and ``dims - 1``, both included,
@@ -216,6 +251,20 @@ class ByBlockLinOp(BaseLinOp):
         """
         raise NotImplementedError
 
+    def to_matrix(self, dtype, device="cpu"):
+        """Fetch all blocks into a matrix."""
+        result = torch.empty(self.shape, dtype=dtype, device=device)
+        #
+        for b_i in range(self.num_blocks):
+            idxs = self.get_vector_idxs(b_i)
+            block = self.get_block(idxs, dtype, device)
+            if self.by_row:
+                result[idxs, :] = block
+            else:
+                result[:, idxs] = block
+        #
+        return result
+
     def _bb_matmul_helper(self, x, adjoint=False):
         """ """
         h, w = self.shape
@@ -226,10 +275,8 @@ class ByBlockLinOp(BaseLinOp):
             xh, n = x.shape
             result = torch.zeros((h, n), device=x.device, dtype=x.dtype)
         #
-        limit = h if self.by_row else w
-        for beg in range(0, limit, self.blocksize):
-            idxs = range(beg, min(limit, beg + self.blocksize))
-            #
+        for b_i in range(self.num_blocks):
+            idxs = self.get_vector_idxs(b_i)
             if adjoint and self.by_row:
                 result += x[:, idxs] @ self.get_block(idxs, x.dtype, x.device)
             elif adjoint and not self.by_row:
@@ -250,6 +297,14 @@ class ByBlockLinOp(BaseLinOp):
     def rmatmul(self, x):
         """ """
         return self._bb_matmul_helper(x, adjoint=True)
+
+    def __repr__(self):
+        """Returns a string in the form <classname(shape)>."""
+        clsname = self.__class__.__name__
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}{block_s}>"
+        return s
 
 
 class TransposedLinOp:

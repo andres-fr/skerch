@@ -585,6 +585,24 @@ class SsrftNoiseLinOp(ByBlockLinOp):
 
         See base class definition for details.
         """
+
+        """
+        TODO:
+        ensure that idxs correspond to a range, otherwise
+        crash due to nondeterministic. do also with IID linops.
+
+        The alternative would be that idxs are indeed arbitrary and it works.
+
+        But in that case, problem is that blocks still need to be generated
+        the same way.
+
+        And then is not a block, so `get_block` is a silly name.
+
+        Either call it get_idxs and we fugg up, or we ideed use block_idx
+        as parameter.
+        """
+        coords = [self.get_idx_coords(i) for i in idxs]
+        breakpoint()
         if isinstance(idxs, int):
             idxs = range(idxs, idxs + 1)
         h, w = self.shape

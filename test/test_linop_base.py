@@ -85,9 +85,12 @@ class MatBBLinOp(ByBlockLinOp):
     def get_block(self, idxs, input_dtype, input_device):
         """ """
         if self.by_row:
-            return self.mat[idxs, :].to(input_device)
+            result = self.mat[idxs, :].to(input_device)
         else:
-            return self.mat[:, idxs].to(input_device)
+            result = self.mat[:, idxs].to(input_device)
+        if len(result.shape) == 1:
+            result.unsqueeze_(0 if self.by_row else 1)
+        return result
 
 
 # ##############################################################################
@@ -186,10 +189,95 @@ def test_baselinop_formal():
     ), "Batched slower than matvec? (adj)"
 
 
+def test_byblock_formal(torch_devices, dtypes_tols):
+    """Formal correctness test for by-block linops.
+
+    Creates small-shaped by-block linops and checks that:
+
+    * Repr creates correct strings
+    * Negative blocksizes trigger error
+    * out-of-bounds block idxs trigger error in get_vector_idxs
+    * out-of-bounds vector idxs trigger error in get_idx_coords
+    """
+    shape = (5, 7)
+    #
+    for by_row in (True, False):
+        # negative blocksize triggers error
+        with pytest.raises(ValueError):
+            _ = ByBlockLinOp(shape, by_row=by_row, blocksize=-1)
+        #
+        for bsize in range(1, max(shape)):
+            lop = ByBlockLinOp(shape, by_row=by_row, blocksize=bsize)
+            # OOB block_idx triggers error
+            assert lop.num_blocks >= 1, "Empty num_blocks?"
+            with pytest.raises(ValueError):
+                _ = lop.get_vector_idxs(-1)
+            with pytest.raises(ValueError):
+                _ = lop.get_vector_idxs(lop.num_blocks)
+            assert isinstance(
+                lop.get_vector_idxs(0), range
+            ), "Invalid otuput for block_idx=0"
+            assert isinstance(
+                lop.get_vector_idxs(lop.num_blocks - 1), range
+            ), "Invalid output for block_idx=N-1"
+            # OOB vector idx triggers error
+            assert lop.num_vecs >= 1, "Empty num_vecs?"
+            with pytest.raises(ValueError):
+                _ = lop.get_idx_coords(-1)
+            with pytest.raises(ValueError):
+                _ = lop.get_idx_coords(lop.num_vecs)
+            assert isinstance(
+                lop.get_idx_coords(0), tuple
+            ), "Invalid output for vec_idx=0"
+            assert isinstance(
+                lop.get_idx_coords(lop.num_vecs - 1), tuple
+            ), "Invalid output for vec_idx=N-1"
+
+
+def test_byblock_correctness_extra(rng_seeds, torch_devices, dtypes_tols):
+    """Extra correctness tests for by-block linop:
+
+    Creates various small-shaped random by-block linops and, for all
+    block sizes and by row/column, tests that:
+
+    * to_matrix retieves correct matrix
+    * get_idx coords and get_vector_idxs are consistent, lead to generation
+      of correct blocks and point to correct idxs.
+    """
+    h, w = 5, 7
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                mat = gaussian_noise(
+                    (h, w), dtype=dtype, device=device, seed=seed
+                )
+                # for all blocksizes and by row/col
+                for by_row in (True, False):
+                    for bsize in range(1, max(h, w)):
+                        lop = MatBBLinOp(
+                            mat, by_row=by_row, batch=None, blocksize=bsize
+                        )
+                        # get_idx_coords and get_vector_idxs retrieve
+                        # consistent and right coordinates
+                        for idx in range(h if by_row else w):
+                            b, v = lop.get_idx_coords(idx)
+                            b_idxs = lop.get_vector_idxs(b)
+                            block = lop.get_block(b_idxs, dtype, device)
+                            if by_row:
+                                assert (mat[idx] == block[v]).all()
+                            else:
+                                assert (mat[:, idx] == block[:, v]).all()
+                        # to_matrix is correct
+                        mat2 = lop.to_matrix(dtype, device)
+                        assert (
+                            mat == mat2
+                        ).all(), "Incorrect BB to_matrix for blocksize {block}"
+
+
 def test_linop_correctness(
     rng_seeds, torch_devices, dtypes_tols, linop_correctness_shapes
 ):
-    """Test case for correctness of base linop and by vector linop.
+    """Test case for correctness of base linop and by-block linop.
 
     For all devices and datatypes, samples Gaussian noise and checks that:
     * linop_to_matrix yields the original matrix.
@@ -262,7 +350,7 @@ def test_linop_correctness(
                             bb4mat = linop_to_matrix(
                                 bb4, dtype=dtype, device=device, adjoint=adj
                             )
-                            # correctness
+                            # correctness via linop_to_matrix
                             assert torch.allclose(
                                 mat, bb1mat
                             ), f"Inconsistent BB1/matrix! {msg}"
