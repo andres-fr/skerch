@@ -756,9 +756,9 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     # get_block errors for invalid index
     lop = SsrftNoiseLinOp((5, 3), 0, blocksize=2, register=False)
     with pytest.raises(ValueError):
-        lop.get_block(range(-1), torch.float32, "cpu")
+        lop.get_block(-1, torch.float32, "cpu")
     with pytest.raises(ValueError):
-        lop.get_block(range(4), torch.float32, "cpu")
+        lop.get_block(2, torch.float32, "cpu")
     # get_block and matmul provide right dtype and device
     lop = SsrftNoiseLinOp((5, 3), 0, register=False)
     for device in torch_devices:
@@ -783,16 +783,22 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
                 lop1 = SsrftNoiseLinOp(hw, seed, norm="ortho", register=False)
                 lop2 = SsrftNoiseLinOp(hw, seed, norm="ortho", register=False)
                 lop3 = SsrftNoiseLinOp(
+                    hw, seed, norm="ortho", register=False, blocksize=max(hw)
+                )
+                lop4 = SsrftNoiseLinOp(
                     hw, seed + 1, norm="ortho", register=False
                 )
                 mat1a = linop_to_matrix(lop1, dtype, device, adjoint=False)
                 mat1b = linop_to_matrix(lop1, dtype, device, adjoint=False)
                 mat1c = linop_to_matrix(lop1, dtype, device, adjoint=True)
-                mat1d = lop1.get_block(range(hw[1]), dtype, device)
-                mat1e = lop1 @ Iright
-                mat1f = Ileft @ lop1
+                mat1d = lop3.get_block(0, dtype, device)
+                mat1e = lop1.to_matrix(dtype, device)
+                mat1f = lop1 @ Iright
+                mat1g = Ileft @ lop1
+                mat1h = lop3 @ Iright
+                mat1i = Ileft @ lop3
                 mat2 = linop_to_matrix(lop2, dtype, device, adjoint=False)
-                mat3 = linop_to_matrix(lop3, dtype, device, adjoint=False)
+                mat4 = linop_to_matrix(lop4, dtype, device, adjoint=False)
                 assert torch.allclose(
                     mat1a, mat1b, atol=tol
                 ), f"Nondeterministic linop? {lop1}"
@@ -801,19 +807,28 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
                 ), f"Different fwd and adjoint? {lop1}"
                 assert torch.allclose(
                     mat1a, mat1d, atol=tol
-                ), f"Wrong get_block? {lop1}"
+                ), f"Inconsistent for different blocksize (get_block)? {lop3}"
                 assert torch.allclose(
                     mat1a, mat1e, atol=tol
-                ), f"Wrong matmul? {lop1}"
+                ), f"Inconsistent for different blocksize (to_matrix)? {lop3}"
                 assert torch.allclose(
                     mat1a, mat1f, atol=tol
+                ), f"Wrong matmul? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1g, atol=tol
                 ), f"Wrong adjoint matmul? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1h, atol=tol
+                ), f"Inconsistent matmul for different blocksize? {lop1}"
+                assert torch.allclose(
+                    mat1a, mat1i, atol=tol
+                ), f"Inconsistent adj matmul for different blocksize? {lop1}"
                 assert torch.allclose(
                     mat1a, mat2, atol=tol
                 ), f"Same seed, differentl linop? {lop1}"
                 #
                 for col in mat1a.H:
-                    cosim = abs(col @ mat3) / (col.norm() ** 2)
+                    cosim = abs(col @ mat4) / (col.norm() ** 2)
                     assert (
                         cosim < 0.75
                     ).all(), "Different seeds, similar vectors? {lop1}"

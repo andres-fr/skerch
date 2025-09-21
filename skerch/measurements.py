@@ -580,44 +580,19 @@ class SsrftNoiseLinOp(ByBlockLinOp):
             self.__class__.REGISTER["default"].append((seed, seed_end))
             self.check_register()
 
-    def get_block(self, idxs, input_dtype, input_device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """Samples a SSRFT block.
 
         See base class definition for details.
         """
-
-        """
-        TODO:
-        ensure that idxs correspond to a range, otherwise
-        crash due to nondeterministic. do also with IID linops.
-
-        The alternative would be that idxs are indeed arbitrary and it works.
-
-        But in that case, problem is that blocks still need to be generated
-        the same way.
-
-        And then is not a block, so `get_block` is a silly name.
-
-        Either call it get_idxs and we fugg up, or we ideed use block_idx
-        as parameter.
-        """
-        coords = [self.get_idx_coords(i) for i in idxs]
-        breakpoint()
-        if isinstance(idxs, int):
-            idxs = range(idxs, idxs + 1)
+        idxs = self.get_vector_idxs(block_idx)
         h, w = self.shape
-        blocksize = len(idxs)
-        if (
-            idxs.start < 0
-            or idxs.stop < 0
-            or idxs.stop > (h if self.by_row else w)
-        ):
-            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
+        bsize = len(idxs)
         #
         onehot_mat = torch.zeros(
-            (blocksize, w), dtype=input_dtype, device=input_device
+            (bsize, w), dtype=input_dtype, device=input_device
         )
-        onehot_mat[range(blocksize), idxs] = 1
+        onehot_mat[range(bsize), idxs] = 1
         #
         result = SSRFT.issrft(
             onehot_mat,
