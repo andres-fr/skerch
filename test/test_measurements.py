@@ -510,9 +510,9 @@ def test_iid_measurements_formal(
         lop_type.REGISTER.clear()  # clear register for this lop_type
         # invalid index triggers error
         with pytest.raises(ValueError):
-            lop.get_block(range(-1), torch.float32, "cpu")
+            lop.get_block(-1, torch.float32, "cpu")
         with pytest.raises(ValueError):
-            lop.get_block(5, torch.float32, "cpu")
+            lop.get_block(1e12, torch.float32, "cpu")
         #
         hw = (100, 2)
         for seed in rng_seeds:
@@ -589,7 +589,8 @@ def test_iid_measurements_correctness(
 
     For each iid linop on all dtypes and devices tests that:
     * Columns/rows behave like iid noise (delta autocorrelation)
-    * Fwd and adj matmul lead to same linop
+    * Fwd and adj matmul with Identity and onehot vectors lead to same linop
+    * Correctness of to_matrix
     * Transposed linop is correct (fwd and adj)
     """
     hw, delta_at_least, nondelta_at_most = iid_hw_and_autocorr_tolerances
@@ -606,60 +607,66 @@ def test_iid_measurements_correctness(
                     }:
                         continue
                     #
-                    lop1 = lop_type(
-                        hw,
-                        seed,
-                        by_row=False,
-                        register=False,
-                        blocksize=max(hw),
-                    )
-                    lop2 = lop_type(
-                        hw,
-                        seed,
-                        by_row=True,
-                        register=False,
-                        blocksize=max(hw),
-                    )
-                    mat1a = lop1 @ Iright
-                    mat1b = lop1 @ Iright
-                    mat2a = lop2 @ Iright
-                    mat2b = Ileft @ lop2
-                    # Columns/rows behave like iid noise (delta autocorr)
-                    for x in mat1a:  # x is a row
-                        try:
-                            autocorrelation_test_helper(
-                                x, delta_at_least, nondelta_at_most
-                            )
-                        except AssertionError as ae:
-                            raise AssertionError(
-                                "IID autocorr error (row)"
-                            ) from ae
-                    for x in mat1a.H:  # x is a column
-                        try:
-                            autocorrelation_test_helper(
-                                x, delta_at_least, nondelta_at_most
-                            )
-                        except AssertionError as ae:
-                            raise AssertionError(
-                                "IID autocorr error (col)"
-                            ) from ae
-                    # fwd and adj matmul lead to same linop
-                    assert (
-                        mat1a == mat1b
-                    ).all(), f"Mismatching fwd/adj {lop_type} (by_col)"
-                    assert (
-                        mat2a == mat2b
-                    ).all(), f"Mismatching fwd/adj {lop_type} (by_row)"
-                    # transposed linop is correct
-                    lopT = TransposedLinOp(lop1)
-                    matTa = lopT @ Ileft
-                    matTb = Iright @ lopT
-                    assert torch.allclose(
-                        mat1a.H, matTa, atol=tol
-                    ), "Wrong iid transposition?"
-                    assert torch.allclose(
-                        mat1a.H, matTb, atol=tol
-                    ), "Wrong iid transposition? (adjoint)"
+                    for by_row in (False, True):
+                        brs = "(by row)" if by_row else "(by col)"
+                        lop = lop_type(
+                            hw,
+                            seed,
+                            by_row=by_row,
+                            register=False,
+                            blocksize=max(hw),
+                        )
+                        mat1a = lop @ Iright
+                        mat1b = lop @ Iright
+                        mat1c = lop.to_matrix(dtype, device)
+                        mat1d = linop_to_matrix(
+                            lop, dtype, device, adjoint=False
+                        )
+                        mat1e = linop_to_matrix(
+                            lop, dtype, device, adjoint=True
+                        )
+                        # Columns/rows behave like iid noise (delta autocorr)
+                        for x in mat1a:  # x is a row
+                            try:
+                                autocorrelation_test_helper(
+                                    x, delta_at_least, nondelta_at_most
+                                )
+                            except AssertionError as ae:
+                                raise AssertionError(
+                                    "IID autocorr error (row)"
+                                ) from ae
+                        for x in mat1a.H:  # x is a column
+                            try:
+                                autocorrelation_test_helper(
+                                    x, delta_at_least, nondelta_at_most
+                                )
+                            except AssertionError as ae:
+                                raise AssertionError(
+                                    "IID autocorr error (col)"
+                                ) from ae
+                        # to_matrix, fwd and adj matmul lead to same linop
+                        assert (
+                            mat1a == mat1b
+                        ).all(), f"Mismatching fwd/adj {lop_type} {brs}"
+                        assert (
+                            mat1a == mat1c
+                        ).all(), f"Wrong to_matrix {lop_type} {brs}"
+                        assert (
+                            mat1a == mat1d
+                        ).all(), f"Wrong linop_to_matrix {lop_type} {brs}"
+                        assert (
+                            mat1a == mat1e
+                        ).all(), f"Wrong adj linop_to_matrix {lop_type} {brs}"
+                        # transposed linop is correct
+                        lopT = TransposedLinOp(lop)
+                        matTa = lopT @ Ileft
+                        matTb = Iright @ lopT
+                        assert torch.allclose(
+                            mat1a.H, matTa, atol=tol
+                        ), "Wrong iid transposition?"
+                        assert torch.allclose(
+                            mat1a.H, matTb, atol=tol
+                        ), "Wrong iid transposition? (adjoint)"
 
 
 def test_phasenoise_conj_unit(rng_seeds, torch_devices, complex_dtypes_tols):
@@ -878,6 +885,9 @@ def test_ssrft_correctness(
                     hw, seed, blocksize=7, norm="ortho", register=False
                 )
                 mat = linop_to_matrix(lop, dtype, device, adjoint=False)
+                tomat = lop.to_matrix(dtype, device)
+                # to_matrix is correct
+                assert (mat == tomat).all(), "Wrong SSRFT to_matrix?"
                 # Columns/rows behave like iid noise (delta autocorr)
                 for x in mat:  # x is a row
                     try:
