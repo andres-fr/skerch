@@ -232,16 +232,22 @@ class ByBlockLinOp(BaseLinOp):
         block_idx, vec_idx = divmod(idx, self.blocksize)
         return (block_idx, vec_idx)
 
-    def get_block(self, idxs, input_dtype, input_device):
-        """Method to gather vector entries for this linear operator.
+    def get_block(self, block_idx, input_dtype, input_device):
+        """Method to gather a block (matrix) from this linear operator.
 
         Override this method with the desired behaviour. For a shape of
         ``(h, w)``, it should return matrices of shape ``(block, w)`` if
         ``self.by_row`` is true, and ``(h, block)`` otherwise.
 
-        :param idxs: Range object representing the indices of the row/column to
-          be retrieved. It will be between 0 and ``dims - 1``, both included,
-          where ``dims`` is ``h`` if ``self.by_row``, and ``w`` otherwise.
+        .. note::
+          If ``blocksize==1``, returning vectors may work in some cases, but
+          it is recommended to return matrices (where one of the dimensions
+          equals 1).
+
+        :param block_idx: Index of the block to be returned. Use the auxiliary
+          method :meth:`get_vector_idxs` if you need to know which vector
+          indices are associated to this block index. The attributes
+          ``self.num_vecs, self.num_blocks`` may also be helpful.
         :param input_dtype: The dtype of the input tensor that this linop
           was called on. The output of this method should generally be in the
           same device.
@@ -257,7 +263,7 @@ class ByBlockLinOp(BaseLinOp):
         #
         for b_i in range(self.num_blocks):
             idxs = self.get_vector_idxs(b_i)
-            block = self.get_block(idxs, dtype, device)
+            block = self.get_block(b_i, dtype, device)
             if self.by_row:
                 result[idxs, :] = block
             else:
@@ -278,13 +284,13 @@ class ByBlockLinOp(BaseLinOp):
         for b_i in range(self.num_blocks):
             idxs = self.get_vector_idxs(b_i)
             if adjoint and self.by_row:
-                result += x[:, idxs] @ self.get_block(idxs, x.dtype, x.device)
+                result += x[:, idxs] @ self.get_block(b_i, x.dtype, x.device)
             elif adjoint and not self.by_row:
-                result[:, idxs] = x @ self.get_block(idxs, x.dtype, x.device)
+                result[:, idxs] = x @ self.get_block(b_i, x.dtype, x.device)
             elif not adjoint and self.by_row:
-                result[idxs, :] = self.get_block(idxs, x.dtype, x.device) @ x
+                result[idxs, :] = self.get_block(b_i, x.dtype, x.device) @ x
             elif not adjoint and not self.by_row:
-                result += self.get_block(idxs, x.dtype, x.device) @ x[idxs, :]
+                result += self.get_block(b_i, x.dtype, x.device) @ x[idxs, :]
             else:
                 raise RuntimeError("This should never happen!")
         #
@@ -380,7 +386,6 @@ class CompositeLinOp:
     into ``A @ B @ C ...``.
 
     .. note::
-
       Using this class could be more inefficient than directly computing the
       composed operator, e.g. if ``A.shape = (1, 1000)`` and
       ``B.shape = (1000, 1)``, then computing the scalar ``C = A @ B`` and then

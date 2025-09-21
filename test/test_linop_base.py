@@ -82,8 +82,9 @@ class MatBBLinOp(ByBlockLinOp):
         super().__init__(mat.shape, by_row, batch, blocksize)
         self.mat = mat
 
-    def get_block(self, idxs, input_dtype, input_device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """ """
+        idxs = self.get_vector_idxs(block_idx)
         if self.by_row:
             result = self.mat[idxs, :].to(input_device)
         else:
@@ -262,7 +263,7 @@ def test_byblock_correctness_extra(rng_seeds, torch_devices, dtypes_tols):
                         for idx in range(h if by_row else w):
                             b, v = lop.get_idx_coords(idx)
                             b_idxs = lop.get_vector_idxs(b)
-                            block = lop.get_block(b_idxs, dtype, device)
+                            block = lop.get_block(b, dtype, device)
                             if by_row:
                                 assert (mat[idx] == block[v]).all()
                             else:
