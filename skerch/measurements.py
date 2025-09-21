@@ -190,22 +190,16 @@ class RademacherNoiseLinOp(ByBlockLinOp):
             self.__class__.REGISTER["default"].append((seed, seed_end))
             self.check_register()
 
-    def get_block(self, idxs, input_dtype, input_device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
-        if isinstance(idxs, int):
-            idxs = range(idxs, idxs + 1)
+        idxs = self.get_vector_idxs(block_idx)
         h, w = self.shape
-        blocksize = len(idxs)
-        if (
-            idxs.start < 0
-            or idxs.stop < 0
-            or idxs.stop > (h if self.by_row else w)
-        ):
-            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
-        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        bsize = len(idxs)
+        #
+        out_shape = (bsize, w) if self.by_row else (h, bsize)
         result = (  # device always CPU to ensure determinism across devices
             rademacher_noise(
                 out_shape, seed=self.seed + idxs.start, device="cpu"
@@ -249,22 +243,34 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         self.mean = mean
         self.std = std
 
-    def get_block(self, idxs, input_dtype, input_device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
-        if isinstance(idxs, int):
-            idxs = range(idxs, idxs + 1)
+        idxs = self.get_vector_idxs(block_idx)
         h, w = self.shape
-        blocksize = len(idxs)
-        if (
-            idxs.start < 0
-            or idxs.stop < 0
-            or idxs.stop > (h if self.by_row else w)
-        ):
-            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
-        out_shape = (blocksize, w) if self.by_row else (h, blocksize)
+        bsize = len(idxs)
+        #
+        out_shape = (w, bsize) if self.by_row else (h, bsize)
+        result = phase_noise(  # device always CPU to ensure determinism
+            out_shape, self.seed + idxs.start, input_dtype, device="cpu"
+        ).to(input_device)
+        #
+        if self.conj:
+            result = result.conj()
+        return result
+
+    def get_block(self, block_idx, input_dtype, input_device):
+        """Samples a vector with Rademacher i.i.d. noise.
+
+        See base class definition for details.
+        """
+        idxs = self.get_vector_idxs(block_idx)
+        h, w = self.shape
+        bsize = len(idxs)
+        #
+        out_shape = (bsize, w) if self.by_row else (h, bsize)
         result = gaussian_noise(  # device always CPU to ensure determinism
             out_shape,
             self.mean,
@@ -311,25 +317,16 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         super().__init__(shape, seed, by_row, batch, blocksize, register)
         self.conj = conj
 
-    def get_block(self, idxs, input_dtype, input_device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """Samples a vector with Rademacher i.i.d. noise.
 
         See base class definition for details.
         """
-        if isinstance(idxs, int):
-            idxs = range(idxs, idxs + 1)
-        if input_dtype not in COMPLEX_DTYPES:
-            raise ValueError(f"Input dtype must be complex! was {input_dtype}")
-        #
+        idxs = self.get_vector_idxs(block_idx)
         h, w = self.shape
-        blocksize = len(idxs)
-        if (
-            idxs.start < 0
-            or idxs.stop < 0
-            or idxs.stop > (h if self.by_row else w)
-        ):
-            raise ValueError(f"Invalid rng/idx {idxs} for shape {self.shape}!")
-        out_shape = (w, blocksize) if self.by_row else (h, blocksize)
+        bsize = len(idxs)
+        #
+        out_shape = (w, bsize) if self.by_row else (h, bsize)
         result = phase_noise(  # device always CPU to ensure determinism
             out_shape, self.seed + idxs.start, input_dtype, device="cpu"
         ).to(input_device)
