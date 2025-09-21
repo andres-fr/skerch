@@ -54,79 +54,37 @@ from .utils import (
 # ##############################################################################
 # # CONVENIENCE WRAPPERS
 # ##############################################################################
-def get_measblock(idxs, meas_lop, dtype, device):
-    """ """
-    if isinstance(idxs, int):
-        idxs = range(idxs, idxs + 1)
-    #
-    if isinstance(meas_lop, torch.Tensor):
-        block = meas_lop[:, idxs]
-    else:
-        block = meas_lop.get_block(idxs, dtype, device)
-    #
-    return block
-
-
-# def get_measvec(idx, meas_lop, device=None, dtype=None):
-#     """ """
-#     if isinstance(meas_lop, torch.Tensor):
-#         measvec = meas_lop[:, idx]
-#     elif isinstance(meas_lop, SsrftNoiseLinOp):
-#         if device is None or dtype is None:
-#             raise ValueError("SsrftNoiseLinop requires device and dtype!")
-#         measvec = meas_lop.get_vector(idx, device, dtype, by_row=False)
+# def mop(noise_type, hw, seed, dtype, register=False):
+#     """Returns measurement linop with given specs."""
+#     if noise_type == "rademacher":
+#         mop = RademacherNoiseLinOp(
+#             hw, seed, dtype, by_row=False, register=register
+#         )
+#     elif noise_type == "gaussian":
+#         mop = GaussianNoiseLinOp(
+#             hw, seed, dtype, by_row=False, register=register
+#         )
+#     elif noise_type == "ssrft":
+#         mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+#     elif noise_type == "phase":
+#         if dtype not in COMPLEX_DTYPES:
+#             raise ValueError(
+#                 "Phase noise expects complex dtype! Use Rademacher instead"
+#             )
+#         mop = PhaseNoiseLinOp(
+#             hw, seed, dtype, by_row=False, register=register, conj=False
+#         )
 #     else:
-#         measvec = meas_lop.get_vector(idx, device)
-#     #
-#     return measvec
-
-
-# def lop_measurement(idx, adjoint, lop, meas_lop, device=None, dtype=None):
-#     """ """
-#     measvec = get_measvec(idx, meas_lop, device, dtype)
-#     result = (measvec.conj() @ lop) if adjoint else (lop @ measvec)
-#     return idx, result
-
-
-# def perform_measurements(
-#     meas_fn,
-#     meas_idxs,
-#     adjoint=False,
-#     parallel_mode=None,
-#     compact=False,
-#     max_mp_workers=None,
-# ):
-#     """
-#     :param meas_fn: Function callable with ``meas_fn(idx)`` that returns
-#       the pair ``idx, v_idx``, where ``v_idx`` is a vector corresponding
-#       to the desired measurement at given index.
-#     """
-#     result = {}
-#     meas_fn = partial(meas_fn, adjoint=adjoint)
-#     #
-#     if parallel_mode is None:
+#         # unknown recovery type
+#         supported = "rademacher, gaussian, ssrft, phase"
 #         warnings.warn(
-#             "CPU measurements could be parallelized with parallel_mode=mp",
+#             f"Unknown recovery type! {recovery_type} "
+#             "Supported: {supported}",
 #             RuntimeWarning,
 #         )
-#         for idx in meas_idxs:
-#             result[idx] = meas_fn(idx)[1]
+#         mop = None
 #     #
-#     elif parallel_mode == "mp":
-#         # keep an eye on this, could hang
-#         with ProcessPoolExecutor(max_workers=max_mp_workers) as pool:
-#             result = dict(pool.map(meas_fn, meas_idxs))
-#     #
-#     else:
-#         raise ValueError(f"Unknown parallel_mode! {parallel_mode}")
-#     #
-#     if compact:
-#         sorted_idxs = sorted(result)
-#         result = torch.stack(
-#             [result[idx] for idx in sorted_idxs], dim=0 if adjoint else 1
-#         )
-#         result = (sorted_idxs, result)
-#     return result
+#     return mop
 
 
 # ##############################################################################
