@@ -52,42 +52,6 @@ from .utils import (
 
 
 # ##############################################################################
-# # CONVENIENCE WRAPPERS
-# ##############################################################################
-# def mop(noise_type, hw, seed, dtype, register=False):
-#     """Returns measurement linop with given specs."""
-#     if noise_type == "rademacher":
-#         mop = RademacherNoiseLinOp(
-#             hw, seed, dtype, by_row=False, register=register
-#         )
-#     elif noise_type == "gaussian":
-#         mop = GaussianNoiseLinOp(
-#             hw, seed, dtype, by_row=False, register=register
-#         )
-#     elif noise_type == "ssrft":
-#         mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
-#     elif noise_type == "phase":
-#         if dtype not in COMPLEX_DTYPES:
-#             raise ValueError(
-#                 "Phase noise expects complex dtype! Use Rademacher instead"
-#             )
-#         mop = PhaseNoiseLinOp(
-#             hw, seed, dtype, by_row=False, register=register, conj=False
-#         )
-#     else:
-#         # unknown recovery type
-#         supported = "rademacher, gaussian, ssrft, phase"
-#         warnings.warn(
-#             f"Unknown recovery type! {recovery_type} "
-#             "Supported: {supported}",
-#             RuntimeWarning,
-#         )
-#         mop = None
-#     #
-#     return mop
-
-
-# ##############################################################################
 # # IID NOISE LINOPS
 # ##############################################################################
 class RademacherNoiseLinOp(ByBlockLinOp):

@@ -240,6 +240,24 @@ def relerr(ori, rec):
 
 
 # ##############################################################################
+# # DISPATCHER
+# ##############################################################################
+def test_algo_dispatcher(
+    # rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
+):
+    """xxx
+
+
+    * test that each method does what we want
+
+    * test that extending works
+
+
+    """
+    breakpoint()
+
+
+# ##############################################################################
 # # SSVD
 # ##############################################################################
 def test_ssvd_correctness(

@@ -59,7 +59,6 @@ from functools import partial
 import torch
 from .recovery import singlepass, nystrom, oversampled
 from .recovery import singlepass_h, nystrom_h, oversampled_h
-from .measurements import get_measvec, lop_measurement, perform_measurements
 from .measurements import (
     RademacherNoiseLinOp,
     GaussianNoiseLinOp,
@@ -79,6 +78,31 @@ from .utils import (
 # ##############################################################################
 # # DISPATCHER
 # ##############################################################################
+
+
+def get_measblocks(noise_type, shape, seed, dtype, device, register=False):
+    """ """
+    # first instantiate measurement linop
+    if noise_type == "rademacher":
+        mop = RademacherNoiseLinOp(hw, seed, by_row=False, register=register)
+    elif noise_type == "gaussian":
+        mop = GaussianNoiseLinOp(hw, seed, by_row=False, register=register)
+    elif noise_type == "ssrft":
+        mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
+    elif noise_type == "phase":
+        mop = PhaseNoiseLinOp(
+            hw, seed, by_row=False, register=register, conj=False
+        )
+    else:
+        supported = "rademacher, gaussian, ssrft, phase"
+        raise ValueError(
+            f"Unknown recovery type! {recovery_type}.Supported: {supported}",
+        )
+    # then create iterator to run over linop
+    breakpoint()
+    return mop
+
+
 class SketchedAlgorithmDispatcher:
     """
 
