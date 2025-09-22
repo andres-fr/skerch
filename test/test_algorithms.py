@@ -37,6 +37,13 @@ def dtypes_tols():
 
 
 @pytest.fixture
+def dispatcher_noise_types():
+    """ """
+    result = ["rademacher", "gaussian", "phase", "ssrft", "bloated_1.0"]
+    return result
+
+
+@pytest.fixture
 def ssvd_recovery_shapes(request):
     """Tuples in the form ``((height, width), rank, outermeas, innermeas)."""
     result = [
@@ -190,15 +197,18 @@ class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
         self,
         shape,
         seed,
-        dtype,
         by_row=False,
+        batch=None,
+        blocksize=1,
         register=True,
         mean=0.0,
         std=1.0,
         shift=1.0,
     ):
         """Initializer. See class docstring."""
-        super().__init__(shape, seed, dtype, by_row, register, mean, std)
+        super().__init__(
+            shape, seed, by_row, batch, blocksize, register, mean, std
+        )
         self.shift = shift
 
     def get_vector(self, idx, device):
@@ -219,16 +229,22 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
     """Used here to test the ability to use custom dispatchers."""
 
     @staticmethod
-    def mop(noise_type, hw, seed, dtype, register=False):
+    def mop(noise_type, hw, seed, dtype, blocksize=1, register=False):
         """ """
         if "bloated" in noise_type:
             shift = float(noise_type.split("_")[-1])
             mop = BloatedGaussianNoiseLinOp(
-                hw, seed, dtype, by_row=False, register=register, shift=shift
+                hw,
+                seed,
+                by_row=False,
+                batch=None,
+                blocksize=blocksize,
+                register=register,
+                shift=shift,
             )
         else:
             mop = SketchedAlgorithmDispatcher.mop(
-                noise_type, hw, seed, dtype, register
+                noise_type, hw, seed, dtype, blocksize, register
             )
         return mop
 
@@ -242,29 +258,34 @@ def relerr(ori, rec):
 # ##############################################################################
 # # DISPATCHER
 # ##############################################################################
-def test_algo_dispatcher(
-    # rng_seeds, torch_devices, dtypes_tols, iid_noise_linop_types
-):
-    """xxx
-
-
-    * test that each method does what we want
-
-    * test that extending works
-
-    TODO:
-
-    figure out a nice, modular and extensible way of funneling efficient
-    measurements
-
-    WHAT SHOULD USERS DO IF THEY WANT A NEW TYPE OF NOISE OR IF THEY HAVE
-    A MATRIX? DOES IT NEED TO BE BYBLOCK?
-    * NO: if noise_type is not recognized, it should be treated as a matrix??
-    FIGURE THIS OUT
-
-
-    """
-    breakpoint()
+def test_algo_dispatcher(dispatcher_noise_types):
+    """ """
+    # unknown recovery raises error
+    with pytest.raises(ValueError):
+        SketchedAlgorithmDispatcher.recovery("MadeUpRecovery")
+    # unknown measurement linop raises error
+    with pytest.raises(ValueError):
+        SketchedAlgorithmDispatcher.mop(
+            "MadeUpMop", (3, 3), 0, torch.float32, 1, False
+        )
+    # unknown measurement linop triggers warning in unitnorm checker
+    with pytest.warns(RuntimeWarning):
+        SketchedAlgorithmDispatcher.unitnorm_lop_entries("MadeUpMop")
+    # non-uniform linop triggers warning in unitnorm checker
+    with pytest.warns(RuntimeWarning):
+        SketchedAlgorithmDispatcher.unitnorm_lop_entries("gaussian")
+    # returned mop supports @ and get_blocks
+    dims, dtype, device = 5, torch.complex64, "cpu"
+    for mop_type in dispatcher_noise_types:
+        mop = MyDispatcher.mop(mop_type, (dims, dims), 0, dtype, dims, False)
+        I = torch.eye(dims, dtype=dtype, device=device)
+        mat1 = mop @ I
+        mat2 = I @ mop
+        mat3 = list(mop.get_blocks(dtype, device))[0][0]
+        assert (mat1 == mat2).all(), "Measurement linop: inconsistent @?"
+        assert (
+            mat1 == mat2
+        ).all(), "Measurement linop: inconsistent get_blocks?"
 
 
 # ##############################################################################
