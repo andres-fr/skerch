@@ -13,7 +13,7 @@ import numpy as np
 
 from skerch.utils import torch_dtype_as_str, gaussian_noise
 from skerch.hdf5 import DistributedHDF5
-from . import rng_seeds, torch_devices, max_mp_workers
+from . import rng_seeds, torch_devices
 
 
 # ##############################################################################

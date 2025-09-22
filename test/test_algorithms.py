@@ -17,7 +17,7 @@ from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
 from skerch.algorithms import ssvd, seigh, diagpp, xdiag
 from skerch.measurements import GaussianNoiseLinOp
-from . import rng_seeds, torch_devices, max_mp_workers
+from . import rng_seeds, torch_devices
 from . import svd_test_helper, eigh_test_helper
 
 
@@ -252,6 +252,16 @@ def test_algo_dispatcher(
 
     * test that extending works
 
+    TODO:
+
+    figure out a nice, modular and extensible way of funneling efficient
+    measurements
+
+    WHAT SHOULD USERS DO IF THEY WANT A NEW TYPE OF NOISE OR IF THEY HAVE
+    A MATRIX? DOES IT NEED TO BE BYBLOCK?
+    * NO: if noise_type is not recognized, it should be treated as a matrix??
+    FIGURE THIS OUT
+
 
     """
     breakpoint()
@@ -266,7 +276,6 @@ def test_ssvd_correctness(
     dtypes_tols,
     ssvd_recovery_shapes,
     lowrank_noise_types,
-    max_mp_workers,
 ):
     """Correctness test case for SSVD:
 
@@ -312,7 +321,7 @@ def test_ssvd_correctness(
                                 "{(seed, device, dtype, (hw, rank, outermeas, "
                                 "innermeas), noise_type, recovery_type)})"
                             )
-                            # run SSVD
+                            # run SSVD with max blocksize
                             U, S, Vh = ssvd(
                                 lop,
                                 device,
@@ -321,7 +330,7 @@ def test_ssvd_correctness(
                                 seed + 1,
                                 noise_type,
                                 recovery_type,
-                                max_mp_workers=max_mp_workers,
+                                meas_blocksize=max(lop.shape),
                             )
                             # test that output is correct and SVD-like
                             try:

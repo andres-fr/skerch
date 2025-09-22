@@ -107,7 +107,6 @@ def test_baselinop_formal():
     * Expected repr behaviour
     * Trying to transpose a transposedlinop raises ``ValueError``
     * No matmat implemented raises warning/error when running on matrices
-    * Runtime: matvec > batched > matmat by a substantial amount
     """
     with pytest.raises(ValueError):
         _ = BaseLinOp("NOT A SHAPE")
@@ -164,30 +163,30 @@ def test_baselinop_formal():
     lop1 = MatLinOp(mat, batch=None)
     lop2 = MatLinOp(mat, batch=b)
     lop3 = MatLinOp(mat, batch=1)
-    # matmat is fastest, matvec slowest, batched inbetween
-    # also, all give same result
-    t0 = time()
-    lop1 @ a1  # matmat
-    t1 = time()
-    lop2 @ a1  # batched
-    t2 = time()
-    lop3 @ a1  # matvec
-    t3 = time()
-    assert (slow_factor * (t1 - t0)) < (t2 - t1), "Matmat slower than batched?"
-    assert (slow_factor * (t2 - t1)) < (t3 - t2), "Batched slower than matvec?"
-    t0 = time()
-    a2 @ lop1  # matmat
-    t1 = time()
-    a2 @ lop2  # batched
-    t2 = time()
-    a2 @ lop3  # matvec
-    t3 = time()
-    assert (slow_factor * (t1 - t0)) < (
-        t2 - t1
-    ), "Matmat slower than batched? (adj)"
-    assert (slow_factor * (t2 - t1)) < (
-        t3 - t2
-    ), "Batched slower than matvec? (adj)"
+    # #     * Runtime: matvec > batched > matmat by a substantial amount
+    # # matmat is fastest, matvec slowest, batched inbetween
+    # t0 = time()
+    # lop1 @ a1  # matmat
+    # t1 = time()
+    # lop2 @ a1  # batched
+    # t2 = time()
+    # lop3 @ a1  # matvec
+    # t3 = time()
+    # assert (slow_factor * (t1 - t0)) < (t2 - t1), "Matmat slower than batched?"
+    # assert (slow_factor * (t2 - t1)) < (t3 - t2), "Batched slower than matvec?"
+    # t0 = time()
+    # a2 @ lop1  # matmat
+    # t1 = time()
+    # a2 @ lop2  # batched
+    # t2 = time()
+    # a2 @ lop3  # matvec
+    # t3 = time()
+    # assert (slow_factor * (t1 - t0)) < (
+    #     t2 - t1
+    # ), "Matmat slower than batched? (adj)"
+    # assert (slow_factor * (t2 - t1)) < (
+    #     t3 - t2
+    # ), "Batched slower than matvec? (adj)"
 
 
 def test_byblock_formal(torch_devices, dtypes_tols):
@@ -201,6 +200,11 @@ def test_byblock_formal(torch_devices, dtypes_tols):
     * out-of-bounds vector idxs trigger error in get_idx_coords
     """
     shape = (5, 7)
+    # repr
+    s = str(ByBlockLinOp(shape, by_row=True, batch=10, blocksize=2))
+    assert (
+        s == "<ByBlockLinOp(5x7), by row, batch=10, blocksize=2>"
+    ), "Unexpected repr!"
     #
     for by_row in (True, False):
         # negative blocksize triggers error

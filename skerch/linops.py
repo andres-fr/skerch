@@ -257,13 +257,18 @@ class ByBlockLinOp(BaseLinOp):
         """
         raise NotImplementedError
 
+    def get_blocks(self, dtype, device="cpu"):
+        """Yield all blocks in ascending order and their corresponding idxs."""
+        for b_i in range(self.num_blocks):
+            block = self.get_block(b_i, dtype, device)
+            idxs = self.get_vector_idxs(b_i)
+            yield block, idxs
+
     def to_matrix(self, dtype, device="cpu"):
         """Fetch all blocks into a matrix."""
         result = torch.empty(self.shape, dtype=dtype, device=device)
         #
-        for b_i in range(self.num_blocks):
-            idxs = self.get_vector_idxs(b_i)
-            block = self.get_block(b_i, dtype, device)
+        for block, idxs in self.get_blocks(dtype, device):
             if self.by_row:
                 result[idxs, :] = block
             else:
@@ -305,11 +310,14 @@ class ByBlockLinOp(BaseLinOp):
         return self._bb_matmul_helper(x, adjoint=True)
 
     def __repr__(self):
-        """Returns a string in the form <classname(shape)>."""
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
         clsname = self.__class__.__name__
+        byrow_s = ", by row" if self.by_row else ", by col"
         batch_s = "" if self.batch is None else f", batch={self.batch}"
         block_s = f", blocksize={self.blocksize}"
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}{block_s}>"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
         return s
 
 

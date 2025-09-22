@@ -140,6 +140,18 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         )
         return s
 
+    def __repr__(self):
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
+        clsname = self.__class__.__name__
+        byrow_s = ", by row" if self.by_row else ", by col"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        seed_s = f", seed={self.seed}"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}{seed_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
+        return s
+
 
 class GaussianNoiseLinOp(RademacherNoiseLinOp):
     """Random linear operator with i.i.d. Gaussian entries.
@@ -174,24 +186,6 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         h, w = self.shape
         bsize = len(idxs)
         #
-        out_shape = (w, bsize) if self.by_row else (h, bsize)
-        result = phase_noise(  # device always CPU to ensure determinism
-            out_shape, self.seed + idxs.start, input_dtype, device="cpu"
-        ).to(input_device)
-        #
-        if self.conj:
-            result = result.conj()
-        return result
-
-    def get_block(self, block_idx, input_dtype, input_device):
-        """Samples a vector with Rademacher i.i.d. noise.
-
-        See base class definition for details.
-        """
-        idxs = self.get_vector_idxs(block_idx)
-        h, w = self.shape
-        bsize = len(idxs)
-        #
         out_shape = (bsize, w) if self.by_row else (h, bsize)
         result = gaussian_noise(  # device always CPU to ensure determinism
             out_shape,
@@ -204,13 +198,16 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         return result
 
     def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
         clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"mean={self.mean}, std={self.std}, "
-            + f"seed={self.seed}, by_row={self.by_row})>"
-        )
+        byrow_s = ", by row" if self.by_row else ", by col"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        seed_s = f", seed={self.seed}"
+        stats_s = f", mean={self.mean}, std={self.std}"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}{seed_s}{stats_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
         return s
 
 
@@ -258,13 +255,16 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         return result
 
     def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
         clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"conj={self.conj}, "
-            + f"seed={self.seed}, by_row={self.by_row})>"
-        )
+        byrow_s = ", by row" if self.by_row else ", by col"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        seed_s = f", seed={self.seed}"
+        conj_s = f", conj={self.conj}"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}{seed_s}{conj_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
         return s
 
 
@@ -534,4 +534,17 @@ class SsrftNoiseLinOp(ByBlockLinOp):
             f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
             + f"seed={self.seed})>"
         )
+        return s
+
+    def __repr__(self):
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
+        clsname = self.__class__.__name__
+        byrow_s = ", by row" if self.by_row else ", by col"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        seed_s = f", seed={self.seed}"
+        norm_s = f", norm={self.norm}"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}{seed_s}{norm_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
         return s

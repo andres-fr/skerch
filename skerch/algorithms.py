@@ -78,31 +78,6 @@ from .utils import (
 # ##############################################################################
 # # DISPATCHER
 # ##############################################################################
-
-
-def get_measblocks(noise_type, shape, seed, dtype, device, register=False):
-    """ """
-    # first instantiate measurement linop
-    if noise_type == "rademacher":
-        mop = RademacherNoiseLinOp(hw, seed, by_row=False, register=register)
-    elif noise_type == "gaussian":
-        mop = GaussianNoiseLinOp(hw, seed, by_row=False, register=register)
-    elif noise_type == "ssrft":
-        mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
-    elif noise_type == "phase":
-        mop = PhaseNoiseLinOp(
-            hw, seed, by_row=False, register=register, conj=False
-        )
-    else:
-        supported = "rademacher, gaussian, ssrft, phase"
-        raise ValueError(
-            f"Unknown recovery type! {recovery_type}.Supported: {supported}",
-        )
-    # then create iterator to run over linop
-    breakpoint()
-    return mop
-
-
 class SketchedAlgorithmDispatcher:
     """
 
@@ -135,6 +110,7 @@ class SketchedAlgorithmDispatcher:
     @staticmethod
     def recovery(recovery_type, hermitian=False):
         """Returns recovery funtion with given specs."""
+        supported = "singlepass, nystrom, oversampled_123"
         inner_dims = None
         if recovery_type == "singlepass":
             recovery_fn = singlepass_h if hermitian else singlepass
@@ -144,52 +120,59 @@ class SketchedAlgorithmDispatcher:
             recovery_fn = oversampled_h if hermitian else oversampled
             inner_dims = int(recovery_type.split("_")[-1])
         else:
-            supported = "singlepass, nystrom, oversampled_12345"
-            warnings.warn(
-                f"Unknown recovery type! {recovery_type}! "
-                "Supported: {supported}",
-                RuntimeWarning,
+            raise ValueError(
+                f"Unknown recovery {recovery_type}! Supported: {supported}"
             )
-            recovery_fn = None
         #
         return recovery_fn, inner_dims
 
     @staticmethod
-    def mop(noise_type, hw, seed, dtype, register=False):
-        """Returns measurement linop with given specs."""
-        if noise_type == "rademacher":
+    def mop(mop_type, hw, seed, dtype, blocksize=1, register=False):
+        """Returns measurement linop with given specs.
+
+        The returned linop must support the following operations:
+        * Left and right matmul to matrices via ``@``
+        * A ``get_blocks(dtype, device)`` method that returns pairs in the form
+          ``(block, idxs)``, where ``block`` is a subset of vectors, assumed to
+          be columns of the returned linop, and corresponding to the given
+          ``idxs``.
+        """
+        supported = "rademacher, gaussian, ssrft, phase"
+        if mop_type == "rademacher":
             mop = RademacherNoiseLinOp(
-                hw, seed, dtype, by_row=False, register=register
+                hw, seed, by_row=False, blocksize=blocksize, register=register
             )
-        elif noise_type == "gaussian":
+        elif mop_type == "gaussian":
             mop = GaussianNoiseLinOp(
-                hw, seed, dtype, by_row=False, register=register
+                hw, seed, by_row=False, blocksize=blocksize, register=register
             )
-        elif noise_type == "ssrft":
-            mop = SsrftNoiseLinOp(hw, seed, norm="ortho")
-        elif noise_type == "phase":
+        elif mop_type == "ssrft":
+            mop = SsrftNoiseLinOp(
+                hw, seed, blocksize=blocksize, register=register
+            )
+        elif mop_type == "phase":
             if dtype not in COMPLEX_DTYPES:
                 raise ValueError(
                     "Phase noise expects complex dtype! Use Rademacher instead"
                 )
             mop = PhaseNoiseLinOp(
-                hw, seed, dtype, by_row=False, register=register, conj=False
+                hw,
+                seed,
+                by_row=False,
+                blocksize=blocksize,
+                register=register,
+                conj=False,
             )
         else:
-            # unknown recovery type
-            supported = "rademacher, gaussian, ssrft, phase"
-            warnings.warn(
-                f"Unknown recovery type! {recovery_type} "
-                "Supported: {supported}",
-                RuntimeWarning,
+            raise ValueError(
+                f"Unknown type! {mop_type} Supported: {supported}"
             )
-            mop = None
         #
         return mop
 
     @staticmethod
     def unitnorm_lop_entries(lop_type):
-        """Returns True if all ``lop`` entries must have unit norm."""
+        """True if all ``lop_type`` entries are supposed to have unit norm."""
         if lop_type in {"rademacher", "phase"}:
             result = True
         elif lop_type in {"gaussian", "ssrft"}:
@@ -221,15 +204,14 @@ def ssvd(
     seed=0b1110101001010101011,
     noise_type="ssrft",
     recovery_type="singlepass",
-    max_mp_workers=None,
     lstsq_rcond=1e-6,
+    meas_blocksize=1,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
-    """ """
+    """In-core Sketched SVD."""
     register = False  # set to True for seed debugging
     h, w = lop.shape
     # figure out parallel mode and recovery settings
-    parallel_mode = None if max_mp_workers is None else "mp"
     recovery_fn, inner_dims = dispatcher.recovery(recovery_type, False)
     if (outer_dims > max(h, w)) or (
         inner_dims is not None and (inner_dims > max(h, w))
@@ -239,81 +221,74 @@ def ssvd(
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
-    # instantiate outer measurement linops
+    # instantiate measurement linops
     ro_seed = seed
     lo_seed = ro_seed + outer_dims + 1
     ro_mop = dispatcher.mop(
-        noise_type, (w, outer_dims), ro_seed, lop_dtype, register
+        noise_type,
+        (w, outer_dims),
+        ro_seed,
+        lop_dtype,
+        meas_blocksize,
+        register,
     )
     lo_mop = dispatcher.mop(
-        noise_type, (h, outer_dims), lo_seed, lop_dtype, register
+        noise_type,
+        (h, outer_dims),
+        lo_seed,
+        lop_dtype,
+        meas_blocksize,
+        register,
     )
-    # instantiate inner measurement linops
     if inner_dims is not None:
         ri_seed = lo_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
         ri_mop = dispatcher.mop(
-            noise_type, (w, inner_dims), ri_seed, lop_dtype, register
+            noise_type,
+            (w, inner_dims),
+            ri_seed,
+            lop_dtype,
+            meas_blocksize,
+            register,
         )
-        li_mop = dispatcher.mop(
-            noise_type, (h, inner_dims), li_seed, lop_dtype, register
+        li_mop = TransposedLinOp(
+            dispatcher.mop(
+                noise_type,
+                (h, inner_dims),
+                li_seed,
+                lop_dtype,
+                meas_blocksize,
+                register,
+            )
         )
     # perform outer measurements
-    _, ro_sketch = perform_measurements(
-        partial(
-            lop_measurement,
-            lop=lop,
-            meas_lop=ro_mop,
-            device=lop_device,
-            dtype=lop_dtype,
-        ),
-        range(outer_dims),
-        adjoint=False,
-        parallel_mode=parallel_mode,
-        compact=True,
-        max_mp_workers=max_mp_workers,
+    ro_sketch = torch.empty(
+        (lop.shape[0], outer_dims), dtype=lop_dtype, device=lop_device
     )
-    _, lo_sketch = perform_measurements(
-        partial(
-            lop_measurement,
-            lop=lop,
-            meas_lop=lo_mop,
-            device=lop_device,
-            dtype=lop_dtype,
-        ),
-        range(outer_dims),
-        adjoint=True,
-        parallel_mode=parallel_mode,
-        compact=True,
-        max_mp_workers=max_mp_workers,
+    lo_sketch = torch.empty(
+        (outer_dims, lop.shape[1]), dtype=lop_dtype, device=lop_device
     )
-    # solve sketches
+    for block, idxs in ro_mop.get_blocks(lop_dtype, lop_device):
+        ro_sketch[:, idxs] = lop @ block  # assuming block is by_col!
+    for block, idxs in lo_mop.get_blocks(lop_dtype, lop_device):
+        lo_sketch[idxs, :] = block.conj().T @ lop  # assuming block is by_col!
+    # if not oversampled, solve sketch
     if inner_dims is None:
         U, S, Vh = recovery_fn(
             ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
         )
-    # if oversampled, perform inner measurements before solving
+    # if oversampled, perform inner measurements and then solve
     else:
-        lop_mop = CompositeLinOp([("lop", lop), ("ri", ri_mop)])
-        _, inner_sketch = perform_measurements(
-            partial(
-                lop_measurement,
-                lop=lop_mop,
-                meas_lop=li_mop,
-                device=lop_device,
-                dtype=lop_dtype,
-            ),
-            range(inner_dims),
-            adjoint=True,
-            parallel_mode=parallel_mode,
-            compact=True,
-            max_mp_workers=max_mp_workers,
+        inner_sketch = torch.empty(
+            (inner_dims, inner_dims), dtype=lop_dtype, device=lop_device
         )
+        for block, idxs in ri_mop.get_blocks(lop_dtype, lop_device):
+            inner_sketch[:, idxs] = li_mop @ (lop @ block)  # assuming by_col!
         U, S, Vh = recovery_fn(
             ro_sketch,
             lo_sketch,
             inner_sketch,
-            TransposedLinOp(li_mop),
+            li_mop,
             ri_mop,
             rcond=lstsq_rcond,
             as_svd=True,

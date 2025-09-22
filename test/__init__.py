@@ -38,15 +38,6 @@ def rng_seeds(request):
     return result
 
 
-@pytest.fixture
-def max_mp_workers(request):
-    """Number of workers used when testing multiprocessing features"""
-    #
-    with_mp = request.config.getoption("mp")
-    result = 2 if with_mp else None
-    return result
-
-
 # ##############################################################################
 # # HELPERS
 # ##############################################################################

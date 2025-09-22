@@ -36,7 +36,6 @@ from . import (
     rng_seeds,
     torch_devices,
     autocorrelation_test_helper,
-    max_mp_workers,
 )
 
 
@@ -153,13 +152,16 @@ def test_iid_measurements_formal(
     # correct string conversion
     hw = (3, 3)  # only matters for strings
     lop = RademacherNoiseLinOp(hw, 0, by_row=False, register=False)
-    s = "<RademacherNoiseLinOp(3x3, seed=0, by_row=False)>"
+    s = "<RademacherNoiseLinOp(3x3), by col, blocksize=1, seed=0>"
     assert str(lop) == s, "Unexpected repr for Rademacher noise linop!"
     lop = GaussianNoiseLinOp(hw, 0, by_row=False, register=False)
-    s = "<GaussianNoiseLinOp(3x3, mean=0.0, std=1.0, seed=0, by_row=False)>"
+    s = (
+        "<GaussianNoiseLinOp(3x3), by col, blocksize=1, seed=0, "
+        "mean=0.0, std=1.0>"
+    )
     assert str(lop) == s, "Unexpected repr for Gaussian noise linop!"
     lop = PhaseNoiseLinOp(hw, 0, by_row=False, register=False)
-    s = "<PhaseNoiseLinOp(3x3, conj=False, seed=0, by_row=False)>"
+    s = "<PhaseNoiseLinOp(3x3), by col, blocksize=1, seed=0, conj=False>"
     assert str(lop) == s, "Unexpected repr for Phase noise linop!"
     #
     for lop_type, complex_only in iid_noise_linop_types:
@@ -382,9 +384,8 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     hw = (10, 10)
     # correct string conversion (linop)
     lop = SsrftNoiseLinOp(hw, 0, norm="ortho", register=False)
-    assert (
-        str(lop) == "<SsrftNoiseLinOp(10x10, seed=0)>"
-    ), "Unexpected repr for SSRFT noise linop!"
+    s = "<SsrftNoiseLinOp(10x10), by col, blocksize=1, seed=0, norm=ortho>"
+    assert str(lop) == s, "Unexpected repr for SSRFT noise linop!"
     # non-orthogonal norm raises error (transform)
     with pytest.raises(NotImplementedError):
         SSRFT.ssrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
