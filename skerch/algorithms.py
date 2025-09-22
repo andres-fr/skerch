@@ -184,12 +184,6 @@ class SketchedAlgorithmDispatcher:
             )
             result = False
         #
-        if not result:
-            warnings.warn(
-                "Non-unitnorm noise can be unstable for diagonal estimation! "
-                + "Check output and consider using Rademacher or PhaseNoise.",
-                RuntimeWarning,
-            )
         return result
 
 
@@ -400,8 +394,8 @@ def diagpp(
     defl_dims=0,
     extra_gh_meas=0,
     seed=0b1110101001010101011,
-    noise_type="ssrft",
-    max_mp_workers=None,
+    noise_type="rademacher",
+    meas_blocksize=1,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
     """Diagonal sketched approximation via Hutch++."""
@@ -410,8 +404,7 @@ def diagpp(
     if h != w:
         raise ValueError("XDiag expects square operators!")
     dims = h
-    # figure out parallel mode and recovery settings
-    parallel_mode = None if max_mp_workers is None else "mp"
+    # figure out recovery settings
     if defl_dims > dims:
         raise ValueError("defl_dims larger than operator rank!")
     #
@@ -433,60 +426,63 @@ def diagpp(
     else:
         # instantiate deflation linop and perform measurements
         mop = dispatcher.mop(
-            noise_type, (dims, defl_dims), seed, lop_dtype, register
+            noise_type,
+            (dims, defl_dims),
+            seed,
+            lop_dtype,
+            meas_blocksize,
+            register,
         )
-        _, sketch = perform_measurements(
-            partial(
-                lop_measurement,
-                lop=lop,
-                meas_lop=mop,
-                device=lop_device,
-                dtype=lop_dtype,
-            ),
-            range(defl_dims),
-            adjoint=False,
-            parallel_mode=parallel_mode,
-            compact=True,
-            max_mp_workers=max_mp_workers,
+        mopmat = torch.empty(
+            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
         )
+        sketch = torch.empty(
+            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
+        )
+        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+            mopmat[:, idxs] = block
+            sketch[:, idxs] = lop @ block  # assuming block is by_col!
         # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
         # the first component. Here, X.H = Q.H @ A
         Q, R = qr(sketch, in_place_q=False, return_R=True)
-        _, Xh = perform_measurements(
-            partial(
-                lop_measurement,
-                lop=lop,
-                meas_lop=Q,
-                device=lop_device,
-                dtype=lop_dtype,
-            ),
-            range(defl_dims),
-            adjoint=True,
-            parallel_mode=parallel_mode,
-            compact=True,
-            max_mp_workers=max_mp_workers,
-        )
-        # top diagonal estimate is then Q @ X.H
+        Xh = torch.zeros_like(Q.T)
+        for beg in range(0, defl_dims, meas_blocksize):
+            end = min(defl_dims, beg + meas_blocksize)
+            Xh[beg:end] = Q.conj().T[beg:end] @ lop
+        # top diagonal estimate is then diag(Q @ X.H)
         d_top = (Q * Xh.T).sum(1)  # here only Xh.T!
     # Girard-Hutchinson:
-    # if we deflated, also recycle measurements for estimator
     d_defl = torch.zeros_like(d_top)
-    for i in range(defl_dims):
-        v_i = get_measvec(i, mop, lop_device, lop_dtype)
-        w_i = sketch[:, i] - (Q @ (Xh @ v_i))
-        if is_noise_unitnorm:
-            d_defl += v_i * w_i
-        else:
-            d_defl += (v_i * w_i) / (v_i * v_i)
+    # for i in range(defl_dims):
+    #     v_i = mopmat[:, i]
+    #     w_i = sketch[:, i] - (Q @ (Xh @ v_i))
+    #     if is_noise_unitnorm:
+    #         d_defl += v_i * w_i
+    #     else:
+    #         d_defl += (v_i * w_i) / (v_i * v_i)
+    # d_defl /= defl_dims
+
     # perform any extra Girard-Hutchinson measurements,
-    # assumed to not fit in memory so done sequentially
     if extra_gh_meas > 0:
         seed_gh = seed + defl_dims + 1
         mop_gh = dispatcher.mop(
-            noise_type, (dims, extra_gh_meas), seed_gh, lop_dtype, register
+            noise_type,
+            (dims, extra_gh_meas),
+            seed_gh,
+            lop_dtype,
+            meas_blocksize,
+            register,
         )
+        mopmat_gh = mop_gh.to_matrix(lop_dtype, lop_device)
+
+        import matplotlib.pyplot as plt
+
+        # plt.clf(); plt.imshow(mopmat_gh.H @ mopmat_gh); plt.show()
+        # breakpoint()
+        #
+        ratt = 1 / extra_gh_meas
         for i in range(extra_gh_meas):
-            v_i = get_measvec(i, mop_gh, lop_device, lop_dtype)
+            v_i = mopmat_gh[:, i]
             meas_i = lop @ v_i
             if Q is None:
                 w_i = lop @ v_i
@@ -497,10 +493,132 @@ def diagpp(
                 d_defl += v_i.conj() * w_i
             else:
                 v_i_c = v_i.conj()
-                d_defl += (v_i_c * w_i) / (v_i_c * v_i)
-    d_defl /= defl_dims + extra_gh_meas
+                d_defl += ratt * (v_i_c * w_i) / (v_i_c * v_i)
+        #
+        # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
+        #     measblock = lop @ block
+        #     if Q is None:
+        #         www = lop @ block
+        #     else:
+        #         breakpoint()
+        #         www = measblock - Q @ (measblock.conj().T @ Q).conj()
+        #         # measblock -= Q @ (Q.conj().T @ measblock)
+        #         # measblock = lop @ block
+        #         # www = measblock - Q @ (measblock.conj().T @ Q).conj()
+        #     #
+        #     if is_noise_unitnorm:
+        #         d_defl += (block.conj() * www).sum(1)
+        #     else:
+        #         block_c = block.conj()
+        #         d_defl += ((block_c * measblock) / (block_c * block)).sum(1)
+        d_defl /= extra_gh_meas
     #
     return (d_top + d_defl), (d_top, d_defl, Q, R)
+
+
+# def diagpp(
+#     lop,
+#     lop_device,
+#     lop_dtype,
+#     defl_dims=0,
+#     extra_gh_meas=0,
+#     seed=0b1110101001010101011,
+#     noise_type="ssrft",
+#     meas_blocksize=1,
+#     dispatcher=SketchedAlgorithmDispatcher,
+# ):
+#     """Diagonal sketched approximation via Hutch++."""
+#     register = False  # set to True for seed debugging
+#     h, w = lop.shape
+#     if h != w:
+#         raise ValueError("XDiag expects square operators!")
+#     dims = h
+#     # figure out parallel mode and recovery settings
+#     if defl_dims > dims:
+#         raise ValueError("defl_dims larger than operator rank!")
+#     #
+#     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+#     if not is_noise_unitnorm:
+#         warnings.warn(
+#             "Non-unitnorm noise can be unstable for diagonal estimation! "
+#             + "Check output and consider using Rademacher or PhaseNoise.",
+#             RuntimeWarning,
+#         )
+#     if (defl_dims < 0) or (extra_gh_meas < 0):
+#         raise ValueError("Negative number of measurements?")
+#     if defl_dims + extra_gh_meas <= 0:
+#         raise ValueError("Deflation dims and/or GH measurements needed!")
+#     # deflation:
+#     if defl_dims <= 0:
+#         Q, R, Xh = None, None, None
+#         d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+#     else:
+#         # instantiate deflation linop and perform measurements
+#         mop = dispatcher.mop(
+#             noise_type,
+#             (dims, defl_dims),
+#             seed,
+#             lop_dtype,
+#             meas_blocksize,
+#             register,
+#         )
+#         mopmat = mop.to_matrix(lop_dtype)
+#         sketch = lop @ mopmat
+#         # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
+#         # the first component. Here, X.H = Q.H @ A
+#         Q, R = qr(sketch, in_place_q=False, return_R=True)
+#         Xh = Q.conj().T @ lop
+#         # top diagonal estimate is then Q @ X.H
+#         d_top = (Q * Xh.T).sum(1)  # here only Xh.T!
+#     # Girard-Hutchinson:
+#     # if we deflated, also recycle measurements for estimator
+#     d_defl = torch.zeros_like(d_top)
+#     for i in range(defl_dims):
+#         v_i = mopmat[:, i]
+#         w_i = sketch[:, i] - (Q @ (Xh @ v_i))
+#         if is_noise_unitnorm:
+#             d_defl += v_i * w_i
+#         else:
+#             d_defl += (v_i * w_i) / (v_i * v_i)
+#     # perform any extra Girard-Hutchinson measurements,
+#     # assumed to not fit in memory so done sequentially
+#     if extra_gh_meas > 0:
+#         seed_gh = seed + defl_dims + 1
+#         mop_gh = dispatcher.mop(
+#             noise_type,
+#             (dims, extra_gh_meas),
+#             seed_gh,
+#             lop_dtype,
+#             meas_blocksize,
+#             register,
+#         )
+#         mopmat_gh = mop_gh.to_matrix(lop_dtype)
+#         for i in range(extra_gh_meas):
+#             v_i = get_measvec(i, mop_gh, lop_device, lop_dtype)
+#             meas_i = lop @ v_i
+#             if Q is None:
+#                 w_i = lop @ v_i
+#             else:
+#                 meas_i = lop @ v_i
+#                 w_i = meas_i - Q @ (meas_i.conj() @ Q).conj()
+#             if is_noise_unitnorm:
+#                 d_defl += v_i.conj() * w_i
+#             else:
+#                 v_i_c = v_i.conj()
+#                 d_defl += (v_i_c * w_i) / (v_i_c * v_i)
+#     d_defl /= defl_dims + extra_gh_meas
+#     #
+#     return (d_top + d_defl), (d_top, d_defl, Q, R)
+
+#     # """
+
+#     # """
+#     # import matplotlib.pyplot as plt
+
+#     # # plt.clf(); plt.plot(lop.matrix.diag()); plt.plot(d_top); plt.show()
+#     # # torch.dist(lop.matrix.diag(), d_top)
+#     # # torch.dist(lop.matrix.diag(), d_top + d_defl / defl_dims)
+#     # breakpoint()
 
 
 def xdiag(
@@ -509,8 +627,8 @@ def xdiag(
     lop_dtype,
     defl_dims,
     seed=0b1110101001010101011,
-    noise_type="ssrft",
-    max_mp_workers=None,
+    noise_type="rademacher",
+    meas_blocksize=1,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
     """Diagonal sketched approximation."""
@@ -519,50 +637,44 @@ def xdiag(
     if h != w:
         raise ValueError("XDiag expects square operators!")
     dims = h
-    # figure out parallel mode and recovery settings
-    parallel_mode = None if max_mp_workers is None else "mp"
+    # figure out recovery settings
     if defl_dims > dims:
         raise ValueError("defl_dims larger than operator rank!")
     if defl_dims <= 0:
         raise ValueError("No measurements?")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for diagonal estimation! "
+            + "Check output and consider using Rademacher or PhaseNoise.",
+            RuntimeWarning,
+        )
     # instantiate outer measurement linop and perform outer measurements
-    ro_seed = seed
-    ro_mop = dispatcher.mop(
-        noise_type, (dims, defl_dims), ro_seed, lop_dtype, register
+    mop = dispatcher.mop(
+        noise_type,
+        (dims, defl_dims),
+        seed,
+        lop_dtype,
+        meas_blocksize,
+        register,
     )
-    _, ro_sketch = perform_measurements(
-        partial(
-            lop_measurement,
-            lop=lop,
-            meas_lop=ro_mop,
-            device=lop_device,
-            dtype=lop_dtype,
-        ),
-        range(defl_dims),
-        adjoint=False,
-        parallel_mode=parallel_mode,
-        compact=True,
-        max_mp_workers=max_mp_workers,
+    mopmat = torch.empty(
+        (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
     )
+    sketch = torch.empty(
+        (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
+    )
+    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+        mopmat[:, idxs] = block
+        sketch[:, idxs] = lop @ block  # assuming block is by_col!
     # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
     # the first component. For DiagPP, X.H = Q.H @ A
-    Q, R = qr(ro_sketch, in_place_q=False, return_R=True)
-    _, Xh = perform_measurements(
-        partial(
-            lop_measurement,
-            lop=lop,
-            meas_lop=Q,
-            device=lop_device,
-            dtype=lop_dtype,
-        ),
-        range(defl_dims),
-        adjoint=True,
-        parallel_mode=parallel_mode,
-        compact=True,
-        max_mp_workers=max_mp_workers,
-    )
+    Q, R = qr(sketch, in_place_q=False, return_R=True)
+    Xh = torch.zeros_like(Q.T)
+    for beg in range(0, defl_dims, meas_blocksize):
+        end = min(defl_dims, beg + meas_blocksize)
+        Xh[beg:end] = Q.conj().T[beg:end] @ lop
     # For XDiag, X = I - (1/defl_dims)*(S @ S.H), where S is explained in
     # the Xtrace paper, section 2.1. Then, Xh becomes Z @ Q.H @ A
     S = torch.linalg.pinv(R.conj().T)
@@ -573,17 +685,42 @@ def xdiag(
     # top diagonal estimate is then Q @ X.H
     d_top = (Q * Xh.T).sum(1)
     d_defl = torch.zeros_like(d_top)
-    # it remains to estimate the deflated (and optionally Xchanged) part via
-    # Girard-Hutchinson estimator.
-    for i in range(defl_dims):
-        v_i = get_measvec(i, ro_mop, lop_device, lop_dtype)
-        w_i = ro_sketch[:, i] - (Q @ (Xh @ v_i))
+
+    """
+
+
+
+
+    """
+    import matplotlib.pyplot as plt
+
+    # plt.imshow(Xh); plt.show()
+
+    mmm = sketch - (Q @ (Xh @ mopmat))
+    ddd = (mopmat.conj() * mmm).sum(1)
+    ddd /= defl_dims
+    quack = d_top + ddd
+
+    for beg in range(0, defl_dims, meas_blocksize):
+        end = min(defl_dims, beg + meas_blocksize)
+        block = mopmat[:, beg:end]
+        s_defl = sketch[:, beg:end] - Q @ (Xh @ block)
         if is_noise_unitnorm:
-            d_defl += v_i.conj() * w_i
+            d_defl += (block.conj() * s_defl).sum(1)
         else:
-            v_i_c = v_i.conj()
-            d_defl += (v_i_c * w_i) / (v_i_c * v_i)
+            block_c = block.conj()
+            d_defl += ((block_c * s_defl) / (block_c * block)).sum(1)
+
+        # block = mopmat[:, beg:end]
+        # measblock = lop @ block
+        # www = sketch[:, beg:end] - (Q @ (Xh @ block))
+        # if is_noise_unitnorm:
+        #     d_defl += (block.conj() * www).sum(1)
+        # else:
+        #     block_c = block.conj()
+        #     d_defl += ((block_c * www) / (block_c * block)).sum(1)
     d_defl /= defl_dims
+
     #
     return (d_top + d_defl), (d_top, d_defl, Q, R)
 
