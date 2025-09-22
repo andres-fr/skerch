@@ -369,7 +369,6 @@ def test_seigh_correctness(
     dtypes_tols,
     seigh_recovery_shapes,
     lowrank_noise_types,
-    max_mp_workers,
 ):
     """Correctness test case for SEIGH:
 
@@ -421,7 +420,7 @@ def test_seigh_correctness(
                                     seed + 1,
                                     noise_type,
                                     recovery_type,
-                                    max_mp_workers=max_mp_workers,
+                                    meas_blocksize=dims,
                                     by_mag=by_mag,
                                 )
                             # test that output is correct and SVD-like
