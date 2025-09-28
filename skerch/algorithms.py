@@ -532,14 +532,13 @@ def xdiag(
     if cache_mop:
         mopmat = mop.to_matrix(lop_dtype, lop_device)
         sketch = lop @ mopmat
-        Q, R = qr(sketch, in_place_q=False, return_R=True)
     else:
         sketch = torch.empty(
             (lop.shape[0], x_dims), dtype=lop_dtype, device=lop_device
         )
         for block, idxs in mop.get_blocks(lop_dtype, lop_device):
             sketch[:, idxs] = lop @ block  # assuming block is by_col!
-        Q, R = qr(sketch, in_place_q=True, return_R=True)
+    Q, R = qr(sketch, in_place_q=False, return_R=True)  # we need sketch
     S = torch.linalg.pinv(R.T)
     S /= torch.linalg.norm(S, dim=0)
     Smat = (S @ S.T) / -x_dims
@@ -549,30 +548,27 @@ def xdiag(
     d_top = (Q * Xh.T).sum(1)  # no conj here!
     d_gh = torch.zeros_like(d_top)
     # refine diagonal with deflated (and Xchanged) Girard-Hutchinson
+    is_complex = lop_dtype in COMPLEX_DTYPES
     if cache_mop:
-        sketch -= Q @ (Xh @ mopmat)
-        if is_noise_unitnorm:
-            d_gh += (mopmat * sketch).sum(1)
-        else:
-            mopmat_c = mopmat.conj()
-            d_gh += ((mopmat_c * sketch) / (mopmat_c * mopmat)).sum(1)
+        iterator = ((b, range(0, x_dims)) for b in [mopmat])
     else:
-        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-            breakpoint()
-            # sktch = None
-            # if Q is not None:
-            #     sktch -= Q @ (Q.conj().T @ sktch)
-            # if is_noise_unitnorm:
-            #     d_gh += (block.conj() * sktch).sum(1)
-            # else:
-            #     block_c = block.conj()
-            #     d_gh += ((block_c * sktch) / (block_c * block)).sum(1)
+        iterator = mop.get_blocks(lop_dtype, lop_device)
+    for block, idxs in iterator:
+        sketch[:, idxs] -= Q @ (Xh @ block)
         #
-    d_gh /= x_dims
+        if is_noise_unitnorm and is_complex:
+            d_gh += (block.conj() * sketch).sum(1)
+        elif is_noise_unitnorm and not is_complex:
+            d_gh += (block * sketch).sum(1)
+        elif not is_noise_unitnorm and is_complex:
+            block_c = block.conj()
+            d_gh += ((sketch * block_c) / (block_c * block)).sum(1)
+        elif not is_noise_unitnorm and not is_complex:
+            d_gh += (sketch / block).sum(1)
+        else:
+            raise RuntimeError("Should never happen!")
     #
-    # import matplotlib.pyplot as plt
-    # plt.clf(); plt.plot(lop.matrix.diag()); plt.plot(d_top); plt.show()
-    # Girard-Hutchinson:
+    d_gh /= x_dims
     return (d_top + d_gh), (d_top, d_gh, Q, R)
 
 
