@@ -448,18 +448,14 @@ def diagpp(
             meas_blocksize,
             register,
         )
-        mopmat = torch.empty(
-            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
-        )
         sketch = torch.empty(
             (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
         )
         for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-            mopmat[:, idxs] = block
             sketch[:, idxs] = lop @ block  # assuming block is by_col!
         # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
         # the first component. Here, X.H = Q.H @ A
-        Q, R = qr(sketch, in_place_q=False, return_R=True)
+        Q, R = qr(sketch, in_place_q=True, return_R=True)
         Xh = torch.zeros_like(Q.T)
         for beg in range(0, defl_dims, meas_blocksize):
             end = min(defl_dims, beg + meas_blocksize)
@@ -479,38 +475,17 @@ def diagpp(
             meas_blocksize,
             register,
         )
-        mopmat_gh = mop_gh.to_matrix(lop_dtype, lop_device)
         #
-        for i in range(extra_gh_meas):
-            v_i = mopmat_gh[:, i]
-            meas_i = lop @ v_i
-            if Q is None:
-                w_i = lop @ v_i
-            else:
-                meas_i = lop @ v_i
-                w_i = meas_i - Q @ (meas_i.conj() @ Q).conj()
+        for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
+            yyy = lop @ block
+            if Q is not None:
+                yyy -= Q @ (Q.conj().T @ yyy)
             if is_noise_unitnorm:
-                d_gh += v_i.conj() * w_i
+                d_gh += (block.conj() * yyy).sum(1)
             else:
-                v_i_c = v_i.conj()
-                d_gh += (v_i_c * w_i) / (v_i_c * v_i)
+                block_c = block.conj()
+                d_gh += ((block_c * yyy) / (block_c * block)).sum(1)
         #
-        # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-        #     measblock = lop @ block
-        #     if Q is None:
-        #         www = lop @ block
-        #     else:
-        #         breakpoint()
-        #         www = measblock - Q @ (measblock.conj().T @ Q).conj()
-        #         # measblock -= Q @ (Q.conj().T @ measblock)
-        #         # measblock = lop @ block
-        #         # www = measblock - Q @ (measblock.conj().T @ Q).conj()
-        #     #
-        #     if is_noise_unitnorm:
-        #         d_gh += (block.conj() * www).sum(1)
-        #     else:
-        #         block_c = block.conj()
-        #         d_gh += ((block_c * measblock) / (block_c * block)).sum(1)
         d_gh /= extra_gh_meas
     #
     return (d_top + d_gh), (d_top, d_gh, Q, R)
