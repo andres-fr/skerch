@@ -3,7 +3,6 @@
 
 
 """
-* finish testing diag linops, make them make sense
 * add norm, frob and trace operators, normal and hermitian (as advertised)
 * Add sketchlord(h) facilities?? leave them for paper?
 * Integration tests/docs (add utests where needed):
@@ -826,5 +825,10 @@ class TriangularLinOp(BaseLinOp):
 
 
 # ##############################################################################
-# # TRACEHPP/XTRACEH
+# # TRACEPP/XTRACE
+# ##############################################################################
+
+
+# ##############################################################################
+# # NORMS
 # ##############################################################################

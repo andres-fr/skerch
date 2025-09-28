@@ -760,3 +760,29 @@ def test_triang_correctness(
                     assert (
                         (lop2dT @ v.conj()).conj() == v2d
                     ).all(), "Wrong triangular transpose? (upper)"
+
+
+# ##############################################################################
+# # NORMS
+# ##############################################################################
+def test_norm_correctness(
+    rng_seeds, torch_devices, dtypes_tols, triang_configs
+):
+    """Test case for correctness of xxx
+
+
+
+    NORMS:
+
+    * operator norm:  norm(A) = norm(Q @ (Q.H @ A)) = norm(Q.H @ A)
+      - First obtain Q for a small number of measurements, option for adj,
+        if none given choose the smaller of heigth/width
+      - Then perform corresponding W.H = Q.H @ A, and compute G = W.H @ W
+      - The norm is the sqrt of the max sval of G. Return squared?
+
+    * Frob norm: frob(A)^2 = tr(A.H @ A), so run traceh on the gram matrix?
+      Tropp had some bounds for just throwing gaussian measurements, may be
+      cheaper. Implement both?
+
+    """
+    breakpoint()
