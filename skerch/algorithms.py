@@ -3,33 +3,29 @@
 
 
 """
-* add norm, frob and trace operators, normal and hermitian (as advertised)
-* Add sketchlord(h) facilities?? leave them for paper?
+* add trace operators, normal and hermitian (as advertised)
+* a-priori/posteriori/truncation stuff
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
   - scale up: good recovery of very large composite linop, quick.
   - priori and posteriori...
 * add remaining todos as GH issues and release!
-
+  - sketchlord(h) facilities: leave them for paper
 
 
 
 
 LATER TODO:
 * tracepp xtrace and hermitian
-+ max operator norm
 * HDF5 measurement/wrapper API
 * a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
 * sketchlord and sketchlordh.
-* what about generalized_nystrom_xdiag?
 * sketched permutations
 
 Triang correctness:
-* mp parallelization compatible
 * Xchangeable version of serrated?
 * triang: stairs should include bits of main diag
-
 
 
 CHANGELOG:
@@ -37,21 +33,17 @@ CHANGELOG:
 * support for complex datatypes
 * Support for (approximately) low-rank plus diagonal synthetic matrices
 * Linop API:
-  - New core functionality: Transposed, Signed Sum, Banded, ByVector
+  - New core functionality: Transposed, Signed Sum, Banded, ByBlock
+  - Support for parallelization of matrix-matrix products
   - New measurement linops: Rademacher, Gaussian, Phase, SSRFT
 * Sketching API:
   - Modular measurement API supporting multiprocessing and HDF5
-  - Support for matrix-matrix parallelization
-  - Modular recovery methods (singlepass, Nystrom, oversampled) for
-    general and symmetric low-rank matrices
+  - Modular recovery methods (singlepass, Nystrom, oversampled)
 * Algorithm API:
-  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Sketchlord, Triangular, Norm
+  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Triangular, Norms
   - Efficient support for Hermitian versions
   - Dispatcher for modularized use of noise sources and recovery types
   - Matrix-free a-posteriori error verification
-
-* A-posteriori error verification
-* A-priori hyperparameter selection
 """
 
 
@@ -415,8 +407,10 @@ def diagpp(
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
-        raise ValueError("XDiag expects square operators!")
+        raise BadShapeError("Diag++ expects square operators!")
     dims = h
+    if dims == 0:
+        raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
     if defl_dims > dims:
         raise ValueError("defl_dims larger than max operator rank!")
@@ -502,8 +496,10 @@ def xdiag(
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
-        raise ValueError("XDiag expects square operators!")
+        raise BadShapeError("XDiag expects square operators!")
     dims = h
+    if dims == 0:
+        raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
     if x_dims > dims:
         raise ValueError("x_dims larger than max operator rank!")
@@ -825,11 +821,6 @@ class TriangularLinOp(BaseLinOp):
 
 
 # ##############################################################################
-# # TRACEPP/XTRACE
-# ##############################################################################
-
-
-# ##############################################################################
 # # NORMS
 # ##############################################################################
 def snorm(
@@ -844,7 +835,10 @@ def snorm(
     adj_meas=None,
     norm_types=("fro", "op"),
 ):
-    """Sketched norms."""
+    """Sketched norms.
+
+    For Frobenius, check 6.2 in Tropp 19.
+    """
     h, w = lop.shape
     if num_meas <= 0 or num_meas > min(h, w):
         raise ValueError(
@@ -892,3 +886,104 @@ def snorm(
             )
     #
     return result, (Q, R, sketch2)
+
+
+# ##############################################################################
+# # TRACEPP/XTRACE
+# ##############################################################################
+def tracepp(
+    lop,
+    lop_device,
+    lop_dtype,
+    defl_dims=0,
+    extra_gh_meas=0,
+    seed=0b1110101001010101011,
+    noise_type="rademacher",
+    meas_blocksize=1,
+    dispatcher=SketchedAlgorithmDispatcher,
+):
+    """Trace sketched approximation via Hutch++."""
+    register = False  # set to True for seed debugging
+    h, w = lop.shape
+    if h != w:
+        raise ValueError("Trace++ expects square operators!")
+    dims = h
+    # figure out recovery settings
+    if defl_dims > dims:
+        raise ValueError("defl_dims larger than max operator rank!")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for diagonal estimation! "
+            + "Check output and consider using Rademacher or PhaseNoise.",
+            RuntimeWarning,
+        )
+    if (defl_dims < 0) or (extra_gh_meas < 0):
+        raise ValueError("Negative number of measurements?")
+    if defl_dims + extra_gh_meas <= 0:
+        raise ValueError("Deflation dims and/or GH measurements needed!")
+    # without deflation
+    if defl_dims <= 0:
+        Q, R, Xh = None, None, None
+        t_top = 0
+    # with deflation
+    else:
+        # instantiate deflation linop and perform measurements
+        mop = dispatcher.mop(
+            noise_type,
+            (dims, defl_dims),
+            seed,
+            lop_dtype,
+            meas_blocksize,
+            register,
+        )
+        sketch = torch.empty(
+            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
+        )
+        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+            sketch[:, idxs] = lop @ block  # assuming block is by_col!
+        # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
+        # the trace of the first component: tr(Q.H @ A @ Q)
+        Q, R = qr(sketch, in_place_q=True, return_R=True)
+        Xh = Q.conj().T @ lop
+        # top trace estimate is then sum(diag(Q @ Xh))
+        t_top = (Q * Xh.T).sum()  # no conj here!
+    # Girard-Hutchinson for deflated estimate
+    t_gh = 0
+    # perform any extra Girard-Hutchinson measurements,
+    if extra_gh_meas > 0:
+        seed_gh = seed + defl_dims + 1
+        mop_gh = dispatcher.mop(
+            noise_type,
+            (dims, extra_gh_meas),
+            seed_gh,
+            lop_dtype,
+            meas_blocksize,
+            register,
+        )
+        #
+        for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
+            if Q is not None:
+                block = block - Q @ (Q.conj().T @ block)
+            if is_noise_unitnorm:
+                t_gh += (block.conj() * (lop @ block)).sum()
+                t_gh /= extra_gh_meas
+            else:
+                # t_gh += (block.conj() * (lop @ block)).sum()
+
+                block_c = block.conj()
+                ddd = (block * block_c).sum(1)
+                t_gh += ((block_c * (lop @ block)).sum(1) / ddd).sum()
+                # t_gh += ((block_c * (lop @ block)) / (block_c * block)).sum()
+                # t_top + (t_gh / extra_gh_meas)
+                # lop.matrix.diag().sum()
+                # breakpoint()
+        #
+        # t_gh /= extra_gh_meas
+    #
+    return (t_top + t_gh), (t_top, t_gh, Q, R)
+
+    # sktch = lop @ block
+    # if Q is not None:
+    #     sktch -= Q @ (Q.conj().T @ sktch)

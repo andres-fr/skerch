@@ -15,7 +15,7 @@ from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
 from skerch.linops import linop_to_matrix, TransposedLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
-from skerch.algorithms import ssvd, seigh, diagpp, xdiag
+from skerch.algorithms import ssvd, seigh, tracepp, diagpp, xdiag
 from skerch.algorithms import snorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
@@ -474,6 +474,55 @@ def test_seigh_correctness(
 # ##############################################################################
 # # XDIAG/DIAGPP
 # ##############################################################################
+def test_diagpp_xdiag_formal():
+    """Formal test case for ``diagpp`` amd ``xdiag``.
+
+    * Only square, nonempty linops supported
+    * defl_dims or x_dims can't be larger than dims.
+    * At least 1 measurement must be done, and meas params can't be negative
+    * Warning for non-unitnorm noise
+    """
+    Z, M, H = torch.ones(0, 0), torch.ones(4, 5), torch.ones(5, 5)
+    # DIAGPP
+    # nonsquare lop
+    with pytest.raises(BadShapeError):
+        _ = diagpp(M, M.device, M.dtype, defl_dims=1, extra_gh_meas=0, seed=0)
+    # empty lop
+    with pytest.raises(BadShapeError):
+        _ = diagpp(Z, Z.device, Z.dtype, defl_dims=1, extra_gh_meas=0, seed=0)
+    # too many defl
+    with pytest.raises(ValueError):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=6, extra_gh_meas=0, seed=0)
+    # zero total measurements
+    with pytest.raises(ValueError):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=0, extra_gh_meas=0, seed=0)
+    # negative measurements
+    with pytest.raises(ValueError):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=-1, extra_gh_meas=1, seed=0)
+    with pytest.raises(ValueError):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=1, extra_gh_meas=-1, seed=0)
+    # warning for non-unitnorm noise
+    with pytest.warns(RuntimeWarning):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=1, noise_type="gaussian")
+    # XDIAG
+    # nonsquare lop
+    with pytest.raises(BadShapeError):
+        _ = xdiag(M, M.device, M.dtype, x_dims=1, seed=0)
+    # empty lop
+    with pytest.raises(BadShapeError):
+        _ = xdiag(Z, Z.device, Z.dtype, x_dims=1, seed=0)
+    # too many or negative meas
+    with pytest.raises(ValueError):
+        _ = xdiag(H, H.device, H.dtype, x_dims=6, seed=0)
+    with pytest.raises(ValueError):
+        _ = xdiag(H, H.device, H.dtype, x_dims=0, seed=0)
+    # warning for non-unitnorm noise
+    with pytest.warns(RuntimeWarning):
+        _ = xdiag(
+            H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian"
+        )
+
+
 def test_diagpp_xdiag_correctness(
     rng_seeds,
     torch_devices,
@@ -481,7 +530,7 @@ def test_diagpp_xdiag_correctness(
     diag_recovery_shapes,
     diag_noise_types,
 ):
-    """Correctness test case for XDIAG/DIAGPP:
+    """Correctness test case for ``diagpp`` amd ``xdiag``.
 
     Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
     different settings for rank and measurements, testing that:
@@ -895,3 +944,122 @@ def test_norm_correctness(
                         assert (
                             abs(frob - snorms["fro"]) / frob <= froberr
                         ), "Wrong Frobenius snorm!"
+
+
+# ##############################################################################
+# # TRACEPP/XTRACE
+# ##############################################################################
+def test_tracepp_xtrace_correctness(
+    rng_seeds,
+    torch_devices,
+    dtypes_tols,
+    diag_recovery_shapes,
+    diag_noise_types,
+):
+    """Correctness test case for ``diagpp`` amd ``xdiag``.
+
+    Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
+    different settings for rank and measurements, testing that:
+
+    * Retrieved Q matrices are orthogonal
+    * Retrieved diagonals are close enough (either deflation or final ones)
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for (
+                    dims,
+                    rank,
+                    defl,
+                    gh_extra,
+                    (diagpp_full_tol, diagpp_top_tol),
+                    (xdiag_full_tol, xdiag_top_tol),
+                ) in diag_recovery_shapes:
+                    hw = (dims, dims)
+                    mat, _ = RandomLordMatrix.exp(
+                        hw,
+                        rank,
+                        decay=100,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    lop = BasicMatrixLinOp(mat)
+                    trace = mat.diag().sum()
+                    I = torch.eye(defl, dtype=dtype, device=device)
+                    #
+                    for noise_type, complex_only in diag_noise_types:
+                        if dtype not in COMPLEX_DTYPES and complex_only:
+                            # this noise type does not support reals,
+                            # skip this iteration
+                            continue
+                        # run diagpp
+                        t1, (ttop1, tdefl1, Q1, R1) = tracepp(
+                            lop,
+                            device,
+                            dtype,
+                            defl,
+                            gh_extra,
+                            seed,
+                            noise_type,
+                            meas_blocksize=dims,
+                            dispatcher=MyDispatcher,
+                        )
+
+                        print(
+                            "\n\n>>>>>>>",
+                            noise_type,
+                            trace,
+                            t1,
+                            torch.dist(trace, t1),
+                        )
+                        breakpoint()
+
+                        # # run XDiag
+                        # if (
+                        #     xdiag_full_tol is not None
+                        #     or xdiag_top_tol is not None
+                        # ):
+                        #     diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                        #         lop,
+                        #         device,
+                        #         dtype,
+                        #         defl,
+                        #         seed,
+                        #         noise_type,
+                        #         meas_blocksize=dims,
+                        #         dispatcher=MyDispatcher,
+                        #     )
+                        # else:
+                        #     Q2 = None
+                        # # test Qs are orthogonal
+                        # if Q1 is not None:
+                        #     QhQ1 = Q1.H @ Q1
+                        #     assert torch.allclose(
+                        #         QhQ1, I, atol=tol
+                        #     ), "Diag++ Q not orthogonal?"
+                        # if Q2 is not None:
+                        #     QhQ2 = Q2.H @ Q2
+                        #     assert torch.allclose(
+                        #         QhQ2, I, atol=tol
+                        #     ), "XDiag Q not orthogonal?"
+                        # # test recoveries are correct
+                        # if diagpp_full_tol is not None:
+                        #     assert (
+                        #         relerr(D, diag1) < diagpp_full_tol
+                        #     ), "Bad full Diag++?"
+                        # if diagpp_top_tol is not None:
+                        #     assert (
+                        #         relerr(D, dtop1) < diagpp_top_tol
+                        #     ), "Bad top Diag++?"
+                        # if xdiag_full_tol is not None:
+                        #     assert (
+                        #         relerr(D, diag2) < xdiag_full_tol
+                        #     ), "Bad full XDiag?"
+                        # if xdiag_top_tol is not None:
+                        #     assert (
+                        #         relerr(D, dtop2) < xdiag_top_tol
+                        #     ), "Bad top XDiag?"
