@@ -81,9 +81,9 @@ def diag_recovery_shapes(request):
         (200, 5, 50, 0, (1e-10, 1e-10), (0.5, 0.1)),
         # now less deflation but we add G-H: while dtop is equally good in
         # both, the few GH measurements seem to hurt much more in d++ than XD
-        (200, 10, 9, 50, (4, 0.2), (0.5, 0.3)),
+        (200, 10, 9, 50, (0.75, 0.2), (0.5, 0.3)),
         # now we add more GH measurements to D++, and then it surpasses XD
-        (200, 10, 9, 190, (0.25, 0.2), (0.5, 0.3)),
+        (200, 10, 9, 190, (0.2, 0.2), (0.5, 0.3)),
         # just doing a lot of GH measurements also works for D++
         (10, 10, 0, 2_000, (0.05, None), (None, None)),
     ]
@@ -211,12 +211,12 @@ class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
         )
         self.shift = shift
 
-    def get_vector(self, idx, device):
+    def get_block(self, block_idx, input_dtype, input_device):
         """Samples a vector with standard Gaussian i.i.d. noise.
 
         See base class definition for details.
         """
-        result = super().get_vector(idx, device)
+        result = super().get_block(block_idx, input_dtype, input_device)
         try:
             result = result + result.sign() * self.shift
         except:
@@ -241,6 +241,8 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
                 blocksize=blocksize,
                 register=register,
                 shift=shift,
+                mean=0.0,
+                std=0.01,
             )
         else:
             mop = SketchedAlgorithmDispatcher.mop(
@@ -512,12 +514,12 @@ def test_diagpp_xdiag_correctness(
                             )
                         else:
                             Q2 = None
-                        # # test Qs are orthogonal
-                        # if Q1 is not None:
-                        #     QhQ1 = Q1.H @ Q1
-                        #     assert torch.allclose(
-                        #         QhQ1, I, atol=tol
-                        #     ), "Diag++ Q not orthogonal?"
+                        # test Qs are orthogonal
+                        if Q1 is not None:
+                            QhQ1 = Q1.H @ Q1
+                            assert torch.allclose(
+                                QhQ1, I, atol=tol
+                            ), "Diag++ Q not orthogonal?"
                         # if Q2 is not None:
                         #     QhQ2 = Q2.H @ Q2
                         #     assert torch.allclose(
@@ -525,26 +527,13 @@ def test_diagpp_xdiag_correctness(
                         #     ), "XDiag Q not orthogonal?"
                         # test recoveries are correct
                         if diagpp_full_tol is not None:
-                            try:
-                                assert (
-                                    relerr(D, diag1) < diagpp_full_tol
-                                ), "Bad full Diag++?"
-                            except:
-                                import matplotlib.pyplot as plt
-
-                                print(
-                                    "\n\n!!!",
-                                    relerr(D, diag1),
-                                    "instead of",
-                                    diagpp_full_tol,
-                                )
-                                # plt.clf(); plt.plot(D); plt.plot(diag1); plt.show()
-                                # plt.clf(); plt.plot(D); plt.plot(dtop1); plt.show()
-                                breakpoint()
-                        # if diagpp_top_tol is not None:
-                        #     assert (
-                        #         relerr(D, dtop1) < diagpp_top_tol
-                        #     ), "Bad top Diag++?"
+                            assert (
+                                relerr(D, diag1) < diagpp_full_tol
+                            ), "Bad full Diag++?"
+                        if diagpp_top_tol is not None:
+                            assert (
+                                relerr(D, dtop1) < diagpp_top_tol
+                            ), "Bad top Diag++?"
                         # if xdiag_full_tol is not None:
                         #     assert (
                         #         relerr(D, diag2) < xdiag_full_tol

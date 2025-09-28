@@ -3,7 +3,9 @@
 
 
 """
-* Add sketchlord(h) facilities
+* finish testing diag linops, make them make sense
+* add norm, frob and trace operators, normal and hermitian (as advertised)
+* Add sketchlord(h) facilities?? leave them for paper?
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
   - scale up: good recovery of very large composite linop, quick.
@@ -398,7 +400,19 @@ def diagpp(
     meas_blocksize=1,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
-    """Diagonal sketched approximation via Hutch++."""
+    """Diagonal sketched approximation via Hutch++.
+
+    As it can be seen in Table 1 from
+    `[BN2022] <https://arxiv.org/abs/2201.10684>`_,
+    Gaussian noise is less efficient than Rademacher: These functions provide
+    the number of measurements needed to ensure an approximation with at
+    most ``eps`` error, with a probability of at least ``1 - delta``
+    (try e.g. ``eps=0.001, delta=0.001``). We see that the number of samples
+    is in the millions, i.e. GH is not sample-efficient for smaller matrices.
+
+    rad = lambda delta, eps: 2 * np.log(2 / delta) / eps**2
+    gau = lambda delta, eps: 4 * np.log2(2**0.5 / delta) / eps**2
+    """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
@@ -419,10 +433,11 @@ def diagpp(
         raise ValueError("Negative number of measurements?")
     if defl_dims + extra_gh_meas <= 0:
         raise ValueError("Deflation dims and/or GH measurements needed!")
-    # deflation:
+    # without deflation
     if defl_dims <= 0:
         Q, R, Xh = None, None, None
         d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    # with deflation
     else:
         # instantiate deflation linop and perform measurements
         mop = dispatcher.mop(
@@ -450,18 +465,9 @@ def diagpp(
             end = min(defl_dims, beg + meas_blocksize)
             Xh[beg:end] = Q.conj().T[beg:end] @ lop
         # top diagonal estimate is then diag(Q @ X.H)
-        d_top = (Q * Xh.T).sum(1)  # here only Xh.T!
+        d_top = (Q * Xh.T).sum(1)
     # Girard-Hutchinson:
-    d_defl = torch.zeros_like(d_top)
-    # for i in range(defl_dims):
-    #     v_i = mopmat[:, i]
-    #     w_i = sketch[:, i] - (Q @ (Xh @ v_i))
-    #     if is_noise_unitnorm:
-    #         d_defl += v_i * w_i
-    #     else:
-    #         d_defl += (v_i * w_i) / (v_i * v_i)
-    # d_defl /= defl_dims
-
+    d_gh = torch.zeros_like(d_top)
     # perform any extra Girard-Hutchinson measurements,
     if extra_gh_meas > 0:
         seed_gh = seed + defl_dims + 1
@@ -474,13 +480,7 @@ def diagpp(
             register,
         )
         mopmat_gh = mop_gh.to_matrix(lop_dtype, lop_device)
-
-        import matplotlib.pyplot as plt
-
-        # plt.clf(); plt.imshow(mopmat_gh.H @ mopmat_gh); plt.show()
-        # breakpoint()
         #
-        ratt = 1 / extra_gh_meas
         for i in range(extra_gh_meas):
             v_i = mopmat_gh[:, i]
             meas_i = lop @ v_i
@@ -490,10 +490,10 @@ def diagpp(
                 meas_i = lop @ v_i
                 w_i = meas_i - Q @ (meas_i.conj() @ Q).conj()
             if is_noise_unitnorm:
-                d_defl += v_i.conj() * w_i
+                d_gh += v_i.conj() * w_i
             else:
                 v_i_c = v_i.conj()
-                d_defl += ratt * (v_i_c * w_i) / (v_i_c * v_i)
+                d_gh += (v_i_c * w_i) / (v_i_c * v_i)
         #
         # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
         #     measblock = lop @ block
@@ -507,13 +507,13 @@ def diagpp(
         #         # www = measblock - Q @ (measblock.conj().T @ Q).conj()
         #     #
         #     if is_noise_unitnorm:
-        #         d_defl += (block.conj() * www).sum(1)
+        #         d_gh += (block.conj() * www).sum(1)
         #     else:
         #         block_c = block.conj()
-        #         d_defl += ((block_c * measblock) / (block_c * block)).sum(1)
-        d_defl /= extra_gh_meas
+        #         d_gh += ((block_c * measblock) / (block_c * block)).sum(1)
+        d_gh /= extra_gh_meas
     #
-    return (d_top + d_defl), (d_top, d_defl, Q, R)
+    return (d_top + d_gh), (d_top, d_gh, Q, R)
 
 
 # def diagpp(
