@@ -78,12 +78,12 @@ def diag_recovery_shapes(request):
     """
     result = [
         # low-rank matrix with good deflation: good d++, decent XD top
-        (200, 5, 50, 0, (1e-10, 1e-10), (0.5, 0.1)),
+        (200, 5, 50, 0, (1e-10, 1e-10), (0.3, 0.1)),
         # now less deflation but we add G-H: while dtop is equally good in
         # both, the few GH measurements seem to hurt much more in d++ than XD
-        (200, 10, 9, 50, (0.75, 0.2), (0.5, 0.3)),
+        (200, 10, 9, 50, (0.75, 0.2), (0.35, 0.2)),
         # now we add more GH measurements to D++, and then it surpasses XD
-        (200, 10, 9, 190, (0.2, 0.2), (0.5, 0.3)),
+        (200, 10, 9, 190, (0.2, 0.2), (0.35, 0.2)),
         # just doing a lot of GH measurements also works for D++
         (10, 10, 0, 2_000, (0.05, None), (None, None)),
     ]
@@ -520,11 +520,11 @@ def test_diagpp_xdiag_correctness(
                             assert torch.allclose(
                                 QhQ1, I, atol=tol
                             ), "Diag++ Q not orthogonal?"
-                        # if Q2 is not None:
-                        #     QhQ2 = Q2.H @ Q2
-                        #     assert torch.allclose(
-                        #         QhQ2, I, atol=tol
-                        #     ), "XDiag Q not orthogonal?"
+                        if Q2 is not None:
+                            QhQ2 = Q2.H @ Q2
+                            assert torch.allclose(
+                                QhQ2, I, atol=tol
+                            ), "XDiag Q not orthogonal?"
                         # test recoveries are correct
                         if diagpp_full_tol is not None:
                             assert (
@@ -534,14 +534,14 @@ def test_diagpp_xdiag_correctness(
                             assert (
                                 relerr(D, dtop1) < diagpp_top_tol
                             ), "Bad top Diag++?"
-                        # if xdiag_full_tol is not None:
-                        #     assert (
-                        #         relerr(D, diag2) < xdiag_full_tol
-                        #     ), "Bad full XDiag?"
-                        # if xdiag_top_tol is not None:
-                        #     assert (
-                        #         relerr(D, dtop2) < xdiag_top_tol
-                        #     ), "Bad top XDiag?"
+                        if xdiag_full_tol is not None:
+                            assert (
+                                relerr(D, diag2) < xdiag_full_tol
+                            ), "Bad full XDiag?"
+                        if xdiag_top_tol is not None:
+                            assert (
+                                relerr(D, dtop2) < xdiag_top_tol
+                            ), "Bad top XDiag?"
 
 
 # ##############################################################################
@@ -589,7 +589,6 @@ def test_triang_formal(
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                # mat = torch.arange(dims**2, dtype=dtype).reshape(dims, dims)
                 mat = gaussian_noise((dims, dims), 0, 1, seed, dtype, device)
                 for lower in (True, False):
                     for diag in (True, False):
@@ -626,6 +625,8 @@ def test_triang_formal(
                         mat1a_ = linop_to_matrix(
                             lop1a, dtype, device, adjoint=False
                         )
+                        # **commented on purpose: by design, triang linop
+                        # fwd and adj are not same**
                         # mat1j = linop_to_matrix(
                         #     lop1a, dtype, device, adjoint=True
                         # )
@@ -639,6 +640,8 @@ def test_triang_formal(
                         assert torch.allclose(
                             mat1a, mat1a_, atol=tol
                         ), "Nondeterministic linop?"
+                        # **commented on purpose: by design, triang linop
+                        # fwd and adj are not same**
                         # # adjoint to_matrix is same as forward
                         # assert torch.allclose(
                         #     mat1a, mat1j, atol=tol
