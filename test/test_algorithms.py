@@ -16,7 +16,7 @@ from skerch.linops import linop_to_matrix, TransposedLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
 from skerch.algorithms import ssvd, seigh, diagpp, xdiag
-from skerch.algorithms import sopnorm
+from skerch.algorithms import snorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
 from . import svd_test_helper, eigh_test_helper
@@ -173,21 +173,21 @@ def norm_noise_types():
 
 
 @pytest.fixture
-def opnorm_configs(request):
+def norm_configs(request):
     """Configurations for the operator norm
 
-    Tuples in the form ``(shape, specdecay, num_meas, relerr)``.
+    Tuples in the form ``(shape, specdecay, num_meas, op_relerr, frob_relerr)``.
     specdecay: 0.01 slow, 0.1 medium, 0.5 fast
     """
 
     result = [
-        # perfect recovery if meas=rank
-        ((20, 10), 0.01, 10, 1e-5),
+        # near-perfect recovery if meas=rank
+        ((20, 10), 0.01, 10, 1e-5, 1e-5),
         # also works for non-square
-        ((50, 20), 0.1, 15, 0.05),
-        ((20, 50), 0.1, 15, 0.05),
+        ((50, 20), 0.1, 15, 0.01, 0.01),
+        ((20, 50), 0.1, 15, 0.01, 0.01),
         # if meas shorter but sufficient, recovery still good
-        ((200, 200), 0.01, 100, 0.02),
+        ((200, 200), 0.1, 20, 0.001, 0.01),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:3]
@@ -801,30 +801,61 @@ def test_triang_correctness(
 # ##############################################################################
 # # NORMS
 # ##############################################################################
+def test_norm_formal():
+    """Formal test case for ``snorm``.
+
+    * nore measurements than shape raises error
+    * unsupported norm type raises error
+    """
+    mat = torch.empty(5, 5)
+    # too little measurements
+    with pytest.raises(ValueError):
+        _ = snorm(
+            mat,
+            mat.device,
+            mat.dtype,
+            num_meas=0,
+            seed=0,
+            noise_type="gaussian",
+            norm_types=("fro", "op"),
+        )
+    # too many measurements
+    with pytest.raises(ValueError):
+        _ = snorm(
+            mat,
+            mat.device,
+            mat.dtype,
+            num_meas=len(mat) + 1,
+            seed=0,
+            noise_type="gaussian",
+            norm_types=("fro", "op"),
+        )
+    # unknown norm type
+    with pytest.raises(ValueError):
+        _ = snorm(
+            mat,
+            mat.device,
+            mat.dtype,
+            num_meas=len(mat) + 1,
+            seed=0,
+            noise_type="gaussian",
+            norm_types=("fro", "op", "fernandez"),
+        )
+
+
 def test_norm_correctness(
-    rng_seeds, torch_devices, dtypes_tols, opnorm_configs, norm_noise_types
+    rng_seeds, torch_devices, dtypes_tols, norm_configs, norm_noise_types
 ):
-    """Test case for correctness of xxx
+    """Test case for correctness of sketched norms.
 
 
-
-    NORMS:
-
-    * operator norm:  norm(A) = norm(Q @ (Q.H @ A)) = norm(Q.H @ A)
-      - First obtain Q for a small number of measurements, option for adj,
-        if none given choose the smaller of heigth/width
-      - Then perform corresponding W.H = Q.H @ A, and compute G = W.H @ W
-      - The norm is the sqrt of the max sval of G. Return squared?
-
-    * Frob norm: frob(A)^2 = tr(A.H @ A), so run traceh on the gram matrix?
-      Tropp had some bounds for just throwing gaussian measurements, may be
-      cheaper. Implement both?
-
+    For all seeds, devices, dtypes, noise types and shape/spectrum cases,
+    computes ``snorm`` and checks all results are within given tolerances.
     """
     for seed in rng_seeds:
         for device in torch_devices:
             for dtype, tol in dtypes_tols.items():
-                for shape, specdecay, num_meas, relerr in opnorm_configs:
+                for shape, specdecay, num_meas, operr, froberr in norm_configs:
                     mat, _ = RandomLordMatrix.exp(
                         shape,
                         1,
@@ -836,6 +867,7 @@ def test_norm_correctness(
                         dtype=dtype,
                         device=device,
                     )
+                    mat *= 123  # to ensure norm is not always 1
                     svals = torch.linalg.svdvals(mat)
                     frob = svals.norm()
                     opnorm = svals.max()
@@ -845,18 +877,21 @@ def test_norm_correctness(
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # run algorithm and recovery
-                        for adj in (True, False):
-                            snrm, _ = sopnorm(
-                                lop,
-                                device,
-                                dtype,
-                                num_meas,
-                                seed,
-                                noise_type,
-                                adj_meas=adj,
-                                dispatcher=MyDispatcher,
-                            )
-                            assert (
-                                abs(opnorm - snrm) / opnorm <= relerr
-                            ), "Wrong operator norm!"
+                        # run sketched norms and test they are within relerr
+                        snorms, _ = snorm(
+                            lop,
+                            device,
+                            dtype,
+                            num_meas,
+                            seed,
+                            noise_type,
+                            adj_meas=None,
+                            dispatcher=MyDispatcher,
+                            norm_types=("fro", "op"),
+                        )
+                        assert (
+                            abs(opnorm - snorms["op"]) / opnorm <= operr
+                        ), "Wrong operator snorm!"
+                        assert (
+                            abs(frob - snorms["fro"]) / frob <= froberr
+                        ), "Wrong Frobenius snorm!"

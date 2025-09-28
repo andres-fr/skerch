@@ -832,7 +832,7 @@ class TriangularLinOp(BaseLinOp):
 # ##############################################################################
 # # NORMS
 # ##############################################################################
-def sopnorm(
+def snorm(
     lop,
     lop_device,
     lop_dtype,
@@ -841,15 +841,19 @@ def sopnorm(
     noise_type="gaussian",
     meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
-    adj_meas=False,
+    adj_meas=None,
+    norm_types=("fro", "op"),
 ):
-    """Sketched operator norm."""
+    """Sketched norms."""
     h, w = lop.shape
-    if num_meas > min(h, w):
-        raise ValueError("More measurements than rows/columns not supported!")
+    if num_meas <= 0 or num_meas > min(h, w):
+        raise ValueError(
+            "Measurements must be between 1 and number of rows/columns!"
+        )
     if meas_blocksize is None:
         meas_blocksize = num_meas
-    h, w = lop.shape
+    if adj_meas is None:
+        adj_meas = h > w  # this seems to be more accurate
     mop = dispatcher.mop(
         noise_type,
         (h if adj_meas else w, num_meas),
@@ -865,13 +869,26 @@ def sopnorm(
     for block, idxs in mop.get_blocks(lop_dtype, lop_device):
         # assuming block is by_col!
         sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
-    Q = qr(sketch, in_place_q=True, return_R=False)
+    Q, R = qr(sketch, in_place_q=True, return_R=True)
     # project lop onto Q and obtain largest singular value
     sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
     h2, w2 = sketch2.shape
-    if h2 > w2:
-        result = torch.linalg.norm(sketch2.conj().T @ sketch2, ord=2)
-    else:
-        result = torch.linalg.norm(sketch2 @ sketch2.conj().T, ord=2)
+    gram = (
+        (sketch2.conj().T @ sketch2)
+        if h2 > w2
+        else (sketch2 @ sketch2.conj().T)
+    )
+    supported_norm_types = {"fro", "op"}
+    result = {}
+    for norm_type in norm_types:
+        if norm_type == "op":
+            result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
+        elif norm_type == "fro":
+            result[norm_type] = gram.diag().sum() ** 0.5
+        else:
+            raise ValueError(
+                f"Unsupported norm type! {norm_type}. "
+                "Supported: {supported_norm_types}"
+            )
     #
-    return result, Q
+    return result, (Q, R, sketch2)
