@@ -419,7 +419,7 @@ def diagpp(
     dims = h
     # figure out recovery settings
     if defl_dims > dims:
-        raise ValueError("defl_dims larger than operator rank!")
+        raise ValueError("defl_dims larger than max operator rank!")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
@@ -506,7 +506,7 @@ def xdiag(
     dims = h
     # figure out recovery settings
     if x_dims > dims:
-        raise ValueError("x_dims larger than operator rank!")
+        raise ValueError("x_dims larger than max operator rank!")
     if x_dims <= 0:
         raise ValueError("No measurements?")
     #
@@ -832,3 +832,46 @@ class TriangularLinOp(BaseLinOp):
 # ##############################################################################
 # # NORMS
 # ##############################################################################
+def sopnorm(
+    lop,
+    lop_device,
+    lop_dtype,
+    num_meas=5,
+    seed=0b1110101001010101011,
+    noise_type="gaussian",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    adj_meas=False,
+):
+    """Sketched operator norm."""
+    h, w = lop.shape
+    if num_meas > min(h, w):
+        raise ValueError("More measurements than rows/columns not supported!")
+    if meas_blocksize is None:
+        meas_blocksize = num_meas
+    h, w = lop.shape
+    mop = dispatcher.mop(
+        noise_type,
+        (h if adj_meas else w, num_meas),
+        seed,
+        lop_dtype,
+        meas_blocksize,
+        register=False,
+    )
+    # perform measurements and obtain top-space Q
+    sketch = torch.empty(
+        (w if adj_meas else h, num_meas), dtype=lop_dtype, device=lop_device
+    )
+    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+        # assuming block is by_col!
+        sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
+    Q = qr(sketch, in_place_q=True, return_R=False)
+    # project lop onto Q and obtain largest singular value
+    sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
+    h2, w2 = sketch2.shape
+    if h2 > w2:
+        result = torch.linalg.norm(sketch2.conj().T @ sketch2, ord=2)
+    else:
+        result = torch.linalg.norm(sketch2 @ sketch2.conj().T, ord=2)
+    #
+    return result, Q

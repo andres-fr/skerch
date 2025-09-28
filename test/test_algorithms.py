@@ -16,6 +16,7 @@ from skerch.linops import linop_to_matrix, TransposedLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
 from skerch.algorithms import ssvd, seigh, diagpp, xdiag
+from skerch.algorithms import sopnorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
 from . import svd_test_helper, eigh_test_helper
@@ -155,6 +156,41 @@ def triang_configs(request):
     ]
     if request.config.getoption("--quick"):
         result = result[:4]
+    return result
+
+
+@pytest.fixture
+def norm_noise_types():
+    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    result = [
+        ("rademacher", False),
+        ("gaussian", False),
+        ("ssrft", False),
+        ("bloated_1.0", False),
+        ("phase", True),
+    ]
+    return result
+
+
+@pytest.fixture
+def opnorm_configs(request):
+    """Configurations for the operator norm
+
+    Tuples in the form ``(shape, specdecay, num_meas, relerr)``.
+    specdecay: 0.01 slow, 0.1 medium, 0.5 fast
+    """
+
+    result = [
+        # perfect recovery if meas=rank
+        ((20, 10), 0.01, 10, 1e-5),
+        # also works for non-square
+        ((50, 20), 0.1, 15, 0.05),
+        ((20, 50), 0.1, 15, 0.05),
+        # if meas shorter but sufficient, recovery still good
+        ((200, 200), 0.01, 100, 0.02),
+    ]
+    # if request.config.getoption("--quick"):
+    #     result = result[:3]
     return result
 
 
@@ -766,7 +802,7 @@ def test_triang_correctness(
 # # NORMS
 # ##############################################################################
 def test_norm_correctness(
-    rng_seeds, torch_devices, dtypes_tols, triang_configs
+    rng_seeds, torch_devices, dtypes_tols, opnorm_configs, norm_noise_types
 ):
     """Test case for correctness of xxx
 
@@ -785,4 +821,42 @@ def test_norm_correctness(
       cheaper. Implement both?
 
     """
-    breakpoint()
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                for shape, specdecay, num_meas, relerr in opnorm_configs:
+                    mat, _ = RandomLordMatrix.exp(
+                        shape,
+                        1,
+                        decay=specdecay,
+                        diag_ratio=0.0,
+                        symmetric=False,
+                        psd=False,
+                        seed=seed,
+                        dtype=dtype,
+                        device=device,
+                    )
+                    svals = torch.linalg.svdvals(mat)
+                    frob = svals.norm()
+                    opnorm = svals.max()
+                    lop = BasicMatrixLinOp(mat)
+                    for noise_type, complex_only in norm_noise_types:
+                        if dtype not in COMPLEX_DTYPES and complex_only:
+                            # this noise type does not support reals,
+                            # skip this iteration
+                            continue
+                        # run algorithm and recovery
+                        for adj in (True, False):
+                            snrm, _ = sopnorm(
+                                lop,
+                                device,
+                                dtype,
+                                num_meas,
+                                seed,
+                                noise_type,
+                                adj_meas=adj,
+                                dispatcher=MyDispatcher,
+                            )
+                            assert (
+                                abs(opnorm - snrm) / opnorm <= relerr
+                            ), "Wrong operator norm!"
