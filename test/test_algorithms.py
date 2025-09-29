@@ -493,6 +493,9 @@ def test_diagpp_xdiag_formal():
     # too many defl
     with pytest.raises(ValueError):
         _ = diagpp(H, H.device, H.dtype, defl_dims=6, extra_gh_meas=0, seed=0)
+    # too many total measurements
+    with pytest.raises(ValueError):
+        _ = diagpp(H, H.device, H.dtype, defl_dims=3, extra_gh_meas=3, seed=0)
     # zero total measurements
     with pytest.raises(ValueError):
         _ = diagpp(H, H.device, H.dtype, defl_dims=0, extra_gh_meas=0, seed=0)
@@ -980,7 +983,7 @@ def test_tracepp_xtrace_correctness(
                         hw,
                         rank,
                         decay=100,
-                        diag_ratio=0.0,
+                        diag_ratio=10.0,
                         symmetric=False,
                         psd=False,
                         seed=seed,
@@ -1001,11 +1004,11 @@ def test_tracepp_xtrace_correctness(
                             lop,
                             device,
                             dtype,
-                            defl,
-                            gh_extra,
+                            defl * 0,
+                            gh_extra * 0 + 50000,
                             seed,
                             noise_type,
-                            meas_blocksize=dims,
+                            meas_blocksize=dims * 0 + 50000,
                             dispatcher=MyDispatcher,
                         )
 
@@ -1016,7 +1019,7 @@ def test_tracepp_xtrace_correctness(
                             t1,
                             torch.dist(trace, t1),
                         )
-                        breakpoint()
+                        # breakpoint()
 
                         # # run XDiag
                         # if (

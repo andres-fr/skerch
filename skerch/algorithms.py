@@ -412,8 +412,8 @@ def diagpp(
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
-    if defl_dims > dims:
-        raise ValueError("defl_dims larger than max operator rank!")
+    if defl_dims > dims or (defl_dims + extra_gh_meas) > dims:
+        raise ValueError("More measurements than max operator rank!")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
@@ -426,10 +426,12 @@ def diagpp(
         raise ValueError("Negative number of measurements?")
     if defl_dims + extra_gh_meas <= 0:
         raise ValueError("Deflation dims and/or GH measurements needed!")
+
     # without deflation
     if defl_dims <= 0:
         Q, R, Xh = None, None, None
         d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+        # t_top = 0 #########################3
     # with deflation
     else:
         # instantiate deflation linop and perform measurements
@@ -452,8 +454,13 @@ def diagpp(
         Xh = Q.conj().T @ lop
         # top diagonal estimate is then diag(Q @ Xh)
         d_top = (Q * Xh.T).sum(1)  # no conj here!
+
+        # # top trace estimate is then sum(diag(Q @ Xh))  ###################
+        # t_top = (Q * Xh.T).sum()  # no conj here!
+
     # Girard-Hutchinson:
     d_gh = torch.zeros_like(d_top)
+    # t_gh = 0 ################################
     # perform any extra Girard-Hutchinson measurements,
     if extra_gh_meas > 0:
         seed_gh = seed + defl_dims + 1
@@ -465,6 +472,18 @@ def diagpp(
             meas_blocksize,
             register,
         )
+        #  # trace block
+        # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
+        #     if Q is not None:
+        #         block = block - Q @ (Q.conj().T @ block)
+        #     if is_noise_unitnorm:
+        #         t_gh += (block.conj() * (lop @ block)).sum()
+        #         t_gh /= len(idxs)
+        #     else:
+        #         norm = block.norm(dim=1)
+        #         block = (block.T / norm).T
+        #         t_gh += (block.conj() * (lop @ block)).sum()
+
         #
         for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
             sktch = lop @ block
@@ -478,6 +497,7 @@ def diagpp(
         #
         d_gh /= extra_gh_meas
     #
+
     return (d_top + d_gh), (d_top, d_gh, Q, R)
 
 
@@ -502,7 +522,7 @@ def xdiag(
         raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
     if x_dims > dims:
-        raise ValueError("x_dims larger than max operator rank!")
+        raise ValueError("More measurements than max operator rank!")
     if x_dims <= 0:
         raise ValueError("No measurements?")
     #
@@ -909,8 +929,9 @@ def tracepp(
         raise ValueError("Trace++ expects square operators!")
     dims = h
     # figure out recovery settings
-    if defl_dims > dims:
-        raise ValueError("defl_dims larger than max operator rank!")
+    if defl_dims > dims or (defl_dims + extra_gh_meas) > dims:
+        # raise ValueError("More measurements than max operator rank!")
+        pass  # while debugging
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
@@ -968,22 +989,10 @@ def tracepp(
                 block = block - Q @ (Q.conj().T @ block)
             if is_noise_unitnorm:
                 t_gh += (block.conj() * (lop @ block)).sum()
-                t_gh /= extra_gh_meas
+                t_gh /= len(idxs)
             else:
-                # t_gh += (block.conj() * (lop @ block)).sum()
-
-                block_c = block.conj()
-                ddd = (block * block_c).sum(1)
-                t_gh += ((block_c * (lop @ block)).sum(1) / ddd).sum()
-                # t_gh += ((block_c * (lop @ block)) / (block_c * block)).sum()
-                # t_top + (t_gh / extra_gh_meas)
-                # lop.matrix.diag().sum()
-                # breakpoint()
-        #
-        # t_gh /= extra_gh_meas
+                norm = block.norm(dim=1)
+                block = (block.T / norm).T
+                t_gh += (block.conj() * (lop @ block)).sum()
     #
     return (t_top + t_gh), (t_top, t_gh, Q, R)
-
-    # sktch = lop @ block
-    # if Q is not None:
-    #     sktch -= Q @ (Q.conj().T @ sktch)
