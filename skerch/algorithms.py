@@ -387,7 +387,7 @@ def seigh(
 
 
 # ##############################################################################
-# # DIAGPP/XDIAG
+# # TRACEPP/XTRACE AND DIAGPP/XDIAG
 # ##############################################################################
 def hutchpp(
     lop,
@@ -487,10 +487,27 @@ def hutchpp(
                 block if Q is None else block - Q @ (Q.conj().T @ block)
             )
             if is_noise_unitnorm:
-                t_gh += (block.conj() * (lop @ block)).sum()
+                t_gh += (block_defl.conj() * (lop @ block_defl)).sum()
                 t_gh /= len(idxs)
                 if return_diag:
                     d_gh += (block.conj() * (tlop @ block_defl)).sum(1).conj()
+                """
+                """
+                import matplotlib.pyplot as plt
+
+                proj = -Q @ Q.conj().T
+                proj[range(len(proj)), range(len(proj))] += 1
+                torch.trace(proj @ lop.matrix)  # this is correct
+                torch.trace(proj @ lop.matrix @ proj)  # also correct
+                norm = block_defl.norm(dim=1)
+                block_defl2 = (block_defl.T / norm).T
+                # GG = block @ block.T / extra_gh_meas
+                GG = block_defl2 @ block_defl2.T
+                # tst = ((lop @ proj) * GG).sum()
+                # plt.clf(); plt.imshow(GG); plt.show()
+                tst2 = ((proj @ lop.matrix @ proj) * GG).sum()
+                trace = lop.matrix.diag().sum()
+                breakpoint()
             else:
                 block_c = block.conj()
                 norm = block.norm(dim=1)
@@ -921,88 +938,3 @@ def snorm(
 # ##############################################################################
 # # TRACEPP/XTRACE
 # ##############################################################################
-def tracepp(
-    lop,
-    lop_device,
-    lop_dtype,
-    defl_dims=0,
-    extra_gh_meas=0,
-    seed=0b1110101001010101011,
-    noise_type="rademacher",
-    meas_blocksize=1,
-    dispatcher=SketchedAlgorithmDispatcher,
-):
-    """Trace sketched approximation via Hutch++."""
-    register = False  # set to True for seed debugging
-    h, w = lop.shape
-    if h != w:
-        raise ValueError("Trace++ expects square operators!")
-    dims = h
-    # figure out recovery settings
-    if defl_dims > dims or (defl_dims + extra_gh_meas) > dims:
-        # raise ValueError("More measurements than max linop rank!")
-        pass  # while debugging
-    #
-    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
-    if not is_noise_unitnorm:
-        warnings.warn(
-            "Non-unitnorm noise can be unstable for diagonal estimation! "
-            + "Check output and consider using Rademacher or PhaseNoise.",
-            RuntimeWarning,
-        )
-    if (defl_dims < 0) or (extra_gh_meas < 0):
-        raise ValueError("Negative number of measurements?")
-    if defl_dims + extra_gh_meas <= 0:
-        raise ValueError("Deflation dims and/or GH measurements needed!")
-    # without deflation
-    if defl_dims <= 0:
-        Q, R, Xh = None, None, None
-        t_top = 0
-    # with deflation
-    else:
-        # instantiate deflation linop and perform measurements
-        mop = dispatcher.mop(
-            noise_type,
-            (dims, defl_dims),
-            seed,
-            lop_dtype,
-            meas_blocksize,
-            register,
-        )
-        sketch = torch.empty(
-            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
-        )
-        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-            sketch[:, idxs] = lop @ block  # assuming block is by_col!
-        # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
-        # the trace of the first component: tr(Q.H @ A @ Q)
-        Q, R = qr(sketch, in_place_q=True, return_R=True)
-        Xh = Q.conj().T @ lop
-        # top trace estimate is then sum(diag(Q @ Xh))
-        t_top = (Q * Xh.T).sum()  # no conj here!
-    # Girard-Hutchinson for deflated estimate
-    t_gh = 0
-    # perform any extra Girard-Hutchinson measurements,
-    if extra_gh_meas > 0:
-        seed_gh = seed + defl_dims + 1
-        mop_gh = dispatcher.mop(
-            noise_type,
-            (dims, extra_gh_meas),
-            seed_gh,
-            lop_dtype,
-            meas_blocksize,
-            register,
-        )
-        #
-        for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-            if Q is not None:
-                block = block - Q @ (Q.conj().T @ block)
-            if is_noise_unitnorm:
-                t_gh += (block.conj() * (lop @ block)).sum()
-                t_gh /= len(idxs)
-            else:
-                norm = block.norm(dim=1)
-                block = (block.T / norm).T
-                t_gh += (block.conj() * (lop @ block)).sum()
-    #
-    return (t_top + t_gh), (t_top, t_gh, Q, R)

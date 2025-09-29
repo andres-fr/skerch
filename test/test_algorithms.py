@@ -95,6 +95,19 @@ def diag_recovery_shapes(request):
 
 
 @pytest.fixture
+def trace_recovery_shapes(request):
+    """Fixture to test Trace++ and XTrace.
+
+    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
+    where the tolerances are in the form ``(full, top_only)``.
+    """
+    result = [
+        (1000, 100, 50, 100000, (1e-10, 1e-10), (0.3, 0.1)),
+    ]
+    return result
+
+
+@pytest.fixture
 def lowrank_noise_types():
     """Collection of tuples ``(noise_type, is_complex_only)``"""
     result = [
@@ -107,7 +120,7 @@ def lowrank_noise_types():
 
 
 @pytest.fixture
-def diag_noise_types():
+def diagtrace_noise_types():
     """Collection of tuples ``(noise_type, is_complex_only)``"""
     result = [
         ("rademacher", False),
@@ -578,7 +591,7 @@ def test_diagpp_xdiag_correctness(
     torch_devices,
     dtypes_tols,
     diag_recovery_shapes,
-    diag_noise_types,
+    diagtrace_noise_types,
 ):
     """Correctness test case for ``diagpp`` amd ``xdiag``.
 
@@ -616,7 +629,7 @@ def test_diagpp_xdiag_correctness(
                     tr = D.sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
-                    for noise_type, complex_only in diag_noise_types:
+                    for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
@@ -1007,8 +1020,8 @@ def test_tracepp_xtrace_correctness(
     rng_seeds,
     torch_devices,
     dtypes_tols,
-    diag_recovery_shapes,
-    diag_noise_types,
+    trace_recovery_shapes,
+    diagtrace_noise_types,
 ):
     """Correctness test case for ``diagpp`` amd ``xdiag``.
 
@@ -1028,7 +1041,7 @@ def test_tracepp_xtrace_correctness(
                     gh_extra,
                     (diagpp_full_tol, diagpp_top_tol),
                     (xdiag_full_tol, xdiag_top_tol),
-                ) in diag_recovery_shapes:
+                ) in trace_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
@@ -1046,7 +1059,7 @@ def test_tracepp_xtrace_correctness(
                     tr = D.sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
-                    for noise_type, complex_only in diag_noise_types:
+                    for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
@@ -1060,7 +1073,8 @@ def test_tracepp_xtrace_correctness(
                             gh_extra,
                             seed,
                             noise_type,
-                            meas_blocksize=dims,
+                            meas_blocksize=dims
+                            + gh_extra,  #######################
                             dispatcher=MyDispatcher,
                             return_diag=True,
                         )
@@ -1074,3 +1088,4 @@ def test_tracepp_xtrace_correctness(
                             tr.item(),
                             tr1.item(),
                         )
+                        breakpoint()
