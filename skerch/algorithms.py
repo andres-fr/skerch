@@ -3,6 +3,10 @@
 
 
 """
+TODO:
+
+* merging tracepp and diagpp: lop is being called more than once in GH!
+
 * add trace operators, normal and hermitian (as advertised)
 * a-priori/posteriori/truncation stuff
 * Integration tests/docs (add utests where needed):
@@ -58,7 +62,12 @@ from .measurements import (
     PhaseNoiseLinOp,
     SsrftNoiseLinOp,
 )
-from .linops import BaseLinOp, CompositeLinOp, TransposedLinOp
+from .linops import (
+    BaseLinOp,
+    CompositeLinOp,
+    TransposedLinOp,
+    check_linop_input,
+)
 from .utils import (
     BadShapeError,
     COMPLEX_DTYPES,
@@ -380,7 +389,7 @@ def seigh(
 # ##############################################################################
 # # DIAGPP/XDIAG
 # ##############################################################################
-def diagpp(
+def hutchpp(
     lop,
     lop_device,
     lop_dtype,
@@ -390,8 +399,9 @@ def diagpp(
     noise_type="rademacher",
     meas_blocksize=1,
     dispatcher=SketchedAlgorithmDispatcher,
+    return_diag=True,
 ):
-    """Diagonal sketched approximation via Hutch++.
+    """Diagonal and trace sketched approximation via Hutch++.
 
     As it can be seen in Table 1 from
     `[BN2022] <https://arxiv.org/abs/2201.10684>`_,
@@ -412,8 +422,8 @@ def diagpp(
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
-    if defl_dims > dims or (defl_dims + extra_gh_meas) > dims:
-        raise ValueError("More measurements than max operator rank!")
+    if defl_dims > dims:
+        raise ValueError("More defl rank than max linop rank!")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
@@ -426,12 +436,12 @@ def diagpp(
         raise ValueError("Negative number of measurements?")
     if defl_dims + extra_gh_meas <= 0:
         raise ValueError("Deflation dims and/or GH measurements needed!")
-
     # without deflation
     if defl_dims <= 0:
         Q, R, Xh = None, None, None
-        d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
-        # t_top = 0 #########################3
+        t_top = 0
+        if return_diag:
+            d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
     # with deflation
     else:
         # instantiate deflation linop and perform measurements
@@ -453,14 +463,13 @@ def diagpp(
         Q, R = qr(sketch, in_place_q=True, return_R=True)
         Xh = Q.conj().T @ lop
         # top diagonal estimate is then diag(Q @ Xh)
-        d_top = (Q * Xh.T).sum(1)  # no conj here!
-
-        # # top trace estimate is then sum(diag(Q @ Xh))  ###################
-        # t_top = (Q * Xh.T).sum()  # no conj here!
-
+        t_top = (Q * Xh.T).sum()  # no conj here!
+        if return_diag:
+            d_top = (Q * Xh.T).sum(1)  # no conj here!
     # Girard-Hutchinson:
-    d_gh = torch.zeros_like(d_top)
-    # t_gh = 0 ################################
+    t_gh = 0
+    if return_diag:
+        d_gh = torch.zeros_like(d_top)
     # perform any extra Girard-Hutchinson measurements,
     if extra_gh_meas > 0:
         seed_gh = seed + defl_dims + 1
@@ -472,33 +481,34 @@ def diagpp(
             meas_blocksize,
             register,
         )
-        #  # trace block
-        # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-        #     if Q is not None:
-        #         block = block - Q @ (Q.conj().T @ block)
-        #     if is_noise_unitnorm:
-        #         t_gh += (block.conj() * (lop @ block)).sum()
-        #         t_gh /= len(idxs)
-        #     else:
-        #         norm = block.norm(dim=1)
-        #         block = (block.T / norm).T
-        #         t_gh += (block.conj() * (lop @ block)).sum()
-
-        #
+        tlop = TransposedLinOp(lop)
         for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-            sktch = lop @ block
-            if Q is not None:
-                sktch -= Q @ (Q.conj().T @ sktch)
+            block_defl = (
+                block if Q is None else block - Q @ (Q.conj().T @ block)
+            )
             if is_noise_unitnorm:
-                d_gh += (block.conj() * sktch).sum(1)
+                t_gh += (block.conj() * (lop @ block)).sum()
+                t_gh /= len(idxs)
+                if return_diag:
+                    d_gh += (block.conj() * (tlop @ block_defl)).sum(1).conj()
             else:
                 block_c = block.conj()
-                d_gh += ((block_c * sktch) / (block_c * block)).sum(1)
+                norm = block.norm(dim=1)
+                t_gh += (block_c * (lop @ (block.T / norm).T)).sum()
+                if return_diag:
+                    d_gh += (
+                        ((block_c * (tlop @ block_defl)) / (block_c * block))
+                        .sum(1)
+                        .conj()
+                    )
         #
-        d_gh /= extra_gh_meas
+        if return_diag:
+            d_gh /= extra_gh_meas
     #
-
-    return (d_top + d_gh), (d_top, d_gh, Q, R)
+    result = {"QR": (Q, R), "tr": (t_top + t_gh, t_top, t_gh)}
+    if return_diag:
+        result["diag"] = (d_top + d_gh, d_top, d_gh)
+    return result
 
 
 def xdiag(
@@ -522,7 +532,7 @@ def xdiag(
         raise BadShapeError("Only nonempty operators supported!")
     # figure out recovery settings
     if x_dims > dims:
-        raise ValueError("More measurements than max operator rank!")
+        raise ValueError("More measurements than max linop rank!")
     if x_dims <= 0:
         raise ValueError("No measurements?")
     #
@@ -764,7 +774,7 @@ class TriangularLinOp(BaseLinOp):
         method implements both at the same time. The specific mode can be
         dispatched using the ``adjoint`` parameter.
         """
-        self.check_input(x, self.lop.shape, adjoint=adjoint)
+        check_linop_input(x, self.lop.shape, adjoint=adjoint)
         # we don't factorize this method because we want to share buff
         # across both loops to hopefully save memory
         buff = torch.zeros_like(x)
@@ -930,7 +940,7 @@ def tracepp(
     dims = h
     # figure out recovery settings
     if defl_dims > dims or (defl_dims + extra_gh_meas) > dims:
-        # raise ValueError("More measurements than max operator rank!")
+        # raise ValueError("More measurements than max linop rank!")
         pass  # while debugging
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
