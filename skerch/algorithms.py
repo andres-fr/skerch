@@ -481,28 +481,11 @@ def hutchpp(
             meas_blocksize,
             register,
         )
-        # for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-        #     # nonscalar normalization before deflation
-        #     if not is_noise_unitnorm:
-        #         block = (block.T / block.norm(dim=1)).T
-        #     # deflate block and perform adjoint measurement (since Q deflates
-        #     # lop on the left space).
-        #     block_defl = (
-        #         block if Q is None else block - Q @ (Q.conj().T @ block)
-        #     )
-        #     tlopbc = (block_defl.conj().T @ lop).T
-        #     t_gh += (block_defl * tlopbc).sum()
-        #     if is_noise_unitnorm:
-        #         t_gh /= extra_gh_meas  # len(idxs)  # scalar normalization
-        #     if return_diag:
-        #         if is_noise_unitnorm:
-        #             d_gh += (block * tlopbc).sum(1)
-        #         else:
-        #             d_gh += ((block * tlopbc) / (block * block.conj())).sum(1)
+        #
         for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-            # transpose block: all measurements adjointsince Q deflates lop on
+            # transpose block: all measurements adjoint since Q deflates lop on
             # the left space
-            block = block.T
+            block = block.T  # after transp: (idxs, dims)
             # nonscalar normalization before deflation
             if not is_noise_unitnorm:
                 # so gram matrix of (dims, dims) has diag=1
@@ -511,15 +494,15 @@ def hutchpp(
             block_defl = (
                 block if Q is None else block - (block @ Q.conj()) @ Q.T
             )
-            tlopbc = block_defl.conj() @ lop
-            t_gh += (block_defl * tlopbc).sum()
-            if is_noise_unitnorm:
-                t_gh /= extra_gh_meas  # len(idxs)  # scalar normalization
+            b_lop = block_defl.conj() @ lop
+            t_gh += (block_defl * b_lop).sum() / extra_gh_meas
+            # if is_noise_unitnorm:
+            #     t_gh /= len(idxs)  # scalar normalization
             if return_diag:
                 if is_noise_unitnorm:
-                    d_gh += (block * tlopbc).sum(0)
+                    d_gh += (block * b_lop).sum(0)
                 else:
-                    d_gh += ((block * tlopbc) / (block * block.conj())).sum(0)
+                    d_gh += ((block * b_lop) / (block * block.conj())).sum(0)
         #
         if return_diag:
             d_gh /= extra_gh_meas
