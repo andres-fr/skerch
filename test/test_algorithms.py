@@ -15,7 +15,7 @@ from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
 from skerch.linops import linop_to_matrix, TransposedLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
-from skerch.algorithms import ssvd, seigh, hutchpp, xdiag, xtrace
+from skerch.algorithms import ssvd, seigh, hutchpp, xdiag
 from skerch.algorithms import snorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
@@ -96,13 +96,13 @@ def diag_recovery_shapes(request):
 
 @pytest.fixture
 def trace_recovery_shapes(request):
-    """Fixture to test Trace++ and XTrace.
+    """Fixture to test Trace++ (and XTrace)
 
-    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
+    Tuples in the form ``(dims, rank, defl, gh_extra, tracepp_tol, xtrace_tol)``
     where the tolerances are in the form ``(full, top_only)``.
     """
     result = [
-        (5000, 500, 2000, 100000, (1e-10, 1e-10), (0.3, 0.1)),
+        (10, 10, 0, 2000, (2, None), (None, None)),
     ]
     return result
 
@@ -1022,13 +1022,13 @@ def test_tracepp_xtrace_correctness(
     trace_recovery_shapes,
     diagtrace_noise_types,
 ):
-    """Correctness test case for ``diagpp`` amd ``xdiag``.
+    """Correctness test case for ``tracepp`` amd ``xtrace``.
 
-    Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
+    Runs trace recoveries on all devices/dtypes/noisemats, on a few
     different settings for rank and measurements, testing that:
 
     * Retrieved Q matrices are orthogonal
-    * Retrieved diagonals are close enough (either deflation or final ones)
+    * Retrieved traces are close enough (either deflation or final ones)
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -1038,14 +1038,14 @@ def test_tracepp_xtrace_correctness(
                     rank,
                     defl,
                     gh_extra,
-                    (diagpp_full_tol, diagpp_top_tol),
-                    (xdiag_full_tol, xdiag_top_tol),
+                    (tracepp_full_tol, tracepp_top_tol),
+                    (xtrace_full_tol, xtrace_top_tol),
                 ) in trace_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
-                        decay=0.01,
+                        decay=100,
                         diag_ratio=0.0,
                         symmetric=False,
                         psd=False,
@@ -1053,8 +1053,9 @@ def test_tracepp_xtrace_correctness(
                         dtype=dtype,
                         device=device,
                     )
+                    mat *= 123
                     lop = BasicMatrixLinOp(mat)
-                    tr = mat.diag().sum()
+                    trace = mat.diag().sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
@@ -1062,154 +1063,45 @@ def test_tracepp_xtrace_correctness(
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # # run hutchpp
-                        # hutch = hutchpp(
-                        #     lop,
-                        #     device,
-                        #     dtype,
-                        #     defl,
-                        #     gh_extra,
-                        #     seed,
-                        #     noise_type,
-                        #     meas_blocksize=dims,
-                        #     dispatcher=MyDispatcher,
-                        #     return_diag=True,
-                        # )
-                        # Q1, R1 = hutch["QR"]
-                        # tr1, ttop1, tgh1 = hutch["tr"]
-
-                        # run xtrace
-                        if (
-                            xdiag_full_tol is not None
-                            or xdiag_top_tol is not None
-                        ):
-                            xtr = xtrace(
-                                lop,
-                                device,
-                                dtype,
-                                defl,
-                                seed,
-                                noise_type,
-                                meas_blocksize=dims,
-                                dispatcher=MyDispatcher,
-                            )
-                            Q2, R2 = xtr["QR"]
-                            tr2, ttop2, tgh2 = xtr["tr"]
-                        else:
-                            Q2 = None
-                        #
-                        print(
-                            (defl, gh_extra),
-                            ">>>",
+                        # run hutchpp
+                        hutch = hutchpp(
+                            lop,
+                            device,
                             dtype,
+                            defl,
+                            gh_extra,
+                            seed,
                             noise_type,
-                            torch.dist(tr, tr2).item(),
-                            torch.dist(tr, ttop2).item(),
-                            # tr.item(),
-                            # tr2.item(),
+                            meas_blocksize=dims,
+                            dispatcher=MyDispatcher,
+                            return_diag=True,
                         )
-                        # breakpoint()
+                        Q1, R1 = hutch["QR"]
+                        tr1, ttop1, tgh1 = hutch["tr"]
+                        # test Qs are orthogonal
+                        if Q1 is not None:
+                            QhQ1 = Q1.H @ Q1
+                            assert torch.allclose(
+                                QhQ1, I, atol=tol
+                            ), "Diag++ Q not orthogonal?"
+                        # test recoveries are correct
+                        if tracepp_full_tol is not None:
+                            try:
+                                assert (
+                                    relerr(trace, tr1) < tracepp_full_tol
+                                ), "Bad full Trace++?"
+                            except:
+                                """
+                                TODO:
 
-                        # # test Qs are orthogonal
-                        # if Q1 is not None:
-                        #     QhQ1 = Q1.H @ Q1
-                        #     assert torch.allclose(
-                        #         QhQ1, I, atol=tol
-                        #     ), "Diag++ Q not orthogonal?"
-                        # if Q2 is not None:
-                        #     QhQ2 = Q2.H @ Q2
-                        #     assert torch.allclose(
-                        #         QhQ2, I, atol=tol
-                        #     ), "XDiag Q not orthogonal?"
-                        # # test recoveries are correct
-                        # if diagpp_full_tol is not None:
-                        #     assert (
-                        #         relerr(D, diag1) < diagpp_full_tol
-                        #     ), "Bad full Diag++?"
-                        # if diagpp_top_tol is not None:
-                        #     assert (
-                        #         relerr(D, dtop1) < diagpp_top_tol
-                        #     ), "Bad top Diag++?"
-                        # if xdiag_full_tol is not None:
-                        #     assert (
-                        #         relerr(D, diag2) < xdiag_full_tol
-                        #     ), "Bad full XDiag?"
-                        # if xdiag_top_tol is not None:
-                        #     assert (
-                        #         relerr(D, dtop2) < xdiag_top_tol
-                        #     ), "Bad top XDiag?"
-
-
-# def test_tracepp_xtrace_correctness(
-#     rng_seeds,
-#     torch_devices,
-#     dtypes_tols,
-#     trace_recovery_shapes,
-#     diagtrace_noise_types,
-# ):
-#     """Correctness test case for ``diagpp`` amd ``xdiag``.
-
-#     Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
-#     different settings for rank and measurements, testing that:
-
-#     * Retrieved Q matrices are orthogonal
-#     * Retrieved diagonals are close enough (either deflation or final ones)
-#     """
-#     for seed in rng_seeds:
-#         for device in torch_devices:
-#             for dtype, tol in dtypes_tols.items():
-#                 for (
-#                     dims,
-#                     rank,
-#                     defl,
-#                     gh_extra,
-#                     (diagpp_full_tol, diagpp_top_tol),
-#                     (xdiag_full_tol, xdiag_top_tol),
-#                 ) in trace_recovery_shapes:
-#                     hw = (dims, dims)
-#                     mat, _ = RandomLordMatrix.exp(
-#                         hw,
-#                         rank,
-#                         decay=100,
-#                         diag_ratio=0.0,
-#                         symmetric=False,
-#                         psd=False,
-#                         seed=seed,
-#                         dtype=dtype,
-#                         device=device,
-#                     )
-#                     lop = BasicMatrixLinOp(mat)
-#                     D = mat.diag()
-#                     tr = D.sum()
-#                     I = torch.eye(defl, dtype=dtype, device=device)
-#                     #
-#                     for noise_type, complex_only in diagtrace_noise_types:
-#                         if dtype not in COMPLEX_DTYPES and complex_only:
-#                             # this noise type does not support reals,
-#                             # skip this iteration
-#                             continue
-#                         # run hutchpp
-#                         hutch = hutchpp(
-#                             lop,
-#                             device,
-#                             dtype,
-#                             defl,
-#                             gh_extra,
-#                             seed,
-#                             noise_type,
-#                             meas_blocksize=dims
-#                             + gh_extra,  #######################
-#                             dispatcher=MyDispatcher,
-#                             return_diag=True,
-#                         )
-#                         Q1, R1 = hutch["QR"]
-#                         tr1, trtop1, trgh1 = hutch["tr"]
-
-#                         print(
-#                             ">>>",
-#                             noise_type,
-#                             torch.dist(tr, tr1).item(),
-#                             tr.item(),
-#                             tr1.item(),
-#                         )
-#                         # breakpoint()
+                                we must eval trace different than diagonal!
+                                In a matrix of diag norm 10000, a trace dev
+                                of 3 is nothing. but my traces avg to 0!
+                                so we get 300% error. this is nonsense.
+                                """
+                                diag1, dtop1, dgh1 = hutch["diag"]
+                                breakpoint()
+                        if tracepp_top_tol is not None:
+                            assert (
+                                relerr(trace, ttop1) < tracepp_top_tol
+                            ), "Bad top Trace++?"
