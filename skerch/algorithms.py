@@ -428,7 +428,7 @@ def hutchpp(
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
         warnings.warn(
-            "Non-unitnorm noise can be unstable for diagonal estimation! "
+            "Non-unitnorm noise can be unstable for trace/diag estimation! "
             + "Check output and consider using Rademacher or PhaseNoise.",
             RuntimeWarning,
         )
@@ -488,7 +488,8 @@ def hutchpp(
             block = block.T  # after transp: (idxs, dims)
             # nonscalar normalization before deflation
             if not is_noise_unitnorm:
-                # so gram matrix of (dims, dims) has diag=sqrt(len(idxs))
+                # so gram matrix of (dims, dims) has diag=len(idxs)
+                # and adding every subtrace/gh_meas yields unit diagonal.
                 block *= (len(idxs) ** 0.5) / block.norm(dim=0)
             # deflate block and perform adj meas
             block_defl = (
@@ -509,6 +510,125 @@ def hutchpp(
     if return_diag:
         result["diag"] = (d_top + d_gh, d_top, d_gh)
     return result
+
+
+def xtrace(
+    lop,
+    lop_device,
+    lop_dtype,
+    x_dims,
+    seed=0b1110101001010101011,
+    noise_type="rademacher",
+    meas_blocksize=1,
+    dispatcher=SketchedAlgorithmDispatcher,
+    cache_mop=True,
+    return_diag=True,
+):
+    """ """
+    register = False  # set to True for seed debugging
+    h, w = lop.shape
+    if h != w:
+        raise BadShapeError("Xtrace expects square operators!")
+    dims = h
+    if dims == 0:
+        raise BadShapeError("Only nonempty operators supported!")
+    # figure out recovery settings
+    if x_dims > dims:
+        raise ValueError("More measurements than max linop rank!")
+    if x_dims <= 0:
+        raise ValueError("No measurements?")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for trace/diag estimation! "
+            + "Check output and consider using Rademacher or PhaseNoise.",
+            RuntimeWarning,
+        )
+    # instantiate outer measurement linop and perform outer measurements
+    mop = dispatcher.mop(
+        noise_type,
+        (dims, x_dims),
+        seed,
+        lop_dtype,
+        meas_blocksize,
+        register,
+    )
+    # leveraging A ~= (Q @ S @ Q.H) A + [I - (Q @ S @ Q.H)] A, we hard-compute
+    # the first component. For that, obtain Q and Xh = S @ Q.H @ A
+    if cache_mop:
+        mopmat = mop.to_matrix(lop_dtype, lop_device)
+        sketch = lop @ mopmat
+    else:
+        sketch = torch.empty(
+            (lop.shape[0], x_dims), dtype=lop_dtype, device=lop_device
+        )
+        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+            sketch[:, idxs] = lop @ block  # assuming block is by_col!
+    Q, R = qr(sketch, in_place_q=False, return_R=True)  # we need sketch
+    S = torch.linalg.pinv(R.conj().T)
+    S /= torch.linalg.norm(S, dim=0)
+    Smat = (S @ S.conj().T) / -x_dims
+    Smat[range(x_dims), range(x_dims)] += 1
+    Xh = Smat @ (Q.conj().T @ lop)
+    # compute top trace/diag as preliminary diag (efficient and exact)
+    t_top = (Q * Xh.T).sum()  # no conj here!
+    t_gh = 0
+    if return_diag:
+        d_top = (Q * Xh.T).sum(1)  # no conj here!
+        d_gh = torch.zeros_like(d_top)
+    # refine diagonal with deflated (and Xchanged) Girard-Hutchinson
+    is_complex = lop_dtype in COMPLEX_DTYPES
+    if cache_mop:
+        iterator = ((b, range(0, x_dims)) for b in [mopmat])
+    else:
+        iterator = mop.get_blocks(lop_dtype, lop_device)
+    for block, idxs in iterator:
+        # transpose block: all measurements adjoint since Q deflates lop on
+        # the left space
+        block = block.T  # no conj here! after transp: (idxs, dims)
+        # nonscalar normalization before deflation
+        if not is_noise_unitnorm:
+            # so gram matrix of (dims, dims) has diag=len(idxs)
+            # and adding every subtrace/gh_meas yields unit diagonal.
+            block *= (len(idxs) ** 0.5) / block.norm(dim=0)
+        # deflate block and perform adj meas
+        block_defl = block if Q is None else block - (block @ Q.conj()) @ Q.T
+        # block_defl = (
+        #     block if Q is None else block - (block @ Q.conj()) @ Smat @ Q.T
+        # )
+        b_lop = block_defl.conj() @ lop
+        t_gh += (block_defl * b_lop).sum() / x_dims
+        if return_diag:
+            if is_noise_unitnorm:
+                d_gh += (block * b_lop).sum(0)
+            else:
+                d_gh += ((block * b_lop) / (block * block.conj())).sum(0)
+    #
+    if return_diag:
+        d_gh /= x_dims
+    #
+    result = {"QR": (Q, R), "tr": (t_top + t_gh, t_top, t_gh)}
+    if return_diag:
+        result["diag"] = (d_top + d_gh, d_top, d_gh)
+    return result
+
+    #     sketch[:, idxs] -= Q @ (Xh @ block)
+    #     #
+    #     if is_noise_unitnorm and is_complex:
+    #         d_gh += (block.conj() * sketch).sum(1)
+    #     elif is_noise_unitnorm and not is_complex:
+    #         d_gh += (block * sketch).sum(1)
+    #     elif not is_noise_unitnorm and is_complex:
+    #         block_c = block.conj()
+    #         d_gh += ((sketch * block_c) / (block_c * block)).sum(1)
+    #     elif not is_noise_unitnorm and not is_complex:
+    #         d_gh += (sketch / block).sum(1)
+    #     else:
+    #         raise RuntimeError("Should never happen!")
+    # #
+    # d_gh /= x_dims
+    # return (d_top + d_gh), (d_top, d_gh, Q, R)
 
 
 def xdiag(

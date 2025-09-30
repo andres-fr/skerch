@@ -15,7 +15,7 @@ from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
 from skerch.linops import linop_to_matrix, TransposedLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
-from skerch.algorithms import ssvd, seigh, hutchpp, xdiag
+from skerch.algorithms import ssvd, seigh, hutchpp, xdiag, xtrace
 from skerch.algorithms import snorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
@@ -102,7 +102,7 @@ def trace_recovery_shapes(request):
     where the tolerances are in the form ``(full, top_only)``.
     """
     result = [
-        (1000, 100, 50, 100000, (1e-10, 1e-10), (0.3, 0.1)),
+        (5000, 500, 2000, 100000, (1e-10, 1e-10), (0.3, 0.1)),
     ]
     return result
 
@@ -1045,7 +1045,7 @@ def test_tracepp_xtrace_correctness(
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
-                        decay=100,
+                        decay=0.01,
                         diag_ratio=0.0,
                         symmetric=False,
                         psd=False,
@@ -1062,48 +1062,54 @@ def test_tracepp_xtrace_correctness(
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # run hutchpp
-                        hutch = hutchpp(
-                            lop,
-                            device,
-                            dtype,
-                            defl,
-                            gh_extra,
-                            seed,
-                            noise_type,
-                            meas_blocksize=dims,
-                            dispatcher=MyDispatcher,
-                            return_diag=True,
-                        )
-                        Q1, R1 = hutch["QR"]
-                        tr1, ttop1, tgh1 = hutch["tr"]
+                        # # run hutchpp
+                        # hutch = hutchpp(
+                        #     lop,
+                        #     device,
+                        #     dtype,
+                        #     defl,
+                        #     gh_extra,
+                        #     seed,
+                        #     noise_type,
+                        #     meas_blocksize=dims,
+                        #     dispatcher=MyDispatcher,
+                        #     return_diag=True,
+                        # )
+                        # Q1, R1 = hutch["QR"]
+                        # tr1, ttop1, tgh1 = hutch["tr"]
+
+                        # run xtrace
+                        if (
+                            xdiag_full_tol is not None
+                            or xdiag_top_tol is not None
+                        ):
+                            xtr = xtrace(
+                                lop,
+                                device,
+                                dtype,
+                                defl,
+                                seed,
+                                noise_type,
+                                meas_blocksize=dims,
+                                dispatcher=MyDispatcher,
+                            )
+                            Q2, R2 = xtr["QR"]
+                            tr2, ttop2, tgh2 = xtr["tr"]
+                        else:
+                            Q2 = None
+                        #
                         print(
                             (defl, gh_extra),
                             ">>>",
+                            dtype,
                             noise_type,
-                            torch.dist(tr, tr1).item(),
-                            tr.item(),
-                            tr1.item(),
+                            torch.dist(tr, tr2).item(),
+                            torch.dist(tr, ttop2).item(),
+                            # tr.item(),
+                            # tr2.item(),
                         )
                         # breakpoint()
 
-                        # # run XDiag
-                        # if (
-                        #     xdiag_full_tol is not None
-                        #     or xdiag_top_tol is not None
-                        # ):
-                        #     diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
-                        #         lop,
-                        #         device,
-                        #         dtype,
-                        #         defl,
-                        #         seed,
-                        #         noise_type,
-                        #         meas_blocksize=dims,
-                        #         dispatcher=MyDispatcher,
-                        #     )
-                        # else:
-                        #     Q2 = None
                         # # test Qs are orthogonal
                         # if Q1 is not None:
                         #     QhQ1 = Q1.H @ Q1
