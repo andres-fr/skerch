@@ -488,16 +488,14 @@ def hutchpp(
             block = block.T  # after transp: (idxs, dims)
             # nonscalar normalization before deflation
             if not is_noise_unitnorm:
-                # so gram matrix of (dims, dims) has diag=1
-                block = block / block.norm(dim=0)
+                # so gram matrix of (dims, dims) has diag=sqrt(len(idxs))
+                block *= (len(idxs) ** 0.5) / block.norm(dim=0)
             # deflate block and perform adj meas
             block_defl = (
                 block if Q is None else block - (block @ Q.conj()) @ Q.T
             )
             b_lop = block_defl.conj() @ lop
             t_gh += (block_defl * b_lop).sum() / extra_gh_meas
-            # if is_noise_unitnorm:
-            #     t_gh /= len(idxs)  # scalar normalization
             if return_diag:
                 if is_noise_unitnorm:
                     d_gh += (block * b_lop).sum(0)
