@@ -483,24 +483,28 @@ def hutchpp(
         )
         tlop = TransposedLinOp(lop)
         for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
+            # nonscalar normalization before deflation
+            if not is_noise_unitnorm:
+                block = (block.T / block.norm(dim=1)).T
+            # deflate block and perform lop.T@deflblock measurement
+            # we use lopT because the diagonal needs the fact that Q is a
+            # left-space projector (not right-space), and trace doesn't mind.
             block_defl = (
                 block if Q is None else block - Q @ (Q.conj().T @ block)
             )
             tlopb = tlop @ block_defl
+            t_gh += (block_defl.conj() * tlopb).sum()
             if is_noise_unitnorm:
-                t_gh += (block_defl.conj() * tlopb).sum()
-                t_gh /= len(idxs)
-                if return_diag:
+                t_gh /= len(idxs)  # scalar normalization
+            #
+            if return_diag:
+                if is_noise_unitnorm:
                     d_gh += (block.conj() * tlopb).sum(1).conj()
-            else:
-                block_c = block.conj()
-                norm = block.norm(dim=1)
-                t_gh += (block_c * (lop @ (block.T / norm).T)).sum()
-                if return_diag:
+                else:
+                    block_c = block.conj()
                     d_gh += (
                         ((block_c * tlopb) / (block_c * block)).sum(1).conj()
                     )
-
                 # """
                 # Thinking:
 
@@ -508,25 +512,39 @@ def hutchpp(
 
                 # If we use GG (either directly or via block_defl)
 
+                # trace is 0.2373
+                # 0.2219 is d_gh ground truth.
+                # Estimation is 0.2406
+
                 # """
                 # import matplotlib.pyplot as plt
 
                 # proj = -Q @ Q.conj().T
                 # proj[range(len(proj)), range(len(proj))] += 1
-                # # torch.trace(proj @ lop.matrix)  # this is correct
-                # # torch.trace(proj @ lop.matrix @ proj)  # also correct
-                # # norm = block_defl.norm(dim=1)
+                # #
+                # # norm = block.norm(dim=1)
+                # # nblock = (block.T / norm).T
+                # # GG = nblock @ nblock.T
+                # nblock = block
+                # nblock -= Q @ (Q.conj().T @ nblock)
+                # GG = block_defl @ block_defl.T
+                # #
                 # # block_defl2 = (block_defl.T / norm).T
                 # # # GG = block @ block.T / extra_gh_meas
-                # # GG = block_defl2 @ block_defl2.T
-                # # II = torch.zeros_like(G)
-                # # II[range(len(GG)), range(len(GG))] = 1
+                # # GG = block_defl @ block_defl.T
+                # II = torch.zeros_like(GG)
+                # II[range(len(GG)), range(len(GG))] = 1
                 # # tst = ((lop @ proj) * GG).sum()
                 # # # plt.clf(); plt.imshow(GG); plt.show()
-                # # tst2 = ((proj @ lop.matrix @ proj) * GG).sum()
-                # # tst3 = ((proj @ lop.matrix @ proj) * II).sum()
-                # # trace = lop.matrix.diag().sum()
-                # # breakpoint()
+                # trace = lop.matrix.diag().sum()
+                # # THIS WORKS
+                # # ((lop.matrix @ proj) * II).sum()
+                # # (lop.matrix * proj).sum()
+                # # THIS?
+                # # (lop.matrix * GG).sum()
+
+                # (nblock.conj() * (lop @ nblock)).sum()
+                # breakpoint()
 
         #
         if return_diag:
