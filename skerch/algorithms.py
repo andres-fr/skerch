@@ -486,38 +486,48 @@ def hutchpp(
             block_defl = (
                 block if Q is None else block - Q @ (Q.conj().T @ block)
             )
+            tlopb = tlop @ block_defl
             if is_noise_unitnorm:
-                t_gh += (block_defl.conj() * (lop @ block_defl)).sum()
+                t_gh += (block_defl.conj() * tlopb).sum()
                 t_gh /= len(idxs)
                 if return_diag:
-                    d_gh += (block.conj() * (tlop @ block_defl)).sum(1).conj()
-                """
-                """
-                import matplotlib.pyplot as plt
-
-                proj = -Q @ Q.conj().T
-                proj[range(len(proj)), range(len(proj))] += 1
-                torch.trace(proj @ lop.matrix)  # this is correct
-                torch.trace(proj @ lop.matrix @ proj)  # also correct
-                norm = block_defl.norm(dim=1)
-                block_defl2 = (block_defl.T / norm).T
-                # GG = block @ block.T / extra_gh_meas
-                GG = block_defl2 @ block_defl2.T
-                # tst = ((lop @ proj) * GG).sum()
-                # plt.clf(); plt.imshow(GG); plt.show()
-                tst2 = ((proj @ lop.matrix @ proj) * GG).sum()
-                trace = lop.matrix.diag().sum()
-                breakpoint()
+                    d_gh += (block.conj() * tlopb).sum(1).conj()
             else:
                 block_c = block.conj()
                 norm = block.norm(dim=1)
                 t_gh += (block_c * (lop @ (block.T / norm).T)).sum()
                 if return_diag:
                     d_gh += (
-                        ((block_c * (tlop @ block_defl)) / (block_c * block))
-                        .sum(1)
-                        .conj()
+                        ((block_c * tlopb) / (block_c * block)).sum(1).conj()
                     )
+
+                # """
+                # Thinking:
+
+                # The plain trace test works (-0.0871 is the residual trace)
+
+                # If we use GG (either directly or via block_defl)
+
+                # """
+                # import matplotlib.pyplot as plt
+
+                # proj = -Q @ Q.conj().T
+                # proj[range(len(proj)), range(len(proj))] += 1
+                # # torch.trace(proj @ lop.matrix)  # this is correct
+                # # torch.trace(proj @ lop.matrix @ proj)  # also correct
+                # # norm = block_defl.norm(dim=1)
+                # # block_defl2 = (block_defl.T / norm).T
+                # # # GG = block @ block.T / extra_gh_meas
+                # # GG = block_defl2 @ block_defl2.T
+                # # II = torch.zeros_like(G)
+                # # II[range(len(GG)), range(len(GG))] = 1
+                # # tst = ((lop @ proj) * GG).sum()
+                # # # plt.clf(); plt.imshow(GG); plt.show()
+                # # tst2 = ((proj @ lop.matrix @ proj) * GG).sum()
+                # # tst3 = ((proj @ lop.matrix @ proj) * II).sum()
+                # # trace = lop.matrix.diag().sum()
+                # # breakpoint()
+
         #
         if return_diag:
             d_gh /= extra_gh_meas
