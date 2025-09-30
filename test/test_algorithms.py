@@ -626,7 +626,6 @@ def test_diagpp_xdiag_correctness(
                     )
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
-                    tr = D.sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
@@ -1055,8 +1054,7 @@ def test_tracepp_xtrace_correctness(
                         device=device,
                     )
                     lop = BasicMatrixLinOp(mat)
-                    D = mat.diag()
-                    tr = D.sum()
+                    tr = mat.diag().sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
@@ -1073,15 +1071,14 @@ def test_tracepp_xtrace_correctness(
                             gh_extra,
                             seed,
                             noise_type,
-                            meas_blocksize=dims
-                            + gh_extra,  #######################
+                            meas_blocksize=dims,
                             dispatcher=MyDispatcher,
                             return_diag=True,
                         )
                         Q1, R1 = hutch["QR"]
-                        tr1, trtop1, trgh1 = hutch["tr"]
-
+                        tr1, ttop1, tgh1 = hutch["tr"]
                         print(
+                            (defl, gh_extra),
                             ">>>",
                             noise_type,
                             torch.dist(tr, tr1).item(),
@@ -1089,3 +1086,124 @@ def test_tracepp_xtrace_correctness(
                             tr1.item(),
                         )
                         # breakpoint()
+
+                        # # run XDiag
+                        # if (
+                        #     xdiag_full_tol is not None
+                        #     or xdiag_top_tol is not None
+                        # ):
+                        #     diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                        #         lop,
+                        #         device,
+                        #         dtype,
+                        #         defl,
+                        #         seed,
+                        #         noise_type,
+                        #         meas_blocksize=dims,
+                        #         dispatcher=MyDispatcher,
+                        #     )
+                        # else:
+                        #     Q2 = None
+                        # # test Qs are orthogonal
+                        # if Q1 is not None:
+                        #     QhQ1 = Q1.H @ Q1
+                        #     assert torch.allclose(
+                        #         QhQ1, I, atol=tol
+                        #     ), "Diag++ Q not orthogonal?"
+                        # if Q2 is not None:
+                        #     QhQ2 = Q2.H @ Q2
+                        #     assert torch.allclose(
+                        #         QhQ2, I, atol=tol
+                        #     ), "XDiag Q not orthogonal?"
+                        # # test recoveries are correct
+                        # if diagpp_full_tol is not None:
+                        #     assert (
+                        #         relerr(D, diag1) < diagpp_full_tol
+                        #     ), "Bad full Diag++?"
+                        # if diagpp_top_tol is not None:
+                        #     assert (
+                        #         relerr(D, dtop1) < diagpp_top_tol
+                        #     ), "Bad top Diag++?"
+                        # if xdiag_full_tol is not None:
+                        #     assert (
+                        #         relerr(D, diag2) < xdiag_full_tol
+                        #     ), "Bad full XDiag?"
+                        # if xdiag_top_tol is not None:
+                        #     assert (
+                        #         relerr(D, dtop2) < xdiag_top_tol
+                        #     ), "Bad top XDiag?"
+
+
+# def test_tracepp_xtrace_correctness(
+#     rng_seeds,
+#     torch_devices,
+#     dtypes_tols,
+#     trace_recovery_shapes,
+#     diagtrace_noise_types,
+# ):
+#     """Correctness test case for ``diagpp`` amd ``xdiag``.
+
+#     Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
+#     different settings for rank and measurements, testing that:
+
+#     * Retrieved Q matrices are orthogonal
+#     * Retrieved diagonals are close enough (either deflation or final ones)
+#     """
+#     for seed in rng_seeds:
+#         for device in torch_devices:
+#             for dtype, tol in dtypes_tols.items():
+#                 for (
+#                     dims,
+#                     rank,
+#                     defl,
+#                     gh_extra,
+#                     (diagpp_full_tol, diagpp_top_tol),
+#                     (xdiag_full_tol, xdiag_top_tol),
+#                 ) in trace_recovery_shapes:
+#                     hw = (dims, dims)
+#                     mat, _ = RandomLordMatrix.exp(
+#                         hw,
+#                         rank,
+#                         decay=100,
+#                         diag_ratio=0.0,
+#                         symmetric=False,
+#                         psd=False,
+#                         seed=seed,
+#                         dtype=dtype,
+#                         device=device,
+#                     )
+#                     lop = BasicMatrixLinOp(mat)
+#                     D = mat.diag()
+#                     tr = D.sum()
+#                     I = torch.eye(defl, dtype=dtype, device=device)
+#                     #
+#                     for noise_type, complex_only in diagtrace_noise_types:
+#                         if dtype not in COMPLEX_DTYPES and complex_only:
+#                             # this noise type does not support reals,
+#                             # skip this iteration
+#                             continue
+#                         # run hutchpp
+#                         hutch = hutchpp(
+#                             lop,
+#                             device,
+#                             dtype,
+#                             defl,
+#                             gh_extra,
+#                             seed,
+#                             noise_type,
+#                             meas_blocksize=dims
+#                             + gh_extra,  #######################
+#                             dispatcher=MyDispatcher,
+#                             return_diag=True,
+#                         )
+#                         Q1, R1 = hutch["QR"]
+#                         tr1, trtop1, trgh1 = hutch["tr"]
+
+#                         print(
+#                             ">>>",
+#                             noise_type,
+#                             torch.dist(tr, tr1).item(),
+#                             tr.item(),
+#                             tr1.item(),
+#                         )
+#                         # breakpoint()
