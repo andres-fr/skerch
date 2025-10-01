@@ -382,13 +382,17 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
     the main diagonal of :math:`A`. If e.g. :math:`\varphi` shifts the entries
     in :math:`v` downwards by ``k`` positions, we get the ``k``-th subdiagonal.
 
+    This function performs the corresponding shift.
+
     .. seealso::
 
       `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
       Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds
       and an improved algorithm”*.  CoRR abs/2201.10684.
 
-    :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
+    :param v: Torch tensor expected to contain zero-mean, uncorrelated entries.
+      If vector, shift is applied directly. If tensor, shift is applied to
+      last dimension.
     :param diag_idxs: Iterator with integers corresponding to the subdiagonal
       indices to include, e.g. 0 corresponds to the main diagonal, 1 to the
       diagonal above, -1 to the diagonal below, and so on.
@@ -403,23 +407,25 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
     """
     if len(diag_idxs) <= 0:
         raise ValueError("Empty diag_idxs?")
-    len_v = len(v)
+    len_v = v.shape[-1]
     if use_fft:
         fft = torch.fft.fft if v.dtype in COMPLEX_DTYPES else torch.fft.rfft
         ifft = torch.fft.ifft if v.dtype in COMPLEX_DTYPES else torch.fft.irfft
         # create a buffer of zeros to avoid circular conv and store the
         # convolutional impulse response
-        buff = torch.zeros(2 * len_v, dtype=v.dtype, device=v.device)
+        buff = torch.zeros(
+            v.shape[:-1] + (2 * len_v,), dtype=v.dtype, device=v.device
+        )
         # padded FFT to avoid circular convolution
-        buff[:len_v] = v
+        buff[..., :len_v] = v
         V = fft(buff)
         # now we can write the impulse response on buff
-        buff[:len_v] = 0
+        buff[..., :len_v] = 0
         for idx in diag_idxs:
-            buff[idx] = 1
+            buff[..., idx] = 1
         # non-circular FFT convolution:
         V *= fft(buff)
-        V = ifft(V)[:len_v]
+        V = ifft(V)[..., :len_v]
         return V
     else:
         result = torch.zeros_like(v)
@@ -427,9 +433,9 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
             if idx == 0:
                 result += v
             elif idx > 0:
-                result[idx:] += v[:-idx]
+                result[..., idx:] += v[..., :-idx]
             else:
-                result[:idx] += v[-idx:]
+                result[..., :idx] += v[..., -idx:]
         return result
 
 
@@ -438,7 +444,9 @@ def serrated_hadamard_pattern(
 ):
     """Shifted copies of vectors for block-triangular Hutchinson estimation.
 
-    :param v: Torch vector expected to contain zero-mean, uncorrelated entries.
+    :param v: Torch tensor expected to contain zero-mean, uncorrelated entries.
+      If vector, shift is applied directly. If tensor, shift is applied to
+      last dimension.
     :param with_main_diagonal: If true, the main diagonal will be included
           in the patterns, otherwise excluded.
     :param lower: If true, the block-triangles will be below the diagonal,
@@ -487,11 +495,10 @@ def serrated_hadamard_pattern(
     * ``v9``
     * ``v10``
     """
-    len_v = len(v)
+    len_v = v.shape[-1]
     if blocksize < 1 or blocksize > len_v:
         raise ValueError("Block size must be an integer from 1 to len(v)!")
     #
-
     if use_fft:
         # TODO: this is not efficient
         raise NotImplementedError
@@ -544,6 +551,6 @@ def serrated_hadamard_pattern(
                 out_beg = block_n * blocksize
                 out_end = out_beg + block_i
             # add to serrated pattern
-            result[out_beg:out_end] += v[beg:end]
+            result[..., out_beg:out_end] += v[..., beg:end]
     #
     return result

@@ -717,6 +717,20 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                     serrated_hadamard_pattern(x, -1)
                 with pytest.raises(ValueError):
                     serrated_hadamard_pattern(x, len(x) + 1)
+                # test vectorized outputs
+                xrep = x.unsqueeze(0).repeat(5, 1)
+                xrep1a = subdiag_hadamard_pattern(xrep, [1], use_fft=False)
+                xrep1b = subdiag_hadamard_pattern(xrep, [1], use_fft=True)
+                xrep2 = serrated_hadamard_pattern(xrep, 3, use_fft=False)
+                assert (
+                    xrep1a - y1[1]
+                ).norm() < tol, "Inconsistent subdiag vectorization!"
+                assert (
+                    xrep1b - y1[1]
+                ).norm() < tol, "Inconsistent subdiag vectorization! (fft)"
+                assert (
+                    xrep2 - z1[2]
+                ).norm() < tol, "Inconsistent serrated vectorization!"
                 # subdiag_hadamard_pattern
                 for i in range(dims + 1):
                     for fft in (False, True):
