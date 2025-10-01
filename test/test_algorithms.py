@@ -102,7 +102,12 @@ def trace_recovery_shapes(request):
     where the tolerances are in the form ``(full, top_only)``.
     """
     result = [
-        (10, 10, 0, 2000, (2, None), (None, None)),
+        # low-rank matrix with good deflation: good tr++
+        (200, 5, 50, 0, (1e-10, 1e-10), (None, None)),
+        # now less deflation but we add G-H: GH seems to hurt but still decent
+        (200, 10, 9, 50, (0.025, 0.01), (None, None)),
+        # # just doing a lot of GH measurements also works
+        (10, 10, 0, 1_000, (0.05, None), (None, None)),
     ]
     return result
 
@@ -301,10 +306,35 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
         return mop
 
 
-def relerr(ori, rec):
+def relerr(ori, rec, squared=True):
     """Relative error in the form ``(frob(ori - rec) / frob(ori))**2``."""
     result = (ori - rec).norm() / ori.norm()
-    return result**2
+    if squared:
+        result = result**2
+    return result
+
+
+def relsumerr(ori_sum, rec_sum, ori_vec, squared=True):
+    """Relative error of a sum of estimators.
+
+    The error for adding N estimators increases with ``sqrt(N)`` times the
+    norm of said estimators, because:
+    ``(1^T ori) - (1^T rec) = 1^T (ori - rec)``, and the norm of this, by
+    Cauchy-Schwarz, is bounded as:
+    ``norm(1^T (ori - rec)) <= norm(1)*norm(ori-rec) = sqrt(N)*norm(ori-rec)``.
+
+    So, for the sum of entries, we apply ``relerr``, but divided by ``sqrt(N)``
+    to account for this factor:
+
+    ``| ori_sum - rec_sum |`` / (sqrt(N) * norm(ori_vec))``.
+
+    This is consistent in the sense that, if rec_vec is close to ori_vec by
+    0.001, this metric will also output at most 0.001 for the estimated sum.
+    """
+    result = abs(ori_sum - rec_sum) / (len(ori_vec) ** 0.5 * ori_vec.norm())
+    if squared:
+        result = result**2
+    return result
 
 
 # ##############################################################################
@@ -1053,9 +1083,9 @@ def test_tracepp_xtrace_correctness(
                         dtype=dtype,
                         device=device,
                     )
-                    mat *= 123
                     lop = BasicMatrixLinOp(mat)
-                    trace = mat.diag().sum()
+                    D = mat.diag()
+                    trace = D.sum()
                     I = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
@@ -1086,22 +1116,10 @@ def test_tracepp_xtrace_correctness(
                             ), "Diag++ Q not orthogonal?"
                         # test recoveries are correct
                         if tracepp_full_tol is not None:
-                            try:
-                                assert (
-                                    relerr(trace, tr1) < tracepp_full_tol
-                                ), "Bad full Trace++?"
-                            except:
-                                """
-                                TODO:
-
-                                we must eval trace different than diagonal!
-                                In a matrix of diag norm 10000, a trace dev
-                                of 3 is nothing. but my traces avg to 0!
-                                so we get 300% error. this is nonsense.
-                                """
-                                diag1, dtop1, dgh1 = hutch["diag"]
-                                breakpoint()
+                            assert (
+                                relsumerr(trace, tr1, D) < tracepp_full_tol
+                            ), "Bad full Trace++?"
                         if tracepp_top_tol is not None:
                             assert (
-                                relerr(trace, ttop1) < tracepp_top_tol
+                                relsumerr(trace, ttop1, D) < tracepp_top_tol
                             ), "Bad top Trace++?"
