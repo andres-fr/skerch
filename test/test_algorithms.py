@@ -171,7 +171,7 @@ def triang_configs(request):
         (11, 3, 150, 0.15),
         (11, 4, 150, 0.15),
         (11, 5, 150, 0.15),
-        (11, 3, 1000, 0.1),
+        (11, 3, 1000, 0.15),
     ]
     if request.config.getoption("--quick"):
         result = result[:4]

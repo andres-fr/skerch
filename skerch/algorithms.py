@@ -5,6 +5,11 @@
 """
 TODO:
 
+* triang: test for other blocksizes and noise types
+* then we should be done, all tests passing. right??????
+* finish docs and release
+
+
 * merging tracepp and diagpp: lop is being called more than once in GH!
 
 * add trace operators, normal and hermitian (as advertised)
@@ -759,23 +764,54 @@ class TriangularLinOp(BaseLinOp):
         num_meas = mop.shape[1]
         normalizer = torch.zeros_like(x)
         for block, idxs in mop.get_blocks(dtype, device):
-            # assuming block is by_col!
-            # sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
+            for m in block.T:
+                pattern = serrated_hadamard_pattern(
+                    m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
+                )
+                if adjoint:
+                    result += pattern * ((m * x) @ lop)
+                else:
+                    result += pattern * (lop @ (m * x))
+                normalizer += m * m
+            #
             breakpoint()
-
-        for i in range(num_meas):
-            m = get_measvec(i, mop, device, dtype)
-            pattern = serrated_hadamard_pattern(
-                m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
-            )
-            if adjoint:
-                result += pattern * ((m * x) @ lop)
-            else:
-                result += pattern * (lop @ (m * x))
-            normalizer += m * m
-        #
-        result = result / normalizer
+            # # assuming block is by_col!
+            # patternT = serrated_hadamard_pattern(
+            #     block.T,
+            #     stair_width,
+            #     with_main_diag,
+            #     (lower ^ adjoint),
+            #     use_fft,
+            # )
+            # if adjoint:
+            #     result += (patternT * ((patternT * x) @ lop)).sum(0)
+            #     # result += pattern * ((m * x) @ lop)
+            # else:
+            #     result += (patternT * (lop @ (patternT * x).T).T).sum(0)
+            #     # result += pattern * (lop @ (m * x))
+            # # normalizer += m * m
+            # normalizer += (block * block).sum(1)
+            #
+            #
+            #
+        result /= normalizer
         return result
+        # """
+
+        # """
+        # for i in range(num_meas):
+        #     m = get_measvec(i, mop, device, dtype)
+        #     pattern = serrated_hadamard_pattern(
+        #         m, stair_width, with_main_diag, (lower ^ adjoint), use_fft
+        #     )
+        #     if adjoint:
+        #         result += pattern * ((m * x) @ lop)
+        #     else:
+        #         result += pattern * (lop @ (m * x))
+        #     normalizer += m * m
+        # #
+        # result = result / normalizer
+        # return result
 
     def _matmul_helper(self, x, adjoint=False):
         """Forward and adjoint triangular matrix multiplications.
