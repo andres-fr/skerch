@@ -678,6 +678,7 @@ class TriangularLinOp(BaseLinOp):
         noise_type="rademacher",
         max_mp_workers=None,
         dispatcher=SketchedAlgorithmDispatcher,
+        meas_blocksize=None,
     ):
         """Initializer. See class docstring."""
         h, w = lop.shape
@@ -702,6 +703,9 @@ class TriangularLinOp(BaseLinOp):
         self.noise_type = noise_type
         self.max_mp_workers = max_mp_workers
         self.dispatcher = dispatcher
+        self.meas_blocksize = (
+            stair_width if meas_blocksize is None else meas_blocksize
+        )
         #
         if num_gh_meas <= 0:
             warnings.warn(
@@ -750,10 +754,15 @@ class TriangularLinOp(BaseLinOp):
         use_fft=False,
     ):
         """Helper method to perform serrated Girard-Hutchinson measurements."""
-        device, dtype = x.device, x.dtype
+        dtype, device = x.dtype, x.device
         result = torch.zeros_like(x)
         num_meas = mop.shape[1]
         normalizer = torch.zeros_like(x)
+        for block, idxs in mop.get_blocks(dtype, device):
+            # assuming block is by_col!
+            # sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
+            breakpoint()
+
         for i in range(num_meas):
             m = get_measvec(i, mop, device, dtype)
             pattern = serrated_hadamard_pattern(
@@ -806,7 +815,11 @@ class TriangularLinOp(BaseLinOp):
         #
         if self.n_gh > 0:
             mop = self.dispatcher.mop(
-                self.noise_type, (self.dims, self.n_gh), self.seed, x.dtype
+                self.noise_type,
+                (self.dims, self.n_gh),
+                self.seed,
+                x.dtype,
+                self.meas_blocksize,
             )
             result += self._gh_meas(
                 x,
