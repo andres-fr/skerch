@@ -143,8 +143,10 @@ def apost_error(
 
     This function implements the error estimation procedure presented in
     `[TYUC2019, 6] <https://arxiv.org/abs/1902.08651>`_.
-    For that, it performs ``num_measurements`` gaussian vector
-    multiplications on linear operators ``lop1`` and ``lop2``, and then
+
+    It performs ``num_measurements`` random vector multiplications on linear
+    operators ``lop1`` and ``lop2``, resulting in estimators for their
+    respective Frobenius norms, as well as for the
     compares the results.
     The :math:`\ell_2` error between the obtained measurements is then an
     estimation of the Frobenius error between ``lop1`` and ``lop2``.
@@ -202,6 +204,71 @@ def apost_error(
         (frob1_pow2_mean, frob2_pow2_mean, diff_pow2_mean),
         (frob1_pow2, frob2_pow2, diff_pow2),
     )
+
+
+def ___snorm(
+    lop,
+    lop_device,
+    lop_dtype,
+    num_meas=5,
+    seed=0b1110101001010101011,
+    noise_type="gaussian",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    adj_meas=None,
+    norm_types=("fro", "op"),
+):
+    """Sketched norms.
+
+    For Frobenius, check 6.2 in Tropp 19.
+    """
+    h, w = lop.shape
+    if num_meas <= 0 or num_meas > min(h, w):
+        raise ValueError(
+            "Measurements must be between 1 and number of rows/columns!"
+        )
+    if meas_blocksize is None:
+        meas_blocksize = num_meas
+    if adj_meas is None:
+        adj_meas = h > w  # this seems to be more accurate
+    mop = dispatcher.mop(
+        noise_type,
+        (h if adj_meas else w, num_meas),
+        seed,
+        lop_dtype,
+        meas_blocksize,
+        register=False,
+    )
+    # perform measurements and obtain top-space Q
+    sketch = torch.empty(
+        (w if adj_meas else h, num_meas), dtype=lop_dtype, device=lop_device
+    )
+    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+        # assuming block is by_col!
+        sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
+    Q, R = qr(sketch, in_place_q=True, return_R=True)
+    # project lop onto Q and obtain largest singular value
+    sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
+    h2, w2 = sketch2.shape
+    gram = (
+        (sketch2.conj().T @ sketch2)
+        if h2 > w2
+        else (sketch2 @ sketch2.conj().T)
+    )
+    supported_norm_types = {"fro", "op"}
+    result = {}
+    for norm_type in norm_types:
+        if norm_type == "op":
+            result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
+        elif norm_type == "fro":
+            result[norm_type] = gram.diag().sum() ** 0.5
+        else:
+            raise ValueError(
+                f"Unsupported norm type! {norm_type}. "
+                "Supported: {supported_norm_types}"
+            )
+    #
+    return result, (Q, R, sketch2)
 
 
 # ##############################################################################
