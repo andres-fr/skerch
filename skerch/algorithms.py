@@ -2,55 +2,16 @@
 # -*- coding: utf-8 -*-
 
 
-"""
-TODO:
+"""In-core sketched algorithms.
 
-* a-posteriori and __main__ stuff
+This module features the following functionality:
 
-* merging tracepp and diagpp: lop is being called more than once in GH!
-
-* add trace operators, normal and hermitian (as advertised)
-* a-priori/posteriori/truncation stuff
-* Integration tests/docs (add utests where needed):
-  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
-  - scale up: good recovery of very large composite linop, quick.
-  - priori and posteriori...
-* add remaining todos as GH issues and release!
-  - sketchlord(h) facilities: leave them for paper
-
-
-
-
-LATER TODO:
-* xtrace
-* HDF5 measurement/wrapper API
-* a-priori/posteriori/truncation stuff
-* out-of-core wrappers for QR, SVD, LSTSQ
-* sketchlord and sketchlordh.
-* sketched permutations
-* batched HDF5
-
-Triang correctness:
-* triang: stairs should include bits of main diag
-
-
-CHANGELOG:
-* Better test coverage -> less bugs
-* Clearer docs
-* support for complex datatypes
-* Support for (approximately) low-rank plus diagonal synthetic matrices
-* Linop API:
-  - New core functionality: Transposed, Signed Sum, Banded, ByBlock
-  - Support for parallelization of matrix-matrix products
-  - New measurement noise linops: Rademacher, Gaussian, Phase, SSRFT
-* Sketching API:
-  - Modular measurement API supporting multiprocessing and HDF5
-  - Modular recovery methods (singlepass, Nystrom, oversampled)
-* Algorithm API:
-  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Triangular, Norms
-  - Efficient support for Hermitian versions
-  - Dispatcher for modularized use of noise sources and recovery types
-  - Matrix-free a-posteriori error verification
+* A modular and extendable dispatcher that provides the algorithms with
+  measurement linops and recovery methods.
+* Sketched SVD and EIGH
+* Sketched trace (Hutch++) and diagonal (Hutch++, XDiag) estimation
+* Sketched linop norm estimation (operator norm, Frobenius)
+* Sketched triangular matvec estimation
 """
 
 
@@ -390,7 +351,7 @@ def seigh(
 
 
 # ##############################################################################
-# # TRACEPP/XTRACE AND DIAGPP/XDIAG
+# # TRACEPP AND DIAGPP/XDIAG
 # ##############################################################################
 def hutchpp(
     lop,
@@ -599,6 +560,74 @@ def xdiag(
     #
     d_gh /= x_dims
     return (d_top + d_gh), (d_top, d_gh, Q, R)
+
+
+# ##############################################################################
+# # NORMS
+# ##############################################################################
+def snorm(
+    lop,
+    lop_device,
+    lop_dtype,
+    num_meas=5,
+    seed=0b1110101001010101011,
+    noise_type="gaussian",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    adj_meas=None,
+    norm_types=("fro", "op"),
+):
+    """Sketched norms.
+
+    For Frobenius, check 6.2 in Tropp 19.
+    """
+    h, w = lop.shape
+    if num_meas <= 0 or num_meas > min(h, w):
+        raise ValueError(
+            "Measurements must be between 1 and number of rows/columns!"
+        )
+    if meas_blocksize is None:
+        meas_blocksize = num_meas
+    if adj_meas is None:
+        adj_meas = h > w  # this seems to be more accurate
+    mop = dispatcher.mop(
+        noise_type,
+        (h if adj_meas else w, num_meas),
+        seed,
+        lop_dtype,
+        meas_blocksize,
+        register=False,
+    )
+    # perform measurements and obtain top-space Q
+    sketch = torch.empty(
+        (w if adj_meas else h, num_meas), dtype=lop_dtype, device=lop_device
+    )
+    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+        # assuming block is by_col!
+        sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
+    Q, R = qr(sketch, in_place_q=True, return_R=True)
+    # project lop onto Q and obtain largest singular value
+    sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
+    h2, w2 = sketch2.shape
+    gram = (
+        (sketch2.conj().T @ sketch2)
+        if h2 > w2
+        else (sketch2 @ sketch2.conj().T)
+    )
+    supported_norm_types = {"fro", "op"}
+    result = {}
+    for norm_type in norm_types:
+        if norm_type == "op":
+            result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
+        elif norm_type == "fro":
+            result[norm_type] = gram.diag().sum() ** 0.5
+        else:
+            raise ValueError(
+                f"Unsupported norm type! {norm_type}. "
+                "Supported: {supported_norm_types}"
+            )
+    #
+    return result, (Q, R, sketch2)
 
 
 # ##############################################################################
@@ -864,76 +893,3 @@ class TriangularLinOp(BaseLinOp):
         diag_str = "with" if self.with_main_diag else "no"
         result = f"<{clsname}[{lopstr}]({lower_str}, {diag_str} main diag)>"
         return result
-
-
-# ##############################################################################
-# # NORMS
-# ##############################################################################
-def snorm(
-    lop,
-    lop_device,
-    lop_dtype,
-    num_meas=5,
-    seed=0b1110101001010101011,
-    noise_type="gaussian",
-    meas_blocksize=None,
-    dispatcher=SketchedAlgorithmDispatcher,
-    adj_meas=None,
-    norm_types=("fro", "op"),
-):
-    """Sketched norms.
-
-    For Frobenius, check 6.2 in Tropp 19.
-    """
-    h, w = lop.shape
-    if num_meas <= 0 or num_meas > min(h, w):
-        raise ValueError(
-            "Measurements must be between 1 and number of rows/columns!"
-        )
-    if meas_blocksize is None:
-        meas_blocksize = num_meas
-    if adj_meas is None:
-        adj_meas = h > w  # this seems to be more accurate
-    mop = dispatcher.mop(
-        noise_type,
-        (h if adj_meas else w, num_meas),
-        seed,
-        lop_dtype,
-        meas_blocksize,
-        register=False,
-    )
-    # perform measurements and obtain top-space Q
-    sketch = torch.empty(
-        (w if adj_meas else h, num_meas), dtype=lop_dtype, device=lop_device
-    )
-    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-        # assuming block is by_col!
-        sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
-    Q, R = qr(sketch, in_place_q=True, return_R=True)
-    # project lop onto Q and obtain largest singular value
-    sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
-    h2, w2 = sketch2.shape
-    gram = (
-        (sketch2.conj().T @ sketch2)
-        if h2 > w2
-        else (sketch2 @ sketch2.conj().T)
-    )
-    supported_norm_types = {"fro", "op"}
-    result = {}
-    for norm_type in norm_types:
-        if norm_type == "op":
-            result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
-        elif norm_type == "fro":
-            result[norm_type] = gram.diag().sum() ** 0.5
-        else:
-            raise ValueError(
-                f"Unsupported norm type! {norm_type}. "
-                "Supported: {supported_norm_types}"
-            )
-    #
-    return result, (Q, R, sketch2)
-
-
-# ##############################################################################
-# # TRACEPP/XTRACE
-# ##############################################################################
