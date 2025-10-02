@@ -7,10 +7,11 @@
 import pytest
 import torch
 
-from skerch.synthmat import SynthMat
+from skerch.synthmat import RandomLordMatrix
 from skerch.utils import COMPLEX_DTYPES
 from skerch.a_posteriori import apost_error_bounds, apost_error, scree_bounds
 
+import numpy as np
 from . import rng_seeds, torch_devices
 
 
@@ -33,6 +34,25 @@ def dtypes_tols():
 def dispatcher_noise_types():
     """ """
     result = ["rademacher", "gaussian", "phase", "ssrft"]
+    return result
+
+
+@pytest.fixture
+def apost_bounds_examples():
+    """Config to test ``apost_error_bounds``.
+
+    Returns a collection of input-output pairs, where input has the form
+    ``(num_meas, rel_err, is_complex)`` and outputs ``(low_p, high_p)``.
+    """
+    result = [
+        # probability that error is other than zero: 100%
+        ((10, 0.0, True), (1.0, 1.0)),
+        # P[error] below 100%: 0, above 200%: very low
+        ((10, 1.0, True), (0.0, 0.04648952807678451)),
+        # complex yields lower probs than real
+        ((1000, 0.1, True), (0.004698482673443763, 0.009188338110655603)),
+        ((1000, 0.1, False), (0.06854547886946127, 0.09585581938857757)),
+    ]
     return result
 
 
@@ -67,12 +87,41 @@ def mixture_weights(request):
 # ##############################################################################
 # # A POSTERIORI ERROR ESTIMATION
 # ##############################################################################
-def test_apost_formal():
+def test_apost_error_bounds(apost_bounds_examples):
+    """Test case for ``apost_error_bounds`` (formal and correctness).
+
+    * num_measurements must be positive
+    * rel_err must be between 0 and 1
+    * output probabilities are as expected
+    """
+    atol = 1e-10
+    low_s, high_s = "P(err<={}x)", "P(err>={}x)"
+    # low_s, high_s = "P(err<=0.9x)", "P(err>=1.1x)"
+    # positive num_meas
+    with pytest.raises(ValueError):
+        apost_error_bounds(-1, rel_err=0.5, is_complex=False)
+    # rel_err in [0, 1]
+    with pytest.raises(ValueError):
+        apost_error_bounds(10, rel_err=-0.0001, is_complex=False)
+    with pytest.raises(ValueError):
+        apost_error_bounds(10, rel_err=1.0001, is_complex=False)
+    # output correctness
+    for (num_meas, rel_err, is_complex), (
+        low_p,
+        high_p,
+    ) in apost_bounds_examples:
+        bounds = apost_error_bounds(num_meas, rel_err, is_complex)
+        lp = bounds[low_s.format(1 - rel_err)]
+        hp = bounds[high_s.format(1 + rel_err)]
+        assert np.isclose(low_p, lp, atol=atol), "Wrong low_p bound!"
+        assert np.isclose(high_p, hp, atol=atol), "Wrong high_p bound!"
+
+
+def test_apost_error_and_scree_correctness():
     """
     What to do?
 
     must be batched and HDF5 compatible
-
     """
     breakpoint()
 

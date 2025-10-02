@@ -88,7 +88,7 @@ from .utils import gaussian_noise
 ################################################################################
 # # A POSTERIORI ERROR ESTIMATION
 # ##############################################################################
-def apost_error_bounds(num_measurements, rel_err):
+def apost_error_bounds(num_measurements, rel_err, is_complex=False):
     """Probabilistic bounds for a-posteriori sketch error estimation.
 
     Retrieves probabilistic error bounds presented in
@@ -111,12 +111,17 @@ def apost_error_bounds(num_measurements, rel_err):
       ``rel_err`` are themselves small (this means that the corresponding error
       estimation is tight).
     """
-    assert 0 <= rel_err <= 1, "rel_err expected between 0 and 1"
+    if num_measurements < 1:
+        raise ValueError("Num measurements must be >=1")
+
+    if rel_err < 0 or rel_err > 1:
+        raise ValueError("rel_err expected between 0 and 1")
+    beta = 2 if is_complex else 1
     experr = math.exp(rel_err)
-    meas_half = num_measurements / 2
+    beta_meas_half = beta * num_measurements / 2
     #
-    lo_p = (experr * (1 - rel_err)) ** meas_half
-    hi_p = (experr / (1 + rel_err)) ** (-meas_half)
+    lo_p = (experr * (1 - rel_err)) ** beta_meas_half
+    hi_p = (experr / (1 + rel_err)) ** (-beta_meas_half)
     #
     result = {
         f"P(err<={1 - rel_err}x)": lo_p,
