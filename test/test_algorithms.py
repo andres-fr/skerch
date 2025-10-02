@@ -19,7 +19,8 @@ from skerch.algorithms import ssvd, seigh, hutchpp, xdiag
 from skerch.algorithms import snorm
 from skerch.measurements import GaussianNoiseLinOp
 from . import rng_seeds, torch_devices
-from . import svd_test_helper, eigh_test_helper
+from . import BasicMatrixLinOp, svd_test_helper, eigh_test_helper
+from . import relerr, relsumerr
 
 
 # ##############################################################################
@@ -216,23 +217,6 @@ def norm_configs(request):
 # ##############################################################################
 # # HELPERS
 # ##############################################################################
-class BasicMatrixLinOp:
-    """Intentionally simple linop, only supporting ``shape`` and @."""
-
-    def __init__(self, matrix):
-        """ """
-        self.matrix = matrix
-        self.shape = matrix.shape
-
-    def __matmul__(self, x):
-        """ """
-        return self.matrix @ x
-
-    def __rmatmul__(self, x):
-        """ """
-        return x @ self.matrix
-
-
 class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
     """Gaussian noise plus a signed constant.
 
@@ -304,37 +288,6 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
                 noise_type, hw, seed, dtype, blocksize, register
             )
         return mop
-
-
-def relerr(ori, rec, squared=True):
-    """Relative error in the form ``(frob(ori - rec) / frob(ori))**2``."""
-    result = (ori - rec).norm() / ori.norm()
-    if squared:
-        result = result**2
-    return result
-
-
-def relsumerr(ori_sum, rec_sum, ori_vec, squared=True):
-    """Relative error of a sum of estimators.
-
-    The error for adding N estimators increases with ``sqrt(N)`` times the
-    norm of said estimators, because:
-    ``(1^T ori) - (1^T rec) = 1^T (ori - rec)``, and the norm of this, by
-    Cauchy-Schwarz, is bounded as:
-    ``norm(1^T (ori - rec)) <= norm(1)*norm(ori-rec) = sqrt(N)*norm(ori-rec)``.
-
-    So, for the sum of entries, we apply ``relerr``, but divided by ``sqrt(N)``
-    to account for this factor:
-
-    ``| ori_sum - rec_sum |`` / (sqrt(N) * norm(ori_vec))``.
-
-    This is consistent in the sense that, if rec_vec is close to ori_vec by
-    0.001, this metric will also output at most 0.001 for the estimated sum.
-    """
-    result = abs(ori_sum - rec_sum) / (len(ori_vec) ** 0.5 * ori_vec.norm())
-    if squared:
-        result = result**2
-    return result
 
 
 # ##############################################################################

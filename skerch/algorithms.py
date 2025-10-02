@@ -177,7 +177,7 @@ def ssvd(
         inner_dims is not None and (inner_dims > max(h, w))
     ):
         raise ValueError("More measurements than rows/columns not supported!")
-    if (inner_dims is not None) and inner_dims < outer_dims:
+    if (inner_dims is not None) and inner_dims <= outer_dims:
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
@@ -280,7 +280,7 @@ def seigh(
     recovery_fn, inner_dims = dispatcher.recovery(recovery_type, True)
     if (outer_dims > dims) or (inner_dims is not None and (inner_dims > dims)):
         raise ValueError("More measurements than rows/columns not supported!")
-    if (inner_dims is not None) and inner_dims < outer_dims:
+    if (inner_dims is not None) and inner_dims <= outer_dims:
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )

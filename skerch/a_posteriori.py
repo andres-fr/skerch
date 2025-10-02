@@ -26,11 +26,9 @@ This module implements this functionality.
 
 
 
-
-
-
 TODO:
 
+* fix scree, utest truncate.
 * a-posteriori and __main__ stuff
 
 * merging tracepp and diagpp: lop is being called more than once in GH!
@@ -82,7 +80,8 @@ CHANGELOG:
 
 import math
 import torch
-from .utils import gaussian_noise
+from .utils import gaussian_noise, COMPLEX_DTYPES
+from .algorithms import SketchedAlgorithmDispatcher
 
 
 ################################################################################
@@ -124,8 +123,8 @@ def apost_error_bounds(num_measurements, rel_err, is_complex=False):
     hi_p = (experr / (1 + rel_err)) ** (-beta_meas_half)
     #
     result = {
-        f"P(err<={1 - rel_err}x)": lo_p,
-        f"P(err>={1 + rel_err}x)": hi_p,
+        f"LOWER: P(err<={1 - rel_err}x)": lo_p,
+        f"HIGHER: P(err>={1 + rel_err}x)": hi_p,
     }
     return result
 
@@ -133,28 +132,37 @@ def apost_error_bounds(num_measurements, rel_err, is_complex=False):
 def apost_error(
     lop1,
     lop2,
-    num_measurements,
+    device,
+    dtype,
+    num_meas=5,
     seed=0b1110101001010101011,
-    dtype=torch.float64,
-    device="cpu",
-    adjoint=False,
+    noise_type="gaussian",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    adj_meas=None,
 ):
     r"""A-posteriori sketch error estimation.
 
-    This function implements the error estimation procedure presented in
+    This function implements the error estimation procedure discussed in
     `[TYUC2019, 6] <https://arxiv.org/abs/1902.08651>`_.
 
     It performs ``num_measurements`` random vector multiplications on linear
     operators ``lop1`` and ``lop2``, resulting in estimators for their
-    respective Frobenius norms, as well as for the
-    compares the results.
-    The :math:`\ell_2` error between the obtained measurements is then an
-    estimation of the Frobenius error between ``lop1`` and ``lop2``.
+    respective Frobenius norms, as well as for their difference.
+
+    .. note::
+      The test measurements performed here are assumed to be random and
+      independent of how either ``lop`` was obtained. For this reason, it is
+      advised to pick a combination of ``noise_type`` and ``seed`` that does
+      not overlap with anything used before.
 
     :param lop1: Linear operator with a ``shape=(h, w)`` attribute and
       implementing a left (``x @ mat``) or right ``(mat @ x)`` matmul op.
-      It is assumed to be compatible with the given torch ``dtype``.
-    :param lop2: See ``lop1``.
+      It is assumed to match the given ``device`` and ``dtype``.
+    :param lop2: Linear operator to compare ``lop1`` against. It must match
+      in shape, device and dtype.
+    :param num_meas: Number of measurements that will be performed on ``lop1``
+      and ``lop2``.
     :param adjoint: If true, left-matmul is used, otherwise right-matmul.
     :returns: A tuple ``((f1_mean, f2_mean, diff_mean), (f1, f2, diff))``,
       where the last 3 elements are lists with the ``L_2^2`` norms of each
@@ -164,65 +172,10 @@ def apost_error(
       ``lop1`` and ``lop2`` is then ``diff_mean``. To get confidence bounds
       on this estimate, use ``a_posteriori_error_bounds``.
     """
-    assert lop1.shape == lop2.shape, "Mismatching shapes!"
     h, w = lop1.shape
-    #
-    frob1_pow2, frob2_pow2, diff_pow2 = [], [], []
-    for i in range(num_measurements):
-        rand = gaussian_noise(
-            h if adjoint else w,
-            mean=0.0,
-            std=1.0,
-            seed=seed + i,
-            dtype=dtype,
-            device=device,
-        )
-        rand_np = None
-        if adjoint:
-            meas1 = rand @ lop1
-            meas2 = rand @ lop2
-        else:
-            try:
-                meas1 = lop1 @ rand
-            except TypeError:
-                rand_np = rand.cpu().numpy() if rand_np is None else rand_np
-                meas1 = torch.from_numpy(lop1 @ rand_np)
-            try:
-                meas2 = lop2 @ rand
-            except TypeError:
-                rand_np = rand.cpu().numpy() if rand_np is None else rand_np
-                meas2 = torch.from_numpy(lop2 @ rand_np)
-        #
-        frob1_pow2.append(sum(meas1**2).item())
-        frob2_pow2.append(sum(meas2**2).item())
-        diff_pow2.append(sum((meas1 - meas2) ** 2).item())
-    #
-    frob1_pow2_mean = sum(frob1_pow2) / num_measurements
-    frob2_pow2_mean = sum(frob2_pow2) / num_measurements
-    diff_pow2_mean = sum(diff_pow2) / num_measurements
-    return (
-        (frob1_pow2_mean, frob2_pow2_mean, diff_pow2_mean),
-        (frob1_pow2, frob2_pow2, diff_pow2),
-    )
-
-
-def ___snorm(
-    lop,
-    lop_device,
-    lop_dtype,
-    num_meas=5,
-    seed=0b1110101001010101011,
-    noise_type="gaussian",
-    meas_blocksize=None,
-    dispatcher=SketchedAlgorithmDispatcher,
-    adj_meas=None,
-    norm_types=("fro", "op"),
-):
-    """Sketched norms.
-
-    For Frobenius, check 6.2 in Tropp 19.
-    """
-    h, w = lop.shape
+    h2, w2 = lop2.shape
+    if lop1.shape != lop2.shape:
+        raise ValueError("Linear operators must be of same shape!")
     if num_meas <= 0 or num_meas > min(h, w):
         raise ValueError(
             "Measurements must be between 1 and number of rows/columns!"
@@ -231,44 +184,42 @@ def ___snorm(
         meas_blocksize = num_meas
     if adj_meas is None:
         adj_meas = h > w  # this seems to be more accurate
+    is_complex = dtype in COMPLEX_DTYPES
+    beta = 2 if is_complex else 1
+    #
+    frob1_all = torch.empty(num_meas, dtype=dtype, device=device)
+    frob2_all = torch.empty_like(frob1_all)
+    dist_all = torch.empty_like(frob1_all)
     mop = dispatcher.mop(
         noise_type,
         (h if adj_meas else w, num_meas),
         seed,
-        lop_dtype,
+        dtype,
         meas_blocksize,
         register=False,
     )
-    # perform measurements and obtain top-space Q
-    sketch = torch.empty(
-        (w if adj_meas else h, num_meas), dtype=lop_dtype, device=lop_device
-    )
-    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-        # assuming block is by_col!
-        sketch[:, idxs] = (block.T @ lop).conj().T if adj_meas else lop @ block
-    Q, R = qr(sketch, in_place_q=True, return_R=True)
-    # project lop onto Q and obtain largest singular value
-    sketch2 = lop @ Q if adj_meas else Q.conj().T @ lop
-    h2, w2 = sketch2.shape
-    gram = (
-        (sketch2.conj().T @ sketch2)
-        if h2 > w2
-        else (sketch2 @ sketch2.conj().T)
-    )
-    supported_norm_types = {"fro", "op"}
-    result = {}
-    for norm_type in norm_types:
-        if norm_type == "op":
-            result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
-        elif norm_type == "fro":
-            result[norm_type] = gram.diag().sum() ** 0.5
-        else:
-            raise ValueError(
-                f"Unsupported norm type! {norm_type}. "
-                "Supported: {supported_norm_types}"
-            )
     #
-    return result, (Q, R, sketch2)
+    for block, idxs in mop.get_blocks(dtype, device):
+        # we need that block @ block.H approximates I
+        # assuming block is by-column!
+        block *= 1000
+        bnorm = block.norm(dim=1)
+        block = block.T * ((len(idxs) ** 0.5) / block.norm(dim=1))
+        # block has been transposed
+        meas1 = block @ lop1 if adj_meas else lop1 @ block.T
+        meas2 = block @ lop2 if adj_meas else lop2 @ block.T
+        #
+        frob1 = (meas1 * meas1.conj()).sum(dim=1 if adj_meas else 0)
+        frob2 = (meas2 * meas2.conj()).sum(dim=1 if adj_meas else 0)
+        meas1 -= meas2
+        dist = (meas1 * meas1.conj()).sum(dim=1 if adj_meas else 0)
+        #
+        frob1_all[idxs] = frob1
+        frob2_all[idxs] = frob2
+        dist_all[idxs] = dist
+    #
+    f1, f2, d = frob1_all.mean(), frob2_all.mean(), dist_all.mean()
+    return ((f1, f2, d), (frob1_all, frob2_all, dist_all))
 
 
 # ##############################################################################
@@ -291,7 +242,7 @@ def scree_bounds(S, ori_frob, err_frob):
     fast. The location of the elbow is a good indicator for the effective rank,
     but quantitative methods are also possible (see [TYUC2019]).
 
-    :param S: Vector of the estimated spectrum/singular values, expected to
+    :param S: Vector of the estimated eigen/singular values, expected to
       contain entries in non-ascending magnitude.
     :param ori_frob: Estimate (or exact if available) ``frob_norm(M)``, where
       ``M`` is the original linop that we are decomposing. This quantity is
@@ -307,16 +258,16 @@ def scree_bounds(S, ori_frob, err_frob):
       scree_lo, scree_hi = scree_bounds(S, f1_pow2**0.5, res_pow2**0.5)
       # plot the scree bounds to find an elbow as a cutting point for rank(M).
     """
-    assert (
-        abs(S).diff() <= 0
-    ).all(), "Provided S must be given in non-ascending magnitude!"
-    S_squared = S**2
+    if (abs(S).diff() > 0).any():
+        raise ValueError(
+            "Provided S must be given in non-ascending magnitude!"
+        )
     # residuals is a vector of len(S), where the ith entry contains the
     # Frobenius norm of M' after an ith-rank deflation, while progressing by
     # descending magnitude. The first entry has a rank 0 deflation, i.e. it
     # contains frob(M') entirely. The last entry has a rank R-1 deflation, i.e.
     # it is the magnitude of the smallest value in S.
-    residuals = S_squared.flip(0).cumsum(0).flip(0) ** 0.5
+    residuals = (S**2).flip(0).cumsum(0).flip(0) ** 0.5
     # now instead of normalizing dividing by sum(S_squared)**0.5, which uses M',
     # we obtain both the lower and upper bounds by using M instead, this is
     # given by ori_frob.

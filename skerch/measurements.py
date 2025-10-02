@@ -3,30 +3,6 @@
 
 
 """
-TODO:
-
-* adapt the measurement API to this new paradigm
-  - get rid of MP and the meas_fn
-  - update algorithms with new paradigm
-
-
-PROBLEM:
-
-as we know, pulling blocks of different sizes results in different randomness.
-
-with batched blocks, we may request a smaller range than the block size.
-currently, this is causing a mismatch in the noise.
-
-Ideally, we should only be able to retrieve full blocks, and then go
-from there.
-
-* SO GET_BLOCK SHOULD GET BLOCK_IDX, INSTEAD OF IDXS
-  - change this in byblock class
-  - then change it in all subclasses, tests should pass
-  - finally get_measblock should now be consistent (how to match with matrix then?)
-  - ready to use in algorithms...
-  -
-
 """
 
 from concurrent.futures import ProcessPoolExecutor

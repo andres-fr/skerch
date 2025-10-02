@@ -554,3 +554,20 @@ def serrated_hadamard_pattern(
             result[..., out_beg:out_end] += v[..., beg:end]
     #
     return result
+
+
+# ##############################################################################
+# # RECOVERY UTILS
+# ##############################################################################
+def truncate_decomp(k, U=None, S=None, Vh=None):
+    """Truncation of diagonal decomposition.
+
+    :returns: ``U[:, :k], S[:k], Vh[:k, :]`` (if given).
+    """
+    if U is not None:
+        U = U[:, :k]
+    if S is not None:
+        S = S[:k]
+    if Vh is not None:
+        Vh = Vh[:k, :]
+    return U, S, Vh

@@ -39,7 +39,61 @@ def rng_seeds(request):
 
 
 # ##############################################################################
-# # HELPERS
+# # TEST LINOPS
+# ##############################################################################
+class BasicMatrixLinOp:
+    """Intentionally simple linop, only supporting ``shape`` and @."""
+
+    def __init__(self, matrix):
+        """ """
+        self.matrix = matrix
+        self.shape = matrix.shape
+
+    def __matmul__(self, x):
+        """ """
+        return self.matrix @ x
+
+    def __rmatmul__(self, x):
+        """ """
+        return x @ self.matrix
+
+
+# ##############################################################################
+# # TEST METRICS
+# ##############################################################################
+def relerr(ori, rec, squared=True):
+    """Relative error in the form ``(frob(ori - rec) / frob(ori))**2``."""
+    result = (ori - rec).norm() / ori.norm()
+    if squared:
+        result = result**2
+    return result
+
+
+def relsumerr(ori_sum, rec_sum, ori_vec, squared=True):
+    """Relative error of a sum of estimators.
+
+    The error for adding N estimators increases with ``sqrt(N)`` times the
+    norm of said estimators, because:
+    ``(1^T ori) - (1^T rec) = 1^T (ori - rec)``, and the norm of this, by
+    Cauchy-Schwarz, is bounded as:
+    ``norm(1^T (ori - rec)) <= norm(1)*norm(ori-rec) = sqrt(N)*norm(ori-rec)``.
+
+    So, for the sum of entries, we apply ``relerr``, but divided by ``sqrt(N)``
+    to account for this factor:
+
+    ``| ori_sum - rec_sum |`` / (sqrt(N) * norm(ori_vec))``.
+
+    This is consistent in the sense that, if rec_vec is close to ori_vec by
+    0.001, this metric will also output at most 0.001 for the estimated sum.
+    """
+    result = abs(ori_sum - rec_sum) / (len(ori_vec) ** 0.5 * ori_vec.norm())
+    if squared:
+        result = result**2
+    return result
+
+
+# ##############################################################################
+# # TEST HELPERS
 # ##############################################################################
 def autocorrelation_test_helper(vec, delta_at_least=0.8, nondelta_at_most=0.1):
     """If vec is iid noise, its autocorrelation resembles a delta."""
