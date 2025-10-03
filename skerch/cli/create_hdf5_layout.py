@@ -9,7 +9,7 @@ import os
 
 import torch
 
-from ..distributed_decompositions import create_hdf5_layout
+from ..hdf5 import create_hdf5_layout
 
 
 # ##############################################################################

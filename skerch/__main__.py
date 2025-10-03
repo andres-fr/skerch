@@ -12,8 +12,11 @@ This script acts in connection with the :mod:`.cli` submodule.
 TODO:
 
 * finish  __main__ stuff
+  - Current HDF5 paradigm doesn't allow for uneven blocks (e.g. 3+3+2). We
+    do need to change it to make it block-compatible (divmod(7, 3)).
+    Then finish ``create_hdf5_layout`` and maybe utest CLI stuff.
   - the create_hdf5_layout assumes Boutsidis! we need to figure out how to
-    make this modular and extendible
+    make this modular and extendible. Also with blocks of tensors...
   - will HDF5 work with other algos? e.g. hutch++ for block-parallel meas.
   - then check the merge HDF5, and we are done.
 
