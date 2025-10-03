@@ -27,8 +27,8 @@ def dtypes_tols():
     result = {
         torch.float32: 1e-3,
         torch.complex64: 1e-3,
-        torch.float64: 3e-8,
-        torch.complex128: 3e-8,
+        torch.float64: 1e-8,
+        torch.complex128: 1e-8,
     }
     return result
 
@@ -87,14 +87,17 @@ def scree_config(request):
     """Config to test ``scree_bounds``.
 
     Returns tuples in the form
-    ``(shape, rank, decay, svd_meas, trunc, test_meas_reps)``.
+    ``(shape, rank, decay, svd_meas, trunc, test_meas_reps, tol)``.
 
     The ``trunc`` field specifies how many dimensions are **left** after
     truncation.
     """
     result = [
-        # ((1000, 1000), 20, 0.02, 100, 50, 500),  # nice gap
-        ((1000, 1000), 50, 0.1, 50, 40, 100),  # mostly inside asdf
+        #  shape  rank decay meas trunc test tol
+        # 85% approx, scree yields informative bounds even at 10 test vectors
+        ((200, 200), 10, 0.05, 40, 20, 10, 0.01),
+        # 99.99% approx, tight scree bounds
+        ((200, 200), 10, 0.1, 40, 20, 10, 0.01),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]
@@ -222,14 +225,32 @@ def test_apost_error_correctness(
 # ##############################################################################
 # # SCREE BOUNDS
 # ##############################################################################
+def test_scree_formal():
+    """Formal test case for ``scree_bounds``.
+
+    * non-ascending S raises error
+    """
+    mat = gaussian_noise(
+        (10, 10), 0, 1, seed=0, dtype=torch.float32, device="cpu"
+    )
+    S = torch.linalg.svdvals(mat)
+    # non-ascending S raises error
+    with pytest.raises(ValueError):
+        _ = scree_bounds(S.flip(0), 1, 1)
+
+
 def test_scree_correctness(
     rng_seeds, torch_devices, dtypes_tols, scree_config, apost_noise_types
 ):
     """Correctness test case for ``scree_bounds``-
 
     For all configurations, creates a matrix with a rapidly decaying spectrum,
-    and performs a sketched SVD. Then,  checks that the provided
-    ``scree_bounds`` are somewhat tight around the true singular values.
+    and performs a sketched SVD. Then, checks provided ``scree_bounds``:
+
+    * lower bound begins with 1
+    * both bounds are nonnegative and nonascending
+    * lower <= true <= higher
+    * as rank increases, bounds tighten
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -241,6 +262,7 @@ def test_scree_correctness(
                     svd_meas,
                     trunc,
                     test_meas,
+                    screetol,
                 ) in scree_config:
                     # sample matrix and compute singular values
                     h, w = shape
@@ -275,7 +297,7 @@ def test_scree_correctness(
                     )
                     U, S, Vh = truncate_decomp(trunc, U, S, Vh)
                     lop2 = CompositeLinOp((("US", U * S), ("Vh", Vh)))
-                    (f1, f2, err), _ = apost_error(
+                    (f1, _, err), _ = apost_error(
                         lop1,
                         lop2,
                         device,
@@ -286,128 +308,34 @@ def test_scree_correctness(
                         meas_blocksize=max(h, w),
                         adj_meas=False,
                     )
-                    f1, f2, err = f1**0.5, f2**0.5, err**0.5
+                    f1, err = f1**0.5, err**0.5
+                    f2 = S.norm()
                     scree_lo, scree_hi = scree_bounds(S, f2, err)
-                    # ground truth quantities
-
-                    """
-
-                    """
-                    import matplotlib.pyplot as plt
-
-                    # relerr(mat, (U*S @ Vh))
-
-                    # plt.clf(); plt.plot(scree_lo, label="lo"); plt.plot(gt_scree, label="GT"); plt.plot(scree_hi, label="hi"); plt.legend(); plt.yscale("log"); plt.show()
-
-                    breakpoint()
-
-
-def old_scr_tst(
-    rng_seeds,
-    torch_devices,
-    f64_rtol,
-    f32_rtol,
-    h_w_sym_measurements,
-    exp_decay,
-    mixture_weights,
-):
-    """Test case for a-posteriori error estimation and scree bounds.
-
-    This test samples all kinds of exp-decaying matrices, and random
-    perturbations of varying magnitude. Then compares the actual Frobenius
-    of the residual with the estimated one. It also reuses part of the
-    computations to extract and test the scree bounds. Tests:
-    * The a-posteriori estimates are within 0.5x and 2x of the real value
-    * The scree upper bounds are above the scree lower bounds
-    * Scree bounds are non-ascending as rank progresses
-    * Scree bounds get tighter as rank progresses
-    """
-    for seed in rng_seeds:
-        for device in torch_devices:
-            for dtype, _rtol in {**f64_rtol, **f32_rtol}.items():
-                for (h, w), sym, q in h_w_sym_measurements:
-                    for dec in exp_decay:
-                        for weight in mixture_weights:
-                            for psd in (True, False):
-                                # sample an exp matrix and its perturbation
-                                mat1 = SynthMat.exp_decay(
-                                    shape=(h, w),
-                                    rank=1,
-                                    decay=dec,
-                                    symmetric=sym,
-                                    seed=seed,
-                                    dtype=dtype,
-                                    device=device,
-                                    psd=psd,
-                                )
-                                mat2 = mat1 + weight * SynthMat.exp_decay(
-                                    shape=(h, w),
-                                    rank=1,
-                                    decay=dec,
-                                    symmetric=sym,
-                                    seed=seed + 1,
-                                    dtype=dtype,
-                                    device=device,
-                                    psd=psd,
-                                )
-                                # measure their actual frobenius difference
-                                residual = ((mat1 - mat2) ** 2).sum()
-                                # a posteriori estimate of their difference
-                                for adjoint in [True, False]:
-                                    f1, f2, res_estimate = a_posteriori_error(
-                                        mat1,
-                                        mat2,
-                                        q,
-                                        seed=seed + 2,
-                                        dtype=dtype,
-                                        device=device,
-                                        adjoint=adjoint,
-                                    )[0]
-                                    assert residual <= (
-                                        res_estimate * 2
-                                    ), "Too small a-posteriori estimate!"
-                                    assert residual >= (
-                                        res_estimate / 2
-                                    ), "Too large a-posteriori estimate!"
-                                # SCREE TEST:
-                                if sym:
-                                    S1 = torch.linalg.eigvalsh(mat1)
-                                    S2 = torch.linalg.eigvalsh(mat2)
-                                else:
-                                    _, S1, _ = torch.linalg.svd(mat1)
-                                    _, S2, _ = torch.linalg.svd(mat2)
-                                _, perm = abs(S1).sort(descending=True)
-                                S1 = S1[perm]
-                                _, perm = abs(S2).sort(descending=True)
-                                S2 = S2[perm]
-                                scree_lo, scree_hi = scree_bounds(
-                                    S2, f1**0.5, res_estimate**0.5
-                                )
-                                # check both bounds non-ascending, and hi>=lo
-                                assert (
-                                    scree_hi >= scree_lo
-                                ).all(), "Scree upper bounds <= lower bounds!"
-                                assert (
-                                    scree_hi.diff() <= 0
-                                ).all(), "Scree upper bounds are ascending!"
-                                assert (
-                                    scree_lo.diff() <= 0
-                                ).all(), "Scree lower bounds are ascending!"
-                                # check: as rank increases, bounds tighten
-                                assert (
-                                    (scree_hi - scree_lo).diff() <= 0
-                                ).all(), "Scree bounds diverging with rank!"
-                                # # Check that bounds surround the actual scree
-                                # # curve. THIS IS NOT THE CASE FOR THIS TEST
-                                # # CASE, BUT WE AREN'T DOING SVD SO IT MAY BE
-                                # # WRONG. IGNORE
-                                # import matplotlib.pyplot as plt
-
-                                # actual_scree, _ = scree_bounds(
-                                #     S1, (S1**2).sum() ** 0.5, 0
-                                # )
-                                # # plt.clf()
-                                # # plt.plot(scree_lo)
-                                # # plt.plot(scree_hi)
-                                # # plt.plot(actual_scree, linestyle="dashed")
-                                # # plt.show()
+                    # scree_lo begins with 1
+                    assert torch.isclose(
+                        scree_lo[0], torch.ones_like(scree_lo[0]), atol=tol
+                    ), "scree_lo doesn't begin with 1?"
+                    # all screes are >= 0
+                    assert (scree_lo >= 0).all(), "Negative scree_lo values?"
+                    assert (scree_hi >= 0).all(), "Negative scree_hi values?"
+                    # scree bounds are non-ascending, and hi>=lo
+                    assert (
+                        scree_hi >= scree_lo
+                    ).all(), "Scree upper bounds <= lower bounds!"
+                    assert (
+                        scree_hi.diff() <= 0
+                    ).all(), "Scree upper bounds are ascending!"
+                    assert (
+                        scree_lo.diff() <= 0
+                    ).all(), "Scree lower bounds are ascending!"
+                    # as rank increases, bounds tighten
+                    assert (
+                        (scree_hi - scree_lo).diff() <= 0
+                    ).all(), "Scree bounds diverging with rank!"
+                    # bounds surround the ground truth scree
+                    assert (
+                        (scree_hi - gt_scree) >= -screetol
+                    ).all(), "scree_hi not an upper bound?"
+                    assert (
+                        (gt_scree - scree_lo) >= -screetol
+                    ).all(), "scree_hi not a lower bound?"

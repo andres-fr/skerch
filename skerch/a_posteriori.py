@@ -80,7 +80,7 @@ CHANGELOG:
 
 import math
 import torch
-from .utils import gaussian_noise, COMPLEX_DTYPES
+from .utils import gaussian_noise, COMPLEX_DTYPES, complex_dtype_to_real
 from .algorithms import SketchedAlgorithmDispatcher
 
 
@@ -187,7 +187,8 @@ def apost_error(
     is_complex = dtype in COMPLEX_DTYPES
     beta = 2 if is_complex else 1
     #
-    frob1_all = torch.empty(num_meas, dtype=dtype, device=device)
+    rdtype = complex_dtype_to_real(dtype)
+    frob1_all = torch.empty(num_meas, dtype=rdtype, device=device)
     frob2_all = torch.empty_like(frob1_all)
     dist_all = torch.empty_like(frob1_all)
     mop = dispatcher.mop(
@@ -209,10 +210,10 @@ def apost_error(
         meas1 = block @ lop1 if adj_meas else lop1 @ block.T
         meas2 = block @ lop2 if adj_meas else lop2 @ block.T
         #
-        frob1 = (meas1 * meas1.conj()).sum(dim=1 if adj_meas else 0)
-        frob2 = (meas2 * meas2.conj()).sum(dim=1 if adj_meas else 0)
+        frob1 = (meas1 * meas1.conj()).real.sum(dim=1 if adj_meas else 0)
+        frob2 = (meas2 * meas2.conj()).real.sum(dim=1 if adj_meas else 0)
         meas1 -= meas2
-        dist = (meas1 * meas1.conj()).sum(dim=1 if adj_meas else 0)
+        dist = (meas1 * meas1.conj()).real.sum(dim=1 if adj_meas else 0)
         #
         frob1_all[idxs] = frob1
         frob2_all[idxs] = frob2

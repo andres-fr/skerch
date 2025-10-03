@@ -15,6 +15,7 @@ from skerch.utils import randperm, rademacher_flip
 from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
 from skerch.utils import qr, pinv, lstsq, svd, eigh, htr
 from skerch.utils import subdiag_hadamard_pattern, serrated_hadamard_pattern
+from skerch.utils import truncate_decomp
 
 from . import rng_seeds, torch_devices
 from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
@@ -804,3 +805,95 @@ def test_hadamard_patterns(dtypes_tols, torch_devices, hadamard_testcases):
                         assert torch.allclose(z4[i], w, atol=tol), (
                             "Wrong serrated upper without main diag!" + msg
                         )
+
+
+# ##############################################################################
+# # RECOVERY UTILS
+# ##############################################################################
+@pytest.fixture
+def truncate_testcases():
+    """Inputs and expected outputs for subdiag and serrated hadamard.
+
+    Returns tuples in the form ``(shape, k)``
+    """
+    result = [
+        ((20, 20), 10),
+    ]
+    return result
+
+
+def test_truncate_decomp(dtypes_tols, torch_devices, truncate_testcases):
+    """Test case for measurement Hadamard patterns in ``utils``.
+
+    For all devices and datatypes, with and without FFT, sample a random vector
+    and check that ``subdiag_hadamard_pattern`` produces the right shift for
+    all possible idxs.
+
+
+    * k <= raises error
+    * Output has expected shape and content
+    * Modifying outputs doesn't alter inputs if copy=True, does otherwise
+    """
+    import itertools
+
+    for device in torch_devices:
+        for dtype, tol in dtypes_tols.items():
+            for shape, k in truncate_testcases:
+                mat = gaussian_noise(
+                    shape,
+                    0,
+                    1,
+                    seed=0,
+                    dtype=dtype,
+                    device=device,
+                )
+                U, S, Vh = torch.linalg.svd(mat)
+                # k <= 0 raises error
+                with pytest.raises(ValueError):
+                    _ = truncate_decomp(0, U, S, Vh)
+                # output has expected shape and content
+                for u, s, vh in itertools.product(
+                    *((x, None) for x in (U, S, Vh))
+                ):
+                    u_out, s_out, vh_out = truncate_decomp(k, u, s, vh)
+                    #
+                    if u is None:
+                        assert u_out is None, "u None u_out not None?"
+                    else:
+                        assert (u_out == u[:, :k]).all(), "incorrect u_out?"
+                    #
+                    if s is None:
+                        assert s_out is None, "s None s_out not None?"
+                    else:
+                        assert (s_out == s[:k]).all(), "incorrect s_out?"
+                    #
+                    if vh is None:
+                        assert vh_out is None, "vh None vh_out not None?"
+                    else:
+                        assert (vh_out == vh[:k, :]).all(), "incorrect vh_out?"
+                # modifying by-copy doesn't alter input
+                u_out, s_out, vh_out = truncate_decomp(
+                    max(shape), U, S, Vh, copy=True
+                )
+                u_out *= 0
+                s_out *= 0
+                vh_out *= 0
+                assert torch.dist(U, u_out) == torch.norm(
+                    U
+                ), "U modified by-copy?"
+                assert torch.dist(S, s_out) == torch.norm(
+                    S
+                ), "S modified by-copy?"
+                assert torch.dist(Vh, vh_out) == torch.norm(
+                    Vh
+                ), "Vh modified by-copy?"
+                # modifying by-reference alters input
+                u_out, s_out, vh_out = truncate_decomp(
+                    max(shape), U, S, Vh, copy=False
+                )
+                u_out *= 0
+                s_out *= 0
+                vh_out *= 0
+                assert torch.norm(U) == 0, "U not modified by-ref?"
+                assert torch.norm(S) == 0, "S not modified by-ref?"
+                assert torch.norm(Vh) == 0, "Vh not modified by-ref?"

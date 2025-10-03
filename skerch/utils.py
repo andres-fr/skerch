@@ -559,15 +559,23 @@ def serrated_hadamard_pattern(
 # ##############################################################################
 # # RECOVERY UTILS
 # ##############################################################################
-def truncate_decomp(k, U=None, S=None, Vh=None):
+def truncate_decomp(k, U=None, S=None, Vh=None, copy=False):
     """Truncation of diagonal decomposition.
 
-    :returns: ``U[:, :k], S[:k], Vh[:k, :]`` (if given).
+    :returns: ``U[:, :k], S[:k], Vh[:k, :]`` (if given), i.e. the ``k``
+      parameter represent the number of dimensions that we wish to keep.
+
+    If ``U, S, Vh`` is the SVD or eigendecomposition of a matrix, and the
+    ``S`` values are in non-ascending magnitude, this truncation returns
+    the top-k components. Note that
     """
+    if k <= 0:
+        raise ValueError("Truncation")
     if U is not None:
-        U = U[:, :k]
+        U = U[:, :k].clone() if copy else U[:, :k]
     if S is not None:
-        S = S[:k]
+        S = S[:k].clone() if copy else S[:k]
     if Vh is not None:
-        Vh = Vh[:k, :]
+        Vh = Vh[:k, :].clone() if copy else Vh[:k, :]
+    #
     return U, S, Vh
