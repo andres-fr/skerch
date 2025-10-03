@@ -152,21 +152,6 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                     # test that virtual+partial HDF5 files are created in disk
                     tmpdir = tempfile.TemporaryDirectory()
                     out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
-                    """
-
-                    TODO HERE:
-                    follow the lifecycle, and get rid of the assumption that
-                    each file is one measurement.
-
-                    Users should be able to specify how many consecutive
-                    meas per file, and everything else should just work same.
-
-                    How to extend tests?
-                    * less total number of files when bigger blocks
-                    * test correctness for all block sizes
-                    *
-                    """
-                    breakpoint()
                     h5_path, h5_subpaths = DistributedHDF5.create(
                         out_path,
                         num_files,
