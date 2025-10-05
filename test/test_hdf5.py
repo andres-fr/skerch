@@ -268,45 +268,7 @@ def test_hdf5_create_layout_lop():
     num_outer_blocks = div + (mod != 0)
     div, mod = divmod(innermeas, partsize)
     num_inner_blocks = div + (mod != 0)
-    # lo requires outer meas
-    with pytest.raises(ValueError):
-        create_hdf5_layout_lop(
-            "/tmp/test",
-            mat.shape,
-            mat.dtype,
-            partsize,
-            None,  # outermeas
-            innermeas,
-            lo=True,
-            ro=False,
-            inner=False,
-        )
-    # ro requires outer meas
-    with pytest.raises(ValueError):
-        create_hdf5_layout_lop(
-            "/tmp/test",
-            mat.shape,
-            mat.dtype,
-            partsize,
-            None,  # outermeas
-            innermeas,
-            lo=False,
-            ro=True,
-            inner=False,
-        )
-    # inner requires inner meas
-    with pytest.raises(ValueError):
-        create_hdf5_layout_lop(
-            "/tmp/test",
-            mat.shape,
-            mat.dtype,
-            partsize,
-            outermeas,
-            None,  # innermeas
-            lo=False,
-            ro=False,
-            inner=True,
-        )
+    #
     for lo, ro, inner in itertools.product((False, True), repeat=3):
         tmpdir = tempfile.TemporaryDirectory()
         (
@@ -316,13 +278,11 @@ def test_hdf5_create_layout_lop():
         ) = create_hdf5_layout_lop(
             tmpdir.name,
             mat.shape,
-            mat.dtype,
+            torch_dtype_as_str(mat.dtype),
             partsize,
-            outermeas,
-            innermeas,
-            lo=lo,
-            ro=ro,
-            inner=inner,
+            lo_meas=outermeas if lo else None,
+            ro_meas=outermeas if ro else None,
+            inner_meas=innermeas if inner else None,
             lo_fmt=lo_fmt,
             ro_fmt=ro_fmt,
             inner_fmt=inner_fmt,

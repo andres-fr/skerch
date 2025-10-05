@@ -11,17 +11,6 @@ This script acts in connection with the :mod:`.cli` submodule.
 
 TODO:
 
-
-
-* finish  __main__ stuff
-  - Current HDF5 paradigm doesn't allow for uneven blocks (e.g. 3+3+2). We
-    do need to change it to make it block-compatible (divmod(7, 3)).
-    Then finish ``create_hdf5_layout`` and maybe utest CLI stuff.
-  - the create_hdf5_layout assumes Boutsidis! we need to figure out how to
-    make this modular and extendible. Also with blocks of tensors...
-  - will HDF5 work with other algos? e.g. hutch++ for block-parallel meas.
-  - then check the merge HDF5, and we are done.
-
 * Debug triang matmul
 * documentation, changelog, issues
 * release!
@@ -83,7 +72,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from . import INNER_FMT, LO_FMT, RO_FMT, cli
+from . import cli
 
 
 # ##############################################################################
@@ -173,8 +162,9 @@ def get_argparser():
 
     Usage examples::
       python -m skerch post_bounds --apost_n=30 --apost_err=0.75 --is_complex
-      python -m skerch create_hdf5_layout --dtype float64 \
-        --shape 123,234 --outer 30 --inner 60
+      python -m skerch create_hdf5_layout_lop --dtype float64 \
+        --shape 123,234 --left_outer 30 --inner 60  --partsize 11
+      python -m skerch merge_hdf5 --in_path=.../inner_ALL.h5 --delete_subfiles
     """
     parser = argparse.ArgumentParser(description="skerch CLI")
     parser.add_argument(
@@ -205,16 +195,37 @@ def get_argparser():
     )
     # create HDF5 layout
     parser.add_argument(
+        "--shape",
+        type=matrix_shape,
+        default=(100, 200),
+        help="Matrix shape in the form 'height,width' as positive integers.",
+    )
+    parser.add_argument(
         "--hdf5dir",
         default=None,
         type=str,
         help="Directory to create the HDF5 layout.",
     )
     parser.add_argument(
-        "--outer", default=100, type=int, help="Number of outer measurements."
+        "--left_outer",
+        default=None,
+        type=int,
+        help="Number of left outer measurements.",
     )
     parser.add_argument(
-        "--inner", default=200, type=int, help="Number of inner measurements."
+        "--right_outer",
+        default=None,
+        type=int,
+        help="Number of right outer measurements.",
+    )
+    parser.add_argument(
+        "--inner", default=None, type=int, help="Number of inner measurements."
+    )
+    parser.add_argument(
+        "--partsize",
+        default=1,
+        type=int,
+        help="How many entries will each HDF5 sub-file have.",
     )
     parser.add_argument(
         "--dtype",
@@ -304,24 +315,15 @@ def main():
         cplx = args.is_complex
         main(n, err, cplx)
     # create HDF5 layout
-    elif cmd == "create_hdf5_layout":
+    elif cmd == "create_hdf5_layout_lop":
         dirpath = ensure_dirpath(args.hdf5dir)
         shape = args.shape
-        with_ro = not args.sym  # if matrix Hermitian, no need for right outer
-        outer = args.outer
-        inner = args.inner
         dtype = args.dtype
-        main(
-            dirpath,
-            shape,
-            dtype,
-            outer,
-            inner,
-            LO_FMT,
-            RO_FMT,
-            INNER_FMT,
-            with_ro,
-        )
+        partsize = args.partsize
+        lo = args.left_outer
+        ro = args.right_outer
+        inner = args.inner
+        main(dirpath, shape, dtype, partsize, lo, ro, inner)
     # merge
     elif cmd == "merge_hdf5":
         inpath = args.in_path

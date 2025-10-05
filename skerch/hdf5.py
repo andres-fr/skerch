@@ -7,7 +7,6 @@
 
 import os
 import h5py
-from .utils import torch_dtype_as_str
 
 
 # ##############################################################################
@@ -222,7 +221,7 @@ class DistributedHDF5Tensor:
         flags_dtype = all_flags.dtype
         max_idx = shape[0]
         if not all_data.is_virtual:
-            raise ValueError(f"{dataset_name} in {all_path} not virtual!")
+            raise ValueError(f"data in {all_path} not virtual!")
         # inspect virtual sources to get info about the chunks
         vs_info = {}
         partition_size = float("-inf")
@@ -294,13 +293,11 @@ class DistributedHDF5Tensor:
 def create_hdf5_layout_lop(
     root,
     lop_shape,
-    lop_dtype,
+    dtype,
     partition_size,
-    num_outer_measurements=None,
-    num_inner_measurements=None,
-    lo=True,
-    ro=True,
-    inner=True,
+    lo_meas=None,
+    ro_meas=None,
+    inner_meas=None,
     lo_fmt="leftouter_{}.h5",
     ro_fmt="rightouter_{}.h5",
     inner_fmt="inner_{}.h5",
@@ -323,39 +320,27 @@ def create_hdf5_layout_lop(
       when working with symmetric matrices where only one side is needed).
     """
     h, w = lop_shape
-    strtype = torch_dtype_as_str(lop_dtype)
-    #
-    if (ro or lo) and (num_outer_measurements is None):
-        raise ValueError("lo/ro require to provide num_outer_measurements!")
-    if inner and (num_inner_measurements is None):
-        raise ValueError("inner requires to provide num_inner_measurements!")
     #
     lo_pth, lo_subpaths, lo_begs_ends = None, None, None
     ro_pth, ro_subpaths, ro_begs_ends = None, None, None
     in_pth, in_subpaths, in_begs_ends = None, None, None
     #
-    if lo:
+    if lo_meas is not None:
         lo_pth, lo_subpaths, lo_begs_ends = DistributedHDF5Tensor.create(
-            os.path.join(root, lo_fmt),
-            (num_outer_measurements, w),
-            partition_size,
-            strtype,
+            os.path.join(root, lo_fmt), (lo_meas, w), partition_size, dtype
         )
     #
-    if ro:
+    if ro_meas is not None:
         ro_pth, ro_subpaths, ro_begs_ends = DistributedHDF5Tensor.create(
-            os.path.join(root, ro_fmt),
-            (num_outer_measurements, h),
-            partition_size,
-            strtype,
+            os.path.join(root, ro_fmt), (ro_meas, w), partition_size, dtype
         )
     #
-    if inner:
+    if inner_meas is not None:
         in_pth, n_subpaths, in_begs_ends = DistributedHDF5Tensor.create(
             os.path.join(root, inner_fmt),
-            (num_inner_measurements, num_inner_measurements),
+            (inner_meas, inner_meas),
             partition_size,
-            strtype,
+            dtype,
         )
     #
     return (
