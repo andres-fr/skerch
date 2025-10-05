@@ -11,6 +11,11 @@ This script acts in connection with the :mod:`.cli` submodule.
 
 TODO:
 
+* block-HDF5
+  - virtual dataset is still a tensor
+  - so provide a global shape and number of partitions
+  - simplify: filedim is always the first
+
 * finish  __main__ stuff
   - Current HDF5 paradigm doesn't allow for uneven blocks (e.g. 3+3+2). We
     do need to change it to make it block-compatible (divmod(7, 3)).

@@ -12,7 +12,7 @@ import torch
 import numpy as np
 
 from skerch.utils import torch_dtype_as_str, gaussian_noise
-from skerch.hdf5 import DistributedHDF5
+from skerch.hdf5 import DistributedHDF5Tensor
 from . import rng_seeds, torch_devices
 
 
@@ -49,9 +49,23 @@ def shapes_numfiles():
 
 
 @pytest.fixture
-def shapes_too_many_files(request):
+def shapes_partsizes():
+    """Shapes of individual HDF5 files and how many individual files."""
+    result = [
+        ((1,), 1),
+        ((10,), 10),
+        ((10,), 3),
+        ((10,), 20),
+        ((11, 7, 5), 3),
+        ((1000, 100), 100),
+    ]
+    return result
+
+
+@pytest.fixture
+def shapes_partsizes_toomany(request):
     """Provides virtual datasets with too many files to cause errors."""
-    result = [((5, 1), 10000)]
+    result = [((10_000, 1), 1)]
     if request.config.getoption("--skip_toomanyfiles"):
         result = []
     return result
@@ -121,7 +135,7 @@ def test_hdf5_merge():
 
 
 def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
-    rng_seeds, dtypes_tols, shapes_numfiles
+    rng_seeds, dtypes_tols, shapes_partsizes
 ):
     """Test case for ``DistributedHDF5`` creation and write/read.
 
@@ -135,81 +149,65 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
     """
     for seed in rng_seeds:
         for dtype, tol in dtypes_tols.items():
-            for shape, num_files in shapes_numfiles:
+            for shape, partsize in shapes_partsizes:
                 # target tensor
-                arr_base = gaussian_noise(
-                    (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
+                tnsr = gaussian_noise(
+                    shape, seed=seed, dtype=dtype, device="cpu"
                 ).numpy()
-                for filedim_last in (True, False):
-                    arr = (
-                        np.moveaxis(arr_base, 0, -1)
-                        if filedim_last
-                        else arr_base
-                    )
-                    h5shape = tuple(
-                        np.roll(arr.shape, -1) if filedim_last else arr.shape
-                    )
-                    # test that virtual+partial HDF5 files are created in disk
-                    tmpdir = tempfile.TemporaryDirectory()
-                    out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
-                    h5_path, h5_subpaths = DistributedHDF5.create(
-                        out_path,
-                        num_files,
-                        shape,
-                        torch_dtype_as_str(dtype),
-                        filedim_last=filedim_last,
-                    )
-                    assert os.path.isfile(h5_path), "Merged HDF5 not created?"
-                    for sp in h5_subpaths:
-                        assert os.path.isfile(sp), "Partial HDF5 not created?"
-                    # simulate distributed writing values to partial H5 files
-                    # then test that load_virtual holds correct values
-                    for i in range(num_files):
-                        vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-                        vals[:] = arr_base[i]
-                        flag[0] = f"good_{i}"
-                        h5.close()
-                    # LOAD TEST
-                    # test that separate files and merger are correct in
-                    # content+shape, and that flags were all set to correct
-                    all_vals, all_flags, all_h5 = DistributedHDF5.load(h5_path)
-                    assert (
-                        all_vals.shape == arr.shape
-                    ), "Wrong merged dataset shape!"
+                # test that virtual+partial HDF5 files are created in disk
+                tmpdir = tempfile.TemporaryDirectory()
+                path_fmt = os.path.join(tmpdir.name, "h5dataset_{}.h5")
+                h5_path, h5_subpaths, begs_ends = DistributedHDF5Tensor.create(
+                    path_fmt,
+                    shape,
+                    partsize,
+                    torch_dtype_as_str(dtype),
+                )
+                assert os.path.isfile(h5_path), "Merged HDF5 not created?"
+                for sp in h5_subpaths:
+                    assert os.path.isfile(sp), "Partial HDF5 not created?"
+                # simulate distributed writing values to partial H5 files
+                for i, (beg, end) in enumerate(begs_ends):
+                    vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
+                    vals[:] = tnsr[beg:end]
+                    flgs[:] = f"good"
+                    h5.close()
+                # VIRTUAL LOAD TEST
+                # test that virtual data and flags are correct in content+shape
+                all_vals, all_flags, all_h5 = DistributedHDF5Tensor.load(
+                    h5_path
+                )
+                assert (
+                    all_vals.shape == tnsr.shape
+                ), "Wrong merged dataset shape!"
+                assert np.allclose(
+                    all_vals, tnsr, atol=tol
+                ), "Wrong merged dataset values!"
+                assert all_flags.shape == (
+                    shape[0],
+                ), "Wrong merged flags shape!"
+                for f in all_flags[:]:
+                    assert f.decode() == f"good", "Unsuccessful flag?"
+                all_h5.close()
+                # SUBFILE LOAD TEST
+                # now load again (it was closed), but this time one by
+                # one via load, and also check content and shape
+                for i, (beg, end) in enumerate(begs_ends):
+                    vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
+                    sublen = end - beg
+                    subshape = (sublen,) + shape[1:]
+                    assert vals.shape == subshape, "Wrong partial shape?"
+                    for f in flgs[:]:
+                        assert f.decode() == "good", "Wrong partial flag?"
                     assert np.allclose(
-                        arr, all_vals, atol=tol
-                    ), "Wrong merged dataset values!"
-                    assert all_flags.shape == (
-                        num_files,
-                    ), "Wrong merged flags shape!"
-                    for i, f in enumerate(all_flags):
-                        assert f.decode() == f"good_{i}", "Unsuccessful flag?"
-                    # LOAD TEST
-                    # now load again (it was closed), but this time one by
-                    # one via load, and also check content and shape
-                    for i in range(num_files):
-                        vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-                        assert vals.shape == shape, "Wrong partial shape!"
-                        assert flag[0].decode() == f"good_{i}", "Wrong flag?"
-                        #
-                        if filedim_last:
-                            sub_target, sub_all = arr[..., i], all_vals[..., i]
-                        else:
-                            sub_target, sub_all = arr[i], all_vals[i]
-                        # breakpoint()
-                        assert np.allclose(
-                            vals, sub_target, atol=tol
-                        ), "Partial inconsistent with target!"
-                        assert np.allclose(
-                            vals, sub_all, atol=tol
-                        ), "Partial inconsistent with merged dataset!"
-                        h5.close()
-                    #
-                    all_h5.close()
-                    tmpdir.cleanup()
+                        vals[:], tnsr[beg:end], atol=tol
+                    ), "Partial data with merged dataset!"
+                    h5.close()
+                #
+                tmpdir.cleanup()
 
 
-def test_hdf5_too_many_files(shapes_too_many_files):
+def test_hdf5_too_many_files(shapes_partsizes_toomany):
     """Test case for too large ``DistributedHDF5``: read errors.
 
     Creates a temporary DistributedHDF5 with random values with a lot of
@@ -218,38 +216,34 @@ def test_hdf5_too_many_files(shapes_too_many_files):
     """
     seed = 0
     dtype, tol = torch.float32, 1e-5
-    for shape, num_files in shapes_too_many_files:
-        tnsr = gaussian_noise(
-            (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
-        )
+    for shape, partsize in shapes_partsizes_toomany:
+        tnsr = gaussian_noise(shape, seed=seed, dtype=dtype, device="cpu")
         # create layout and check is actually being created on (temp) disk
         tmpdir = tempfile.TemporaryDirectory()
-        out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
-        h5_path, h5_subpaths = DistributedHDF5.create(
-            out_path,
-            num_files,
+        path_fmt = os.path.join(tmpdir.name, "h5dataset_{}.h5")
+        h5_path, h5_subpaths, begs_ends = DistributedHDF5Tensor.create(
+            path_fmt,
             shape,
+            partsize,
             torch_dtype_as_str(dtype),
-            filedim_last=False,
         )
         assert os.path.isfile(h5_path), "Merged HDF5 not created?"
         for sp in h5_subpaths:
             assert os.path.isfile(sp), "Partial HDF5 not created?"
         # write values to sub-datasets
-        for i in range(num_files):
-            vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-            vals[:] = tnsr[i]
-            flag[0] = str(i)
+        for i, (beg, end) in enumerate(begs_ends):
+            vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
+            vals[:] = tnsr[beg:end]
+            flgs[:] = f"good"
             h5.close()
-        # test that separate files  are correct
-        all_vals, all_flags, all_h5 = DistributedHDF5.load(h5_path)
+        # now, the aggregated dataset is not correct! This is due to OS file
+        # limit per process being exceeded, overflown values are empty
+        all_vals, all_flags, all_h5 = DistributedHDF5Tensor.load(h5_path)
         assert all_vals.shape == tnsr.shape, "Wrong merged dataset shape!"
-        # but here is the catch, merger is not correct!
-        # this is due to file limit being exceeded, overflown values are empty
         with pytest.raises(AssertionError):
             assert np.allclose(
-                tnsr, all_vals, atol=tol
-            ), "Wrong merged dataset values!"
+                all_vals[:], tnsr, atol=tol
+            ), "now all_vals is missing entries!"
         # it would follow to test that merged is not consistent with
         # sub-datasets, but this itself causes OSErros, so we skip that.
         all_h5.close()
