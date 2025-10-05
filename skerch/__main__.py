@@ -2,58 +2,9 @@
 # -*- coding: utf-8 -*-
 
 
-"""Command Line Interface interaction with ``skerch``.
+"""Command Line Interface interaction via ``python -m skerch ...``.
 
 This script acts in connection with the :mod:`.cli` submodule.
-
-
-
-
-TODO:
-
-* Debug triang matmul
-* documentation, changelog, issues
-* release!
-
-* Integration tests/docs (add utests where needed):
-  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
-  - scale up: good recovery of very large composite linop, quick.
-  - priori and posteriori...
-* add remaining todos as GH issues and release!
-  - sketchlord(h) facilities: leave them for paper
-
-
-
-
-LATER TODO:
-* xtrace
-* HDF5 measurement/wrapper API
-* out-of-core wrappers for QR, SVD, LSTSQ
-* sketchlord and sketchlordh.
-* sketched permutations
-* triang: stairs should include bits of main diag
-
-
-CHANGELOG:
-* Better test coverage -> less bugs
-* Clearer docs
-* support for complex datatypes
-* Support for (approximately) low-rank plus diagonal synthetic matrices
-* Linop API:
-  - New core functionality: Transposed, Signed Sum, Banded, ByBlock
-  - Support for parallelization of matrix-matrix products
-  - New measurement noise linops: Rademacher, Gaussian, Phase, SSRFT
-* Data API:
-  - Batched support for arbitrary tensors in distributed HDF5 arrays
-  - Modular and extendible HDF5 layouts (oversampled, nystrom...)
-* Sketching API:
-  - Modular measurement API supporting multiprocessing and HDF5
-  - Modular recovery methods (singlepass, Nystrom, oversampled)
-* Algorithm API:
-  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Triangular, Norms
-  - Efficient support for Hermitian versions
-  - Dispatcher for modularized use of noise sources and recovery types
-  - Matrix-free a-posteriori error verification
 """
 
 
@@ -223,7 +174,7 @@ def get_argparser():
         "--dtype",
         default="float32",
         type=str,
-        help="Datatype of HDF5 layout to be created. Must be empty",
+        help="Datatype of HDF5 layout to be created.",
     )
     # merge virtual HDF5 into monolithic
     parser.add_argument(
@@ -236,7 +187,7 @@ def get_argparser():
         "--out_path",
         default=None,
         type=str,
-        help="Input path for the file to be processed.",
+        help="Output path for the file to be processed.",
     )
     parser.add_argument(
         "--ok_flag",

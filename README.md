@@ -20,9 +20,9 @@
 
 # What is `skerch`?
 
-`skerch` is a Python package to compute different sketched linear operations, such as SVD/EIGH, diagonal/triangular approximations and operator norms. See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details and usage examples.
+`skerch` is a Python package to compute different sketched linear operations, such as SVD/EIGH, diagonal/triangular approximations and operator norms. See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details and usage examples. Main features:
 
-* Built on top of PyTorch, naturally supporting CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
+* Built on top of PyTorch, naturally supports CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
 * Rich API for matrix-free linear operators, including matrix-free noise sources (Rademacher, Gaussian, SSRFT...)
 * Efficient parallelized and distributed computations
 * Support for out-of-core operations via [HDF5](https://www.h5py.org/)
@@ -34,7 +34,7 @@
 Sketched methods are a good choice whenever we are dealing with *large* objects that can be approximated by *smaller* substructures (e.g. a low-rank approximation of a large matrix).
 Thanks to the random measurements (i.e. the "sketches"), we can directly obtain the *small* approximations, without having to store or compute the *large* object. This works with very few assumptions about how the smaller substructure looks like.
 
-For example, if we have an intractably large linear operator of dimensionality `(N, N)` that doesn't fit in memory, but has rank `k`, we can directly retrieve its top-`k` singular components with only `O(Nk)` storage, as opposed to the intractable `O(N^2)` (see picture below for an intuition). As a bonus, this technique is numerically stable and can be parallelized, which often results in substantial speedups.
+For example, if we have a large linear operator of dimensionality `(N, N)` that doesn't fit in memory, but has rank `k`, we can directly retrieve its top-`k` singular components with only `O(Nk)` storage, as opposed to the intractable `O(N^2)` (see picture below for an intuition). As a bonus, this technique is numerically stable and can be parallelized, which often results in substantial speedups.
 
 And since `skerch` is built on top of PyTorch and with very few dependencies otherwise, it supports a broad variety of platforms and datatypes, including e.g. complex datatypes on GPU.
 Its modular and extendible design, featuring many common components of sketches, is also meant to reduce development times whenever new settings or methods are being explored.
@@ -61,19 +61,51 @@ TODO:
 1. Add integration tests:
 * CLI: python docs/materials/examples/example_deep_learning.py
 * HDF5 files for out-of-core operations
-* noise synthetic matrices and matrix-free noise linops
-* Low-rank approximations
-* Diagonal and triangular approximations
-* Approximating deep learning curvature matrices
+* noise synthetic matrices and matrix-free noise linops (show blockwise speedups)
+* Low-rank approximations (provide boxplot for runtimes and errors compared to classical. +aposteriori)
+* Diagonal and triangular approximations (also boxplot +aposteriori)
+* Approximating deep learning curvature matrices (boxplot? +aposteriori)
+* update readme with reference to examples
 
 
-* Integration tests/docs (add utests where needed):
-  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
-  - scale up: good recovery of very large composite linop, quick.
-  - priori and posteriori...
-* add remaining todos as GH issues and release!
-  - sketchlord(h) facilities: leave them for paper
+2. add remaining todos as GH issues
+* xtrace
+* HDF5 measurement/wrapper API
+* out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask.
+* triang: stairs should include bits of main diag
 
+3. Release
+* Review all docstrings, lint... check webdocs and latex look OK
+* Check all makefile functions run OK
+* no dumb files or text hanging (_old?)
+* Merge PR (changelog?)
+
+4. Verify
+* check online docs
+* follow instructions from scratch to reproduce all examples
+* run utests, all should pass
+
+
+CHANGELOG:
+* Better test coverage -> less bugs
+* Clearer docs
+* support for complex datatypes
+* Support for (approximately) low-rank plus diagonal synthetic matrices
+* Linop API:
+  - New core functionality: Transposed, Signed Sum, Banded, ByBlock
+  - Support for parallelization of matrix-matrix products
+  - New measurement noise linops: Rademacher, Gaussian, Phase, SSRFT
+* Data API:
+  - Batched support for arbitrary tensors in distributed HDF5 arrays
+  - Modular and extendible HDF5 layouts (oversampled, nystrom...)
+* Sketching API:
+  - Modular measurement API supporting multiprocessing and HDF5
+  - Modular recovery methods (singlepass, Nystrom, oversampled)
+* Algorithm API:
+  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Triangular, Norms
+  - Efficient support for Hermitian versions
+  - Dispatcher for modularized use of noise sources and recovery types
+  - Matrix-free a-posteriori error verification
 ```
 
 The sketched SVD of a linear operator `op` of shape `(h, w)` can be then computed simply via:

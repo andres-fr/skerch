@@ -6,10 +6,10 @@ r"""Command Line Interface
 This example demonstrates the functionality in ``skerch`` that can be directly
 accessed from the command line interface (CLI).
 
-We simply assume that ``skerch`` is accessible to the available ``python``
-interpreter.
+To run it, we simply assume that ``skerch`` is accessible to the available
+``python`` interpreter.
 
-The following imports are only needed to exemplify the Python code:
+The following (standard) imports are only needed to exemplify the Python code:
 """
 
 
