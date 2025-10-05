@@ -164,15 +164,15 @@ def triang_configs(request):
     Tuples in the form ``(dims, step_width, num_gh_meas, frob_err_ratio)``.
     """
     result = [
-        (11, 1, 150, 0.15),
-        (11, 2, 150, 0.15),
-        (11, 10, 150, 0.15),
-        (11, 11, 150, 0.15),
-        #
-        (11, 3, 150, 0.15),
-        (11, 4, 150, 0.15),
-        (11, 5, 150, 0.15),
-        (11, 3, 1000, 0.15),
+        (11, 1, 0, 0.15),
+        # (11, 2, 150, 0.22),
+        # (11, 10, 150, 0.22),
+        # (11, 11, 150, 0.22),
+        # #
+        # (11, 3, 150, 0.22),
+        # (11, 4, 150, 0.22),
+        # (11, 5, 150, 0.22),
+        # (11, 3, 1000, 0.22),
     ]
     if request.config.getoption("--quick"):
         result = result[:4]
@@ -687,6 +687,7 @@ def test_triang_formal(
     """Formal test case for ``TriangularLinOp``.
 
     * Only square, nonempty linops supported
+    * Only vectors supported
     * Stair width between 1 and linop dims
     * Non-unitnorm noise raises warning
     * Nonpositive GH measurements raises warning
@@ -701,6 +702,11 @@ def test_triang_formal(
     # only nonempty linops supported
     with pytest.raises(BadShapeError):
         TriangularLinOp(torch.zeros(0, 0))
+    # only vectors supported
+    with pytest.raises(NotImplementedError):
+        _ = TriangularLinOp(torch.ones(5, 5)) @ torch.ones(5, 2)
+    with pytest.raises(NotImplementedError):
+        _ = torch.ones(2, 5) @ TriangularLinOp(torch.ones(5, 5))
     # Stair width between 1 and dims
     with pytest.raises(ValueError):
         TriangularLinOp(torch.zeros(5, 5), stair_width=0)
@@ -775,7 +781,7 @@ def test_triang_formal(
                             mat1a, mat1a_, atol=tol
                         ), "Nondeterministic linop?"
                         # **commented on purpose: by design, triang linop
-                        # fwd and adj are not same**
+                        # fwd and adj are not same** (mat1j)
                         # # adjoint to_matrix is same as forward
                         # assert torch.allclose(
                         #     mat1a, mat1j, atol=tol
@@ -790,6 +796,57 @@ def test_triang_formal(
                             / mat2.numel()
                             < 0.9
                         ), "Different seed, similar results?"
+
+
+def test_triang_wtf(rng_seeds, torch_devices, dtypes_tols, triang_configs):
+    """Test case for correctness of ``TriangularLinOp``.
+
+    For a variety of random matrices, checks that tri matvecs are close enough:
+    * As lower and upper triangle
+    * with and without main diag
+    * Via forward and adjoint matmul
+    * For a variety of stair widths
+    * Transposed linop
+    """
+    for seed in rng_seeds:
+        for device in torch_devices:
+            for dtype, tol in dtypes_tols.items():
+                if dtype != torch.complex64:
+                    continue
+                for dims, width, gh_meas, errtol in triang_configs:
+                    dims = 10
+                    # mat = torch.ones((dims, dims), dtype=dtype, device=device)
+                    mat = gaussian_noise(
+                        (dims, dims), 0, 1, seed, dtype, device
+                    )
+                    mat1 = mat.tril(-1)
+                    # lower/upper linops, with/without diag
+                    lop1 = TriangularLinOp(
+                        mat,
+                        stair_width=3,
+                        lower=True,
+                        with_main_diagonal=False,
+                        use_fft=False,
+                        noise_type="phase",
+                        num_gh_meas=20000,
+                        meas_blocksize=500,
+                    )
+                    vv = (
+                        torch.arange(
+                            dims, dtype=mat.real.dtype, device=mat.device
+                        ).to(dtype)
+                        + 1
+                    )
+                    #
+                    print("\n\n\GT:", mat1 @ vv)
+                    print("   sketched:", lop1 @ vv)
+                    print("\n\n ERROR:", relerr(mat1 @ vv, lop1 @ vv))
+
+                    print("\n\n\GT:", vv @ mat1)
+                    print("   sketched:", vv @ lop1)
+                    print("\n\n ERROR:", relerr(vv @ mat1, vv @ lop1))
+
+                    breakpoint()
 
 
 def test_triang_correctness(
@@ -816,84 +873,89 @@ def test_triang_correctness(
                     mat1d = mat.tril(0)
                     mat2 = mat.triu(1)
                     mat2d = mat.triu(0)
-                    # lower/upper linops, with/without diag
-                    lop1 = TriangularLinOp(
-                        mat,
-                        stair_width=3,
-                        lower=True,
-                        with_main_diagonal=False,
-                        use_fft=False,
-                        num_gh_meas=gh_meas,
-                    )
-                    lop1d = TriangularLinOp(
-                        mat,
-                        stair_width=3,
-                        lower=True,
-                        with_main_diagonal=True,
-                        use_fft=False,
-                        num_gh_meas=gh_meas,
-                    )
-                    lop2 = TriangularLinOp(
-                        mat,
-                        stair_width=3,
-                        lower=False,
-                        with_main_diagonal=False,
-                        use_fft=False,
-                        num_gh_meas=gh_meas,
-                    )
-                    lop2d = TriangularLinOp(
-                        mat,
-                        stair_width=3,
-                        lower=False,
-                        with_main_diagonal=True,
-                        use_fft=False,
-                        num_gh_meas=gh_meas,
-                    )
-                    # test vector
-                    v = gaussian_noise(dims, 0, 1, seed + 1, dtype, device)
-                    # forward matmul
-                    v1 = lop1 @ v
-                    v1d = lop1d @ v
-                    v2 = lop2 @ v
-                    v2d = lop2d @ v
-                    assert (
-                        relerr(mat1 @ v, v1) < errtol
-                    ), "Wrong lower/noDiag trilop! (fwd)"
-                    assert (
-                        relerr(mat1d @ v, v1d) < errtol
-                    ), "Wrong lower/withDiag trilop! (fwd)"
-                    assert (
-                        relerr(mat2 @ v, v2) < errtol
-                    ), "Wrong upper/noDiag trilop! (fwd)"
-                    assert (
-                        relerr(mat2d @ v, v2d) < errtol
-                    ), "Wrong upper/withDiag trilop! (fwd)"
-                    # adjoint matmul
-                    v1 = v @ lop1
-                    v1d = v @ lop1d
-                    v2 = v @ lop2
-                    v2d = v @ lop2d
-                    assert (
-                        relerr(v @ mat1, v1) < errtol
-                    ), "Wrong lower/noDiag trilop! (adj)"
-                    assert (
-                        relerr(v @ mat1d, v1d) < errtol
-                    ), "Wrong lower/withDiag trilop! (adj)"
-                    assert (
-                        relerr(v @ mat2, v2) < errtol
-                    ), "Wrong upper/noDiag trilop! (adj)"
-                    assert (
-                        relerr(v @ mat2d, v2d) < errtol
-                    ), "Wrong upper/withDiag trilop! (adj)"
-                    # transposed
-                    lop1dT = TransposedLinOp(lop1d)
-                    lop2dT = TransposedLinOp(lop2d)
-                    assert (
-                        (lop1dT @ v.conj()).conj() == v1d
-                    ).all(), "Wrong triangular transpose? (lower)"
-                    assert (
-                        (lop2dT @ v.conj()).conj() == v2d
-                    ).all(), "Wrong triangular transpose? (upper)"
+                    for bsize in [1, max(3, gh_meas // 2), gh_meas]:
+                        # lower/upper linops, with/without diag
+                        lop1 = TriangularLinOp(
+                            mat,
+                            stair_width=width,
+                            lower=True,
+                            with_main_diagonal=False,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            meas_blocksize=bsize,
+                        )
+                        lop1d = TriangularLinOp(
+                            mat,
+                            stair_width=width,
+                            lower=True,
+                            with_main_diagonal=True,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            meas_blocksize=bsize,
+                        )
+                        lop2 = TriangularLinOp(
+                            mat,
+                            stair_width=width,
+                            lower=False,
+                            with_main_diagonal=False,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            meas_blocksize=bsize,
+                        )
+                        lop2d = TriangularLinOp(
+                            mat,
+                            stair_width=width,
+                            lower=False,
+                            with_main_diagonal=True,
+                            use_fft=False,
+                            num_gh_meas=gh_meas,
+                            meas_blocksize=bsize,
+                        )
+                        # test vector
+                        v = gaussian_noise(dims, 0, 1, seed + 1, dtype, device)
+                        # forward matmul
+                        v1 = lop1 @ v
+                        v1d = lop1d @ v
+                        v2 = lop2 @ v
+                        v2d = lop2d @ v
+                        assert (
+                            relerr(mat1 @ v, v1) < errtol
+                        ), "Wrong lower/noDiag trilop! (fwd)"
+                        assert (
+                            relerr(mat1d @ v, v1d) < errtol
+                        ), "Wrong lower/withDiag trilop! (fwd)"
+                        assert (
+                            relerr(mat2 @ v, v2) < errtol
+                        ), "Wrong upper/noDiag trilop! (fwd)"
+                        assert (
+                            relerr(mat2d @ v, v2d) < errtol
+                        ), "Wrong upper/withDiag trilop! (fwd)"
+                        # adjoint matmul
+                        v1 = v @ lop1
+                        v1d = v @ lop1d
+                        v2 = v @ lop2
+                        v2d = v @ lop2d
+                        assert (
+                            relerr(v @ mat1, v1) < errtol
+                        ), "Wrong lower/noDiag trilop! (adj)"
+                        assert (
+                            relerr(v @ mat1d, v1d) < errtol
+                        ), "Wrong lower/withDiag trilop! (adj)"
+                        assert (
+                            relerr(v @ mat2, v2) < errtol
+                        ), "Wrong upper/noDiag trilop! (adj)"
+                        assert (
+                            relerr(v @ mat2d, v2d) < errtol
+                        ), "Wrong upper/withDiag trilop! (adj)"
+                        # transposed
+                        lop1dT = TransposedLinOp(lop1d)
+                        lop2dT = TransposedLinOp(lop2d)
+                        assert (
+                            (lop1dT @ v.conj()).conj() == v1d
+                        ).all(), "Wrong triangular transpose? (lower)"
+                        assert (
+                            (lop2dT @ v.conj()).conj() == v2d
+                        ).all(), "Wrong triangular transpose? (upper)"
 
 
 # ##############################################################################

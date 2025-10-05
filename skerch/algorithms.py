@@ -782,42 +782,6 @@ class TriangularLinOp(BaseLinOp):
             beg = end
             end = beg + stair_width
 
-    # @staticmethod
-    # def _gh_meas(
-    #     x,
-    #     lop,
-    #     mop,
-    #     adjoint,
-    #     stair_width,
-    #     with_main_diag,
-    #     lower=True,
-    #     use_fft=False,
-    # ):
-    #     """Helper method to perform serrated Girard-Hutchinson measurements."""
-    #     dtype, device = x.dtype, x.device
-    #     result = torch.zeros_like(x)
-    #     num_meas = mop.shape[1]
-    #     normalizer = torch.zeros_like(x)
-    #     for block, idxs in mop.get_blocks(dtype, device):
-    #         # assuming block is by_col!
-    #         patternT = serrated_hadamard_pattern(
-    #             block.T,
-    #             stair_width,
-    #             with_main_diag,
-    #             (lower ^ adjoint),
-    #             use_fft,
-    #         )
-    #         if adjoint:
-    #             result += (patternT * ((block.T * x) @ lop)).sum(0)
-    #         else:
-    #             result += (patternT * (lop @ (block.T * x).T).T).sum(0)
-    #         normalizer += (block * block.conj()).sum(1)
-    #         if dtype in COMPLEX_DTYPES:
-    #             breakpoint()
-    #     #
-    #     result /= normalizer
-    #     return result
-
     @staticmethod
     def _gh_meas(
         x,
@@ -833,39 +797,26 @@ class TriangularLinOp(BaseLinOp):
         """Helper method to perform serrated Girard-Hutchinson measurements."""
         dtype, device = x.dtype, x.device
         result = torch.zeros_like(x)
-        num_meas = mop.shape[1]
-        normalizer = torch.zeros_like(x)
         for block, idxs in mop.get_blocks(dtype, device):
-            patternT = serrated_hadamard_pattern(
+            pattern = serrated_hadamard_pattern(
                 block.T,
                 stair_width,
                 with_main_diag,
-                (lower ^ adjoint),
+                lower,
                 use_fft,
-            )
-
-            # transpose block: all measurements adjoint since Q deflates lop on
-            # the left space
-            block = block.T  # after transp: (idxs, dims)
-            # nonscalar normalization before deflation
-            if not is_noise_unitnorm:
-                # so gram matrix of (dims, dims) has diag=len(idxs)
-                # and adding every subtrace/gh_meas yields unit diagonal.
-                block *= (len(idxs) ** 0.5) / block.norm(dim=0)
-            # deflate block and perform adj meas
-            b_lop = block.conj() @ lop
-            if is_noise_unitnorm:
-                result += (patternT * b_lop).sum(0)
+            ).T
+            if adjoint:
+                # equivalent to x @ [lop * (pattern @ block.H)]
+                # where (pattern @ block.H) is the staircase pattern
+                meas = (pattern.T * x) @ lop
+                result += (block.H * meas).sum(dim=0)
             else:
-                result += ((patternT * b_lop) / (block * block.conj())).sum(0)
+                # equivalent to [lop * (pattern @ block.H)] @ x
+                # where (pattern @ block.H) is the staircase pattern
+                meas = lop @ (block.H * x).T
+                result += (pattern * meas).sum(dim=1)
         #
-        result /= num_meas
-
-        """
-        here: mop is the only thing that carries self.meas_blocksize
-        """
-        print("\n\n>>>", result)
-        # breakpoint()
+        result /= mop.shape[1]
         return result
 
     def _matmul_helper(self, x, adjoint=False):
@@ -924,6 +875,11 @@ class TriangularLinOp(BaseLinOp):
                 self.use_fft,
             )
         #
+        """
+        """
+        # list(self._iter_stairs(self.dims, self.stair_width, reverse=False))
+
+        breakpoint()
         return result
 
     def __matmul__(self, x):
