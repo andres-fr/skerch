@@ -7,6 +7,7 @@
 
 import os
 import h5py
+from .utils import torch_dtype_as_str
 
 
 # ##############################################################################
@@ -290,64 +291,75 @@ class DistributedHDF5Tensor:
 # ##############################################################################
 # # CONVENIENCE FUNCTIONS
 # ##############################################################################
-# def create_hdf5_layout(
-#     root,
-#     lop_shape,
-#     num_chunks,
-#     dtype,
-#     num_outer_measurements,
-#     num_inner_measurements,
-#     with_lo=True,
-#     with_ro=True,
-#     with_inner=True,
-#     lo_fmt="leftouter_{}.h5",
-#     ro_fmt="rightouter_{}.h5",
-#     inner_fmt="inner_{}.h5",
-# ):
-#     """Creation of persistent HDF5 files to store sketches.
+def create_hdf5_layout_lop(
+    root,
+    lop_shape,
+    lop_dtype,
+    partition_size,
+    num_outer_measurements=None,
+    num_inner_measurements=None,
+    lo=True,
+    ro=True,
+    inner=True,
+    lo_fmt="leftouter_{}.h5",
+    ro_fmt="rightouter_{}.h5",
+    inner_fmt="inner_{}.h5",
+):
+    """Creation of persistent HDF5 files to store linop sketches.
 
-#     :param str dirpath: Where to store the HDF5 files.
-#     :param lop_shape: Shape of linear operator to sketch from, in the form
-#       ``(height, width)``.
-#     :param lop_dtype: Torch dtype of the operator, e.g. ``torch.float32``. The
-#       HDF5 arrays will be of same type.
-#     :param int num_outer_measurements: Left outer measurement layout contains
-#       ``(width, outer)`` entries, and right outer layout ``(height, outer)``.
-#     :param int num_inner_measurements: Inner measurement layout contains
-#       ``(inner, inner)`` entries.
-#     :lo_fmt: Format string for the left-outer HDF5 filenames.
-#     :ro_fmt: Format string for the right-outer HDF5 filenames.
-#     :inner_fmt: Format string for the inner HDF5 filenames.
-#     :param with_ro: If false, no right outer layout will be created (useful
-#       when working with symmetric matrices where only one side is needed).
-#     """
-#     h, w = lop_shape
-#     lo_pth, lo_subpths = DistributedHDF5.create(
-#         os.path.join(dirpath, lo_fmt),
-#         num_outer_measurements,
-#         (w,),
-#         torch_dtype_as_str(lop_dtype),
-#         # this needs to be transposed later, but we keep it tall to allow
-#         # for QR without having to transpose (which may load to RAM)
-#         filedim_last=True,
-#     )
-#     #
-#     if with_ro:
-#         ro_pth, ro_subpths = DistributedHDF5.create(
-#             os.path.join(dirpath, ro_fmt),
-#             num_outer_measurements,
-#             (h,),
-#             torch_dtype_as_str(lop_dtype),
-#             filedim_last=True,
-#         )
-#     else:
-#         ro_pth, ro_subpths = None, None
-#     #
-#     c_pth, c_subpths = DistributedHDF5.create(
-#         os.path.join(dirpath, inner_fmt),
-#         num_inner_measurements,
-#         (num_inner_measurements,),
-#         torch_dtype_as_str(lop_dtype),
-#         filedim_last=True,
-#     )
-#     return ((lo_pth, lo_subpths), (ro_pth, ro_subpths), (c_pth, c_subpths))
+    :param str dirpath: Where to store the HDF5 files.
+    :param lop_shape: Shape of linear operator to sketch from, in the form
+      ``(height, width)``.
+    :param lop_dtype: Torch dtype of the operator, e.g. ``torch.float32``. The
+      HDF5 arrays will be of same type.
+    :param int num_outer_measurements: Left outer measurement layout contains
+      ``(width, outer)`` entries, and right outer layout ``(height, outer)``.
+    :param int num_inner_measurements: Inner measurement layout contains
+      ``(inner, inner)`` entries.
+    :lo_fmt: Format string for the left-outer HDF5 filenames.
+    :ro_fmt: Format string for the right-outer HDF5 filenames.
+    :inner_fmt: Format string for the inner HDF5 filenames.
+    :param with_ro: If false, no right outer layout will be created (useful
+      when working with symmetric matrices where only one side is needed).
+    """
+    h, w = lop_shape
+    strtype = torch_dtype_as_str(lop_dtype)
+    #
+    if (ro or lo) and (num_outer_measurements is None):
+        raise ValueError("lo/ro require to provide num_outer_measurements!")
+    if inner and (num_inner_measurements is None):
+        raise ValueError("inner requires to provide num_inner_measurements!")
+    #
+    lo_pth, lo_subpaths, lo_begs_ends = None, None, None
+    ro_pth, ro_subpaths, ro_begs_ends = None, None, None
+    in_pth, in_subpaths, in_begs_ends = None, None, None
+    #
+    if lo:
+        lo_pth, lo_subpaths, lo_begs_ends = DistributedHDF5Tensor.create(
+            os.path.join(root, lo_fmt),
+            (num_outer_measurements, w),
+            partition_size,
+            strtype,
+        )
+    #
+    if ro:
+        ro_pth, ro_subpaths, ro_begs_ends = DistributedHDF5Tensor.create(
+            os.path.join(root, ro_fmt),
+            (num_outer_measurements, h),
+            partition_size,
+            strtype,
+        )
+    #
+    if inner:
+        in_pth, n_subpaths, in_begs_ends = DistributedHDF5Tensor.create(
+            os.path.join(root, inner_fmt),
+            (num_inner_measurements, num_inner_measurements),
+            partition_size,
+            strtype,
+        )
+    #
+    return (
+        (lo_pth, lo_subpaths, lo_begs_ends),
+        (ro_pth, ro_subpaths, ro_begs_ends),
+        (in_pth, in_subpaths, in_begs_ends),
+    )

@@ -11,7 +11,7 @@ This script acts in connection with the :mod:`.cli` submodule.
 
 TODO:
 
-* Debug triang matmul
+
 
 * finish  __main__ stuff
   - Current HDF5 paradigm doesn't allow for uneven blocks (e.g. 3+3+2). We
@@ -22,6 +22,7 @@ TODO:
   - will HDF5 work with other algos? e.g. hutch++ for block-parallel meas.
   - then check the merge HDF5, and we are done.
 
+* Debug triang matmul
 * documentation, changelog, issues
 * release!
 

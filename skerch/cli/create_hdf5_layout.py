@@ -9,7 +9,7 @@ import os
 
 import torch
 
-from ..hdf5 import create_hdf5_layout
+from ..hdf5 import create_hdf5_layout_lop
 
 
 # ##############################################################################
@@ -18,7 +18,7 @@ from ..hdf5 import create_hdf5_layout
 def main(
     dirpath, shape, lop_dtype, outer, inner, lo_fmt, ro_fmt, inner_fmt, with_ro
 ):
-    """See :func:`.distributed_decompositions.create_hdf5_layout`."""
+    """See :func:`.hdf5.create_hdf5_layout`."""
     h, w = shape
     if (h != w) and (not with_ro):
         raise AssertionError("Non-square matrix can't be symmetric!")
@@ -29,7 +29,7 @@ def main(
         (lo_path, lo_subpaths),
         (ro_path, ro_subpaths),
         (inner_path, inner_subpaths),
-    ) = create_hdf5_layout(
+    ) = create_hdf5_layout_lop(
         dirpath,
         shape,
         lop_dtype,
