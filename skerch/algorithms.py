@@ -165,7 +165,7 @@ def ssvd(
     noise_type="ssrft",
     recovery_type="singlepass",
     lstsq_rcond=1e-6,
-    meas_blocksize=1,
+    meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
     """In-core Sketched SVD."""
@@ -181,6 +181,8 @@ def ssvd(
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
+    if meas_blocksize is None:
+        meas_blocksize = max(lop.shape)
     # instantiate measurement linops
     ro_seed = seed
     lo_seed = ro_seed + outer_dims + 1
@@ -266,7 +268,7 @@ def seigh(
     noise_type="ssrft",
     recovery_type="singlepass",
     lstsq_rcond=1e-6,
-    meas_blocksize=1,
+    meas_blocksize=None,
     by_mag=True,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
@@ -284,8 +286,8 @@ def seigh(
         raise ValueError(
             "Inner dims must be larger than outer for oversampled!"
         )
-    # instantiate measurement linops
-
+    if meas_blocksize is None:
+        meas_blocksize = max(lop.shape)
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
@@ -361,7 +363,7 @@ def hutchpp(
     extra_gh_meas=0,
     seed=0b1110101001010101011,
     noise_type="rademacher",
-    meas_blocksize=1,
+    meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
     return_diag=True,
 ):
@@ -385,6 +387,8 @@ def hutchpp(
     dims = h
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
+    if meas_blocksize is None:
+        meas_blocksize = max(lop.shape)
     # figure out recovery settings
     if defl_dims > dims:
         raise ValueError("More defl rank than max linop rank!")
@@ -483,7 +487,7 @@ def xdiag(
     x_dims,
     seed=0b1110101001010101011,
     noise_type="rademacher",
-    meas_blocksize=1,
+    meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
     cache_mop=True,
 ):
@@ -495,6 +499,8 @@ def xdiag(
     dims = h
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
+    if meas_blocksize is None:
+        meas_blocksize = max(lop.shape)
     # figure out recovery settings
     if x_dims > dims:
         raise ValueError("More measurements than max linop rank!")
@@ -587,7 +593,7 @@ def snorm(
             "Measurements must be between 1 and number of rows/columns!"
         )
     if meas_blocksize is None:
-        meas_blocksize = num_meas
+        meas_blocksize = max(lop.shape)
     if adj_meas is None:
         adj_meas = h > w  # this seems to be more accurate
     mop = dispatcher.mop(
@@ -733,11 +739,14 @@ class TriangularLinOp(BaseLinOp):
         #
         self.seed = seed
         self.noise_type = noise_type
+        self.is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
         self.max_mp_workers = max_mp_workers
         self.dispatcher = dispatcher
-        self.meas_blocksize = (
-            stair_width if meas_blocksize is None else meas_blocksize
-        )
+        if meas_blocksize is None:
+            # meas_blocksize = max(lop.shape)
+            # meas_blocksize = stair_width
+            meas_blocksize = 3
+        self.meas_blocksize = meas_blocksize
         #
         if num_gh_meas <= 0:
             warnings.warn(
@@ -746,8 +755,7 @@ class TriangularLinOp(BaseLinOp):
                 RuntimeWarning,
             )
         else:
-            is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
-            if not is_noise_unitnorm:
+            if not self.is_noise_unitnorm:
                 warnings.warn(
                     "Non-unitnorm noise can be unstable for triangular "
                     "matvecs! Check output and consider using Rademacher "
@@ -774,11 +782,48 @@ class TriangularLinOp(BaseLinOp):
             beg = end
             end = beg + stair_width
 
+    # @staticmethod
+    # def _gh_meas(
+    #     x,
+    #     lop,
+    #     mop,
+    #     adjoint,
+    #     stair_width,
+    #     with_main_diag,
+    #     lower=True,
+    #     use_fft=False,
+    # ):
+    #     """Helper method to perform serrated Girard-Hutchinson measurements."""
+    #     dtype, device = x.dtype, x.device
+    #     result = torch.zeros_like(x)
+    #     num_meas = mop.shape[1]
+    #     normalizer = torch.zeros_like(x)
+    #     for block, idxs in mop.get_blocks(dtype, device):
+    #         # assuming block is by_col!
+    #         patternT = serrated_hadamard_pattern(
+    #             block.T,
+    #             stair_width,
+    #             with_main_diag,
+    #             (lower ^ adjoint),
+    #             use_fft,
+    #         )
+    #         if adjoint:
+    #             result += (patternT * ((block.T * x) @ lop)).sum(0)
+    #         else:
+    #             result += (patternT * (lop @ (block.T * x).T).T).sum(0)
+    #         normalizer += (block * block.conj()).sum(1)
+    #         if dtype in COMPLEX_DTYPES:
+    #             breakpoint()
+    #     #
+    #     result /= normalizer
+    #     return result
+
     @staticmethod
     def _gh_meas(
         x,
         lop,
         mop,
+        is_noise_unitnorm,
         adjoint,
         stair_width,
         with_main_diag,
@@ -791,7 +836,6 @@ class TriangularLinOp(BaseLinOp):
         num_meas = mop.shape[1]
         normalizer = torch.zeros_like(x)
         for block, idxs in mop.get_blocks(dtype, device):
-            # assuming block is by_col!
             patternT = serrated_hadamard_pattern(
                 block.T,
                 stair_width,
@@ -799,13 +843,29 @@ class TriangularLinOp(BaseLinOp):
                 (lower ^ adjoint),
                 use_fft,
             )
-            if adjoint:
-                result += (patternT * ((block.T * x) @ lop)).sum(0)
+
+            # transpose block: all measurements adjoint since Q deflates lop on
+            # the left space
+            block = block.T  # after transp: (idxs, dims)
+            # nonscalar normalization before deflation
+            if not is_noise_unitnorm:
+                # so gram matrix of (dims, dims) has diag=len(idxs)
+                # and adding every subtrace/gh_meas yields unit diagonal.
+                block *= (len(idxs) ** 0.5) / block.norm(dim=0)
+            # deflate block and perform adj meas
+            b_lop = block.conj() @ lop
+            if is_noise_unitnorm:
+                result += (patternT * b_lop).sum(0)
             else:
-                result += (patternT * (lop @ (block.T * x).T).T).sum(0)
-            normalizer += (block * block).sum(1)
+                result += ((patternT * b_lop) / (block * block.conj())).sum(0)
         #
-        result /= normalizer
+        result /= num_meas
+
+        """
+        here: mop is the only thing that carries self.meas_blocksize
+        """
+        print("\n\n>>>", result)
+        # breakpoint()
         return result
 
     def _matmul_helper(self, x, adjoint=False):
@@ -856,6 +916,7 @@ class TriangularLinOp(BaseLinOp):
                 x,
                 self.lop,
                 mop,
+                self.is_noise_unitnorm,
                 adjoint,
                 self.stair_width,
                 self.with_main_diag,
@@ -870,6 +931,8 @@ class TriangularLinOp(BaseLinOp):
 
         See parent class for more details.
         """
+        if len(x.shape) > 1:
+            raise NotImplementedError("Only vectors supported!")
         return self._matmul_helper(x, adjoint=False)
 
     def __rmatmul__(self, x):
@@ -877,6 +940,8 @@ class TriangularLinOp(BaseLinOp):
 
         See parent class for more details.
         """
+        if len(x.shape) > 1:
+            raise NotImplementedError("Only vectors supported!")
         return self._matmul_helper(x, adjoint=True)
 
     def __repr__(self):
