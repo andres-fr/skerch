@@ -15,10 +15,6 @@ TODO:
 * documentation, changelog, issues
 * release!
 
-* merging tracepp and diagpp: lop is being called more than once in GH!
-
-* add trace operators, normal and hermitian (as advertised)
-* a-priori/posteriori/truncation stuff
 * Integration tests/docs (add utests where needed):
   - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
   - scale up: good recovery of very large composite linop, quick.
@@ -32,13 +28,9 @@ TODO:
 LATER TODO:
 * xtrace
 * HDF5 measurement/wrapper API
-* a-priori/posteriori/truncation stuff
 * out-of-core wrappers for QR, SVD, LSTSQ
 * sketchlord and sketchlordh.
 * sketched permutations
-* batched HDF5
-
-Triang correctness:
 * triang: stairs should include bits of main diag
 
 

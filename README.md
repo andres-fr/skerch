@@ -5,7 +5,7 @@
 
 
 <h3 align="center">
-<code>skerch</code>: Sketched matrix decompositions for PyTorch
+<code>skerch</code>: Sketched linear operations for PyTorch
 </h3>
 
 
@@ -18,22 +18,33 @@
 </div>
 
 
+# What is `skerch`?
 
+`skerch` is a Python package to compute different sketched linear operations, such as SVD/EIGH, diagonal/triangular approximations and operator norms. See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details and usage examples.
 
-`skerch` is a Python package to compute different decompositions (SVD, Hermitian Eigendecomposition, diagonal, subdiagonal, triangular, block-triangular) of linear operators via sketched methods.
+* Built on top of PyTorch, naturally supporting CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
+* Rich API for matrix-free linear operators, including matrix-free noise sources (Rademacher, Gaussian, SSRFT...)
+* Efficient parallelized and distributed computations
+* Support for out-of-core operations via [HDF5](https://www.h5py.org/)
+* A-posteriori verification tools to test accuracy of sketched approximations
+* modular and extendible design, for easy adaption to new settings and operations
 
-* Built on top of PyTorch, with natural support for CPU and CUDA interoperability, and very few dependencies otherwise
-* Works on matrices and matrix-free operators of potentially very large dimensionality
-* Support for sketched measurements in a fully distributed fashion via [HDF5 databases](https://www.h5py.org/)
+# Why sketches? Why `skerch`?
 
+Sketched methods are a good choice whenever we are dealing with *large* objects that can be approximated by *smaller* substructures (e.g. a low-rank approximation of a large matrix).
+Thanks to the random measurements (i.e. the "sketches"), we can directly obtain the *small* approximations, without having to store or compute the *large* object. This works with very few assumptions about how the smaller substructure looks like.
 
-References:
+For example, if we have an intractably large linear operator of dimensionality `(N, N)` that doesn't fit in memory, but has rank `k`, we can directly retrieve its top-`k` singular components with only `O(Nk)` storage, as opposed to the intractable `O(N^2)` (see picture below for an intuition). As a bonus, this technique is numerically stable and can be parallelized, which often results in substantial speedups.
 
-* [Streaming Low-Rank Matrix Approximation with an Application to Scientific Simulation](https://arxiv.org/abs/1902.08651) Joel A. Tropp, Alp Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. SIAM Journal on Scientific Computing 41 (4): A2430–63.
-* [Stochastic diagonal estimation: probabilistic bounds and an improved algorithm](https://arxiv.org/abs/2201.10684) Robert A. Baston and Yuji Nakatsukasa. 2022. CoRR abs/2201.10684.
+And since `skerch` is built on top of PyTorch and with very few dependencies otherwise, it supports a broad variety of platforms and datatypes, including e.g. complex datatypes on GPU.
+Its modular and extendible design, featuring many common components of sketches, is also meant to reduce development times whenever new settings or methods are being explored.
+Last but not least, `skerch` also provides functionality to store and manipulate large tensors in a distributed fashion via `HDF5` tensor databases, useful for out-of-core computations.
 
+In summary, `skerch` is made to deal with linear objects that are large and slow, resulting in substantially faster and more scalable operations during runtime, and overall faster development times. Give it a try!
 
-See the [documentation](https://skerch.readthedocs.io/en/latest/index.html) for more details, including examples for other decompositions and use cases.
+<p align="center">
+  <img alt="Intuition for low-rank sketch-and-solve." src="docs/materials/assets/sketch_and_solve.png" width="30%"/>
+</p>
 
 
 # Installation and basic usage
@@ -42,6 +53,27 @@ Install via:
 
 ```bash
 pip install skerch
+```
+
+```
+TODO:
+
+1. Add integration tests:
+* CLI: python docs/materials/examples/example_deep_learning.py
+* HDF5 files for out-of-core operations
+* noise synthetic matrices and matrix-free noise linops
+* Low-rank approximations
+* Diagonal and triangular approximations
+* Approximating deep learning curvature matrices
+
+
+* Integration tests/docs (add utests where needed):
+  - comparing all recoveries for general and herm quasi-lowrank on complex128, using all types of noise -> boxplot
+  - scale up: good recovery of very large composite linop, quick.
+  - priori and posteriori...
+* add remaining todos as GH issues and release!
+  - sketchlord(h) facilities: leave them for paper
+
 ```
 
 The sketched SVD of a linear operator `op` of shape `(h, w)` can be then computed simply via:
@@ -111,10 +143,11 @@ See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.ht
 
 # Developers
 
-Contributions are most welcome under this repo's [LICENSE](LICENSE).
+Contributions are welcome under this repo's [LICENSE](LICENSE).
+
 Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, feature requests, etc.
 
-The documentation contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo.
+The documentation also contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo and propose pull requests.
 
 
 # Researchers
