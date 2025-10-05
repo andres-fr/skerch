@@ -85,50 +85,48 @@ def test_hdf5_merge():
     * Virtual files are deleted if in_place, and kept otherwise
     """
     # create test array
-    num_files, shape, seed, dtype = 10, (3, 4, 5), 12345, torch.float32
+    shape, partsize = (11, 7, 5), 3
+    seed, dtype = 12345, torch.float32
     flag_str = "success"
-    arr = gaussian_noise(
-        (num_files, *shape), seed=seed, dtype=dtype, device="cpu"
-    ).numpy()
+    tnsr = gaussian_noise(shape, seed=seed, dtype=dtype, device="cpu").numpy()
     for in_place in (True, False):
         # create HDF5 layout
         tmpdir = tempfile.TemporaryDirectory()
-        out_path = os.path.join(tmpdir.name, "distdata_{}.h5")
-        h5_path, h5_subpaths = DistributedHDF5.create(
-            out_path,
-            num_files,
+        path_fmt = os.path.join(tmpdir.name, "h5dataset_{}.h5")
+        h5_path, h5_subpaths, begs_ends = DistributedHDF5Tensor.create(
+            path_fmt,
             shape,
+            partsize,
             torch_dtype_as_str(dtype),
-            filedim_last=False,
         )
-        # write array to layout
-        for i in range(num_files):
-            vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-            vals[:] = arr[i]
-            flag[0] = flag_str
+        # write data to layout
+        for i, (beg, end) in enumerate(begs_ends):
+            vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
+            vals[:] = tnsr[beg:end]
+            flgs[:] = flag_str
             h5.close()
         # load ALL layout, check that it contains virtual data
-        all_data, all_flags, all_h5 = DistributedHDF5.load(h5_path)
+        all_data, all_flags, all_h5 = DistributedHDF5Tensor.load(h5_path)
         for ds in all_h5.values():
             assert ds.is_virtual, f"HDF5 layout not virtual?"
         all_h5.close()
         # merge layout into monolithic file
-        DistributedHDF5.merge_all(
+        DistributedHDF5Tensor.merge(
             h5_path,
-            delete_subfiles_while_merging=in_place,
             check_success_flag=flag_str,
+            delete_subfiles_while_merging=in_place,
         )
         # load file again. Now it is non-virtual, contents are correct
-        all_data, all_flags, all_h5 = DistributedHDF5.load(h5_path)
+        all_data, all_flags, all_h5 = DistributedHDF5Tensor.load(h5_path)
         assert all(
             [flag_str == s.decode() for s in all_flags[:]]
         ), "Unsuccessful flags in merged array!"
-        assert np.array_equal(all_data, arr), "Wrong merged array!"
+        assert np.array_equal(all_data, tnsr), "Wrong merged array!"
         for ds in all_h5.values():
             assert not ds.is_virtual, f"HDF5 still virtual? {ds}"
         # check that partial data was/wasn't deleted
         num_tmp = len(os.listdir(tmpdir.name))
-        expected = 1 if in_place else num_files + 1
+        expected = 1 if in_place else len(h5_subpaths) + 1
         assert num_tmp == expected, "Wrong number of files after merging?"
         all_h5.close()
         tmpdir.cleanup()

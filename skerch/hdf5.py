@@ -80,6 +80,15 @@ class DistributedHDF5Tensor:
             end = min(beg + partition_size, max_idx)
             yield (beg, end)
 
+    @staticmethod
+    def get_idxs_format(max_idx):
+        """ """
+        result = (
+            "{0:0" + str(len(str(max_idx)) + 1) + "d}-"
+            "{1:0" + str(len(str(max_idx)) + 1) + "d}"
+        )
+        return result
+
     @classmethod
     def create(
         cls,
@@ -95,8 +104,8 @@ class DistributedHDF5Tensor:
           files, in the form ``<DIR>/my_dataset_{}.h5``.
         :param num_files: Number of HDF5 files to be created, each
           corresponding to one measurement.
-        :param shape: Shape of the global tensorarray inside each individual file. For
-          linear measurements, this is a vector, e.g. ``(1000,)``.
+        :param shape: Shape of the global tensorarray inside each individual
+          file. For linear measurements, this is a vector, e.g. ``(1000,)``.
         :param dtype: Datatype of the HDF5 arrays to be created.
         :param filedim_last: If true, the virtual dataset result of merging
           all files will be of shape ``shape + (num_files,)``. Otherwise,
@@ -109,10 +118,7 @@ class DistributedHDF5Tensor:
         max_idx = shape[0]
         div, mod = divmod(max_idx, partition_size)
         num_partitions = div + (mod != 0)
-        idxs_fmt = (
-            "{0:0" + str(len(str(max_idx)) + 1) + "d}-"
-            "{1:0" + str(len(str(max_idx)) + 1) + "d}"
-        )
+        idxs_fmt = cls.get_idxs_format(max_idx)
         all_path = basepath_fmt.format(cls.MAIN_PATH)
         begs_ends = list(cls.iter_partition_idxs(max_idx, partition_size))
         # create virtual dataset to hold everything together via softlinks
@@ -186,102 +192,8 @@ class DistributedHDF5Tensor:
         flag = h5f[cls.FLAG_NAME]
         return data, flag, h5f
 
-    # @classmethod
-    # def analyze_virtual(cls, all_path, check_success_flag=None):
-    #     """Analyze shapes and relations of files created via :meth:`.create`.
-
-    #     Extract relevant information from a given virtual HDF5 dataset, which
-    #     can be used e.g. to allow merging it into a monolithic one (see
-    #     implementation of :meth:`merge_all` for an example).
-
-    #     :param all_path: The ``all_path`` of a virtual HDF5 dataset like the
-    #       ones created via :meth:`.create`.
-    #     :param check_success_flag: If given, this method will check that all
-    #       HDF5 flags equal this value, raise an ``AssertionError`` otherwise.
-    #     :returns: the tuple ``(data_shape, data_dtype, data_subshapes,
-    #       data_map, flags_shape, flags_dtype, flag_subshapes, flag_map,
-    #       filedim_idx)``.
-    #     """
-    #     # load virtual HDF5 and grab main infos. Note that we avoid
-    #     # using data and flags for anything else, since they may be affected by
-    #     # the "too many open files" OS issue.
-    #     data, flags, h5f = DistributedHDF5.load(all_path, filemode="r")
-    #     data_shape, flags_shape = data.shape, flags.shape
-    #     data_dtype, flags_dtype = data.dtype, flags.dtype
-    #     abspath = h5f.filename
-    #     rootdir = os.path.dirname(abspath)
-    #     # figure out involved paths and their respective indices in virtual
-    #     data_map, flag_map = {}, {}
-    #     data_subshapes, flag_subshapes = [], []
-    #     for vs in h5f[cls.DATA_NAME].virtual_sources():
-    #         subpath = os.path.join(rootdir, vs.file_name)
-    #         begs_ends = tuple(
-    #             (b, e + 1) for b, e in zip(*vs.vspace.get_select_bounds())
-    #         )
-    #         shape = tuple(e - b for b, e in begs_ends)
-    #         data_map[begs_ends] = subpath
-    #         data_subshapes.append(shape)
-    #     for vs in h5f[cls.FLAG_NAME].virtual_sources():
-    #         subpath = os.path.join(rootdir, vs.file_name)
-    #         begs_ends = tuple(
-    #             (b, e + 1) for b, e in zip(*vs.vspace.get_select_bounds())
-    #         )
-    #         shape = tuple(e - b for b, e in begs_ends)
-    #         if shape != (1,):
-    #             raise AssertionError("Flags expected to have shape (1,)!")
-    #         flag_map[begs_ends] = subpath
-    #         flag_subshapes.append(shape)
-    #     subpaths = set(data_map.values())
-    #     # figure out position of filedim was first or last.
-    #     # all dims should match except for one, which is the filedim
-    #     is_filedim = [a != b for a, b in zip(data_shape, data_subshapes[0])]
-    #     if sum(is_filedim) != 1:
-    #         raise AssertionError("Exactly one running dimension expected!")
-    #     filedim_idx = is_filedim.index(True)
-    #     # virtual sanity check and close virtual
-    #     data_beginnings = {k[filedim_idx][0] for k in data_map.keys()}
-    #     assert len(data_beginnings) == len(
-    #         h5f[cls.DATA_NAME].virtual_sources()
-    #     ), "Repeated file_idx beginnings in data?"
-    #     assert len(flag_map) == len(
-    #         h5f[cls.FLAG_NAME].virtual_sources()
-    #     ), "Repeated indices in flags?"
-    #     for sp in subpaths:
-    #         assert os.path.isfile(sp), f"Subpath doesn't exist! {sp}"
-    #     for sp2 in flag_map.values():
-    #         assert sp2 in subpaths, "Flag subpaths different to data subpath!"
-    #     assert (
-    #         len(set(data_subshapes)) == 1
-    #     ), "Heterogeneous data shapes in virtual dataset not supported!"
-    #     assert (
-    #         len(set(flag_subshapes)) == 1
-    #     ), "Heterogeneous flag shapes in virtual dataset not supported!"
-    #     h5f.close()
-    #     # if success flag was given, check every individual sub-HDF5 was
-    #     # successful
-    #     if check_success_flag is not None:
-    #         for sp in subpaths:
-    #             _, flag, h5 = cls.load(sp, filemode="r")
-    #             flag = flag[0].decode()
-    #             assert (
-    #                 flag == check_success_flag
-    #             ), f"Unsuccessful flag in {sp}! {flag}"
-    #             h5.close()
-    #     #
-    #     return (
-    #         data_shape,
-    #         data_dtype,
-    #         data_subshapes,
-    #         data_map,
-    #         flags_shape,
-    #         flags_dtype,
-    #         flag_subshapes,
-    #         flag_map,
-    #         filedim_idx,
-    #     )
-
     @classmethod
-    def merge_all(
+    def merge(
         cls,
         all_path,
         out_path=None,
@@ -303,64 +215,69 @@ class DistributedHDF5Tensor:
           overhead.
         :returns: ``out_path``.
         """
-        breakpoint()
-        # grab relevant infos from virtual, we still didn't modify anything
-        (
-            data_shape,
-            data_dtype,
-            data_subshapes,
-            data_map,
-            flags_shape,
-            flags_dtype,
-            flag_subshapes,
-            flag_map,
-            filedim_idx,
-        ) = cls.analyze_virtual(all_path, check_success_flag)
-        # create HDF5 that we will iteratively expand. If no out_path,
-        # we will overwrite virtual.
+        all_data, all_flags, all_h5 = cls.load(all_path)
+        shape = all_data.shape
+        data_dtype = all_data.dtype
+        flags_dtype = all_flags.dtype
+        max_idx = shape[0]
+        if not all_data.is_virtual:
+            raise ValueError(f"{dataset_name} in {all_path} not virtual!")
+        # inspect virtual sources to get info about the chunks
+        vs_info = {}
+        partition_size = float("-inf")
+        for vs in all_data.virtual_sources():
+            path = os.path.join(os.path.dirname(all_h5.filename), vs.file_name)
+            begs, ends = vs.vspace.get_select_bounds()
+            beg, end = begs[0], ends[0] + 1
+            vs_info[(beg, end)] = path
+            partition_size = max(partition_size, end - beg)
+        all_h5.close()
+        num_partitions = len(vs_info)
+        # check that all expected indices exist, and flags are as expected
+        for beg, end in cls.iter_partition_idxs(max_idx, partition_size):
+            if (not (beg, end) in vs_info) or (
+                not os.path.isfile(vs_info[(beg, end)])
+            ):
+                raise ValueError(f"Can't merge! malformed dataset: {vs_info}")
+            if check_success_flag is not None:
+                subpath = vs_info[(beg, end)]
+                subdata, subflags, h5 = cls.load(subpath, filemode="r")
+                for flg in subflags:
+                    if flg.decode() != check_success_flag:
+                        raise ValueError(f"Can't merge! Bad flag: {flg}")
+        # OK to merge: create merged output dataset, initially empty
         if out_path is None:
             out_path = all_path
         h5f = h5py.File(out_path, "w")
-        #
-        init_shape = list(data_shape)
-        init_shape[filedim_idx] = 0
         h5f.create_dataset(
             cls.DATA_NAME,
-            shape=init_shape,
-            maxshape=data_shape,
+            shape=(0,) + shape[1:],
+            maxshape=shape,
             dtype=data_dtype,
             compression=compression,
-            chunks=data_subshapes[0],
+            chunks=(partition_size,) + shape[1:],
         )
         h5f.create_dataset(
             cls.FLAG_NAME,
             shape=0,
-            maxshape=flags_shape,
+            maxshape=max_idx,
             dtype=flags_dtype,
             compression=compression,
-            chunks=flag_subshapes[0],
+            chunks=partition_size,
         )
         # iterate over contents in sorted order and extend h5f with them
-        sorted_data = sorted(data_map, key=lambda x: x[filedim_idx][0])
-        for begs_ends in sorted_data:
-            subpath = data_map[begs_ends]
-            subdata, subflag, h5 = cls.load(subpath, filemode="r")
-            if check_success_flag is not None:
-                assert (
-                    subflag[0].decode() == check_success_flag
-                ), f"Subfile flag not equal {check_success_flag}!"
-            # increment size of h5f by 1 entry
-            data_shape = list(h5f[cls.DATA_NAME].shape)
-            data_shape[filedim_idx] += 1
-            h5f[cls.DATA_NAME].resize(data_shape)
-            h5f[cls.FLAG_NAME].resize((len(h5f[cls.FLAG_NAME]) + 1,))
-            # write subdata and subflags to h5f, flush and close subfile
-            target_slices = tuple(slice(*be) for be in begs_ends)
-            h5f[cls.DATA_NAME][target_slices] = subdata[:].reshape(
-                data_subshapes[0]
-            )
-            h5f[cls.FLAG_NAME][-1:] = subflag[:]
-            h5f.flush()
+        for beg, end in cls.iter_partition_idxs(max_idx, partition_size):
+            subpath = vs_info[(beg, end)]
+            subdata, subflags, h5 = cls.load(subpath, filemode="r")
+            datashape = h5f[cls.DATA_NAME].shape
+            new_datashape = (datashape[0] + end - beg,) + datashape[1:]
+            #
+            h5f[cls.DATA_NAME].resize(new_datashape)
+            h5f[cls.DATA_NAME][beg:end] = subdata
+            #
+            h5f[cls.FLAG_NAME].resize((new_datashape[0],))
+            h5f[cls.FLAG_NAME][beg:end] = subflags
+            #
             h5.close()
             # optionally, delete subfile
             if delete_subfiles_while_merging:

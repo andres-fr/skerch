@@ -15,6 +15,7 @@ TODO:
   - virtual dataset is still a tensor
   - so provide a global shape and number of partitions
   - simplify: filedim is always the first
+* make sure that blocks by default are max(h, w)?
 
 * finish  __main__ stuff
   - Current HDF5 paradigm doesn't allow for uneven blocks (e.g. 3+3+2). We
