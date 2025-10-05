@@ -709,7 +709,7 @@ class TriangularLinOp(BaseLinOp):
         stair_width=None,
         num_gh_meas=0,
         lower=True,
-        with_main_diagonal=True,
+        with_main_diagonal=False,
         use_fft=False,
         #
         seed=0b1110101001010101011,
@@ -729,6 +729,15 @@ class TriangularLinOp(BaseLinOp):
             stair_width = max(1, self.dims // 2)
         if stair_width < 1 or stair_width > self.dims:
             raise ValueError("Stair width must be >=1 and <= dims!")
+        #
+        if with_main_diagonal:
+            # TODO: current stair measurements do not include diagonal,
+            # and when e.g. stair_width=1 and gh=0, the diagonal is completely
+            # left out. The desirable behaviour would be that the stair
+            # measurements cut into the diagonal whenever required, and that
+            # the serrated pattern adjusts accordingly.
+            raise NotImplementedError("Triang+diag currently not supported!")
+        #
         self.stair_width = stair_width
         self.lop = lop
         self.tlop = TransposedLinOp(lop)
@@ -875,11 +884,6 @@ class TriangularLinOp(BaseLinOp):
                 self.use_fft,
             )
         #
-        """
-        """
-        # list(self._iter_stairs(self.dims, self.stair_width, reverse=False))
-
-        breakpoint()
         return result
 
     def __matmul__(self, x):

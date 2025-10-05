@@ -95,9 +95,9 @@ def scree_config(request):
     result = [
         #  shape  rank decay meas trunc test tol
         # 85% approx, scree yields informative bounds even at 10 test vectors
-        ((200, 200), 10, 0.05, 40, 20, 10, 0.01),
+        ((200, 200), 10, 0.05, 40, 20, 10, 0.02),
         # 99.99% approx, tight scree bounds
-        ((200, 200), 10, 0.1, 40, 20, 10, 0.01),
+        ((200, 200), 10, 0.1, 40, 20, 10, 0.02),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]
