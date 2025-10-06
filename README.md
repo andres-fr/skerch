@@ -59,8 +59,7 @@ pip install skerch
 TODO:
 
 1. Add integration tests:
-* CLI: python docs/materials/examples/example_deep_learning.py
-* noise synthetic matrices and matrix-free noise linops (show blockwise speedups)
+* synthmat notebook, with a plot like sketchlord
 * Low-rank approximations (provide boxplot for runtimes and errors compared to classical. +aposteriori)
 * Diagonal and triangular approximations (also boxplot +aposteriori)
 * HDF5 files for out-of-core operations
@@ -73,6 +72,9 @@ TODO:
 * HDF5 measurement/wrapper API
 * out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask.
 * triang: stairs should include bits of main diag
+* it seems that SSVD busts when we have slow spec decay, unlike PT impls (check lowrank integration test with decay=0.01)
+* JIT optimizations
+* autograd?
 
 3. Release
 * Review all docstrings, lint... check webdocs and latex look OK

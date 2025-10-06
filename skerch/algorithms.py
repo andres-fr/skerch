@@ -182,7 +182,8 @@ def ssvd(
             "Inner dims must be larger than outer for oversampled!"
         )
     if meas_blocksize is None:
-        meas_blocksize = max(lop.shape)
+        idims = 0 if inner_dims is None else inner_dims
+        meas_blocksize = max(lop.shape) + outer_dims + idims
     # instantiate measurement linops
     ro_seed = seed
     lo_seed = ro_seed + outer_dims + 1
@@ -287,7 +288,8 @@ def seigh(
             "Inner dims must be larger than outer for oversampled!"
         )
     if meas_blocksize is None:
-        meas_blocksize = max(lop.shape)
+        idims = 0 if inner_dims is None else inner_dims
+        meas_blocksize = max(lop.shape) + outer_dims + idims
     # instantiate outer measurement linop and perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
@@ -388,7 +390,7 @@ def hutchpp(
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
     if meas_blocksize is None:
-        meas_blocksize = max(lop.shape)
+        meas_blocksize = max(*lop.shape) + defl_dims + extra_gh_meas
     # figure out recovery settings
     if defl_dims > dims:
         raise ValueError("More defl rank than max linop rank!")
@@ -500,7 +502,7 @@ def xdiag(
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
     if meas_blocksize is None:
-        meas_blocksize = max(lop.shape)
+        meas_blocksize = max(*lop.shape) + defl_dims + extra_gh_meas
     # figure out recovery settings
     if x_dims > dims:
         raise ValueError("More measurements than max linop rank!")
@@ -593,7 +595,7 @@ def snorm(
             "Measurements must be between 1 and number of rows/columns!"
         )
     if meas_blocksize is None:
-        meas_blocksize = num_meas
+        meas_blocksize = max(lop.shape) + num_meas
     if adj_meas is None:
         adj_meas = h > w  # this seems to be more accurate
     mop = dispatcher.mop(
@@ -752,9 +754,7 @@ class TriangularLinOp(BaseLinOp):
         self.max_mp_workers = max_mp_workers
         self.dispatcher = dispatcher
         if meas_blocksize is None:
-            # meas_blocksize = max(lop.shape)
-            # meas_blocksize = stair_width
-            meas_blocksize = 3
+            meas_blocksize = max(lop.shape) + num_gh_meas
         self.meas_blocksize = meas_blocksize
         #
         if num_gh_meas <= 0:

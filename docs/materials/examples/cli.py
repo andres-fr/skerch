@@ -4,7 +4,10 @@ r"""Command Line Interface
 ==========================
 
 This example demonstrates the functionality in ``skerch`` that can be directly
-accessed from the command line interface (CLI).
+accessed from the command line interface (CLI). Relevant references:
+
+* :module:`skerch.a_posteriori`
+* :module:`skerch.hdf5`
 
 To run it, we simply assume that ``skerch`` is accessible to the available
 ``python`` interpreter.
@@ -44,8 +47,8 @@ skerch_main(["-h"])
 # -------------------------
 #
 # It is possible to efficiently estimate the Frobenius distance between
-# any two linear operators via sketches (see other docs for explanations on how
-# to do this with ``skerch``).
+# any two linear operators via sketches (see e.g. :module:`skerch.a_posteriori`
+# or other tutorials for examples doing this with ``skerch``).
 #
 # In a nutshell, we apply the same random "test" sketch to both operators, and
 # compare the distance between measurements, which becomes is a proxy for the
@@ -80,12 +83,12 @@ skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 # Creating HDF5 layout for distributed sketches
 # ---------------------------------------------
 #
-# HDF5 files allow to efficiently read and write large numerical arrays in
-# an out-of-core, distributed fashion. This is useful to perform sketched
-# decompositions of (very) large linear operators, since both storage
-# and measurements can be distributed across different processes or machines
-# (see documentation for details on how to work with these files
-# using ``skerch``).
+# `HDF5 <https://www.h5py.org/>` files allow to efficiently read and write
+# large numerical arrays in an out-of-core, distributed fashion.
+# This is useful to perform sketched decompositions of (very) large linear
+# operators, since both storage and measurements can be distributed across
+# different processes or machines (see documentation for details on how to
+# work with these files using ``skerch``).
 #
 # The following ``skerch`` CLI call allows to conveniently create a HDF5
 # layout to store sketched measurements from a linear operator of given

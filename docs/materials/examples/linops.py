@@ -118,7 +118,8 @@ fig.tight_layout()
 # Matrix-free transposition
 # -------------------------
 #
-# We can also use ``skerch`` to transpose linear operators:
+# We can also use :class:`skerch.linops.TransposedLinOp` to transpose linear
+# operators in a matrix-free fashion:
 
 lopT = TransposedLinOp(lop)
 
@@ -175,7 +176,7 @@ print("Wrapped linop on torch data:", torch_lop @ ramp)
 #
 # We can perform matrix-free compositions and additions of linear operators.
 # Other matrix-free structured linops, such as diagonal and banded, are also
-# available:
+# available (see :module:`skerch.linops`):
 
 k = 2
 U, S, Vh = torch.linalg.svd(mat.cpu())
@@ -203,11 +204,13 @@ fig.tight_layout()
 # restrictive: besides the ``.shape`` and ``@`` properties required by all
 # ``skerch`` linops, they must also implement a ``get_blocks`` iterator, that
 # yields blocks of columns and their indices.
+#
 # A good way to add new types of noise into existing ``skerch`` algorithms is
-# then to extend the ``ByBlockLinOp`` class (see e.g. the source code for
-# ``RademacherNoiseLinOp``), and then to extend ``SketchedAlgorithmDispatcher``
-# adding the newly created type of noise to the register (see also source
-# code).
+# then to extend :class:`skerch.linops.ByBlockLinOp` with ``get_blocks``,
+# and then extending :class:`skerch.algorithms.SketchedAlgorithmDispatcher`
+# adding the newly created type of noise to the register (see e.g. the
+# source code for :class:`skerch.measurements.RademacherNoiseLinOp` and
+# :func:`skerch.algorithms.snorm` for examples).
 #
 # The figure below illustrates some of the already supported types of noise:
 
@@ -261,7 +264,7 @@ fig.tight_layout()
 # ##############################################################################
 #
 # This concludes the ``skerch`` tour of linear operators! Please refer to the
-# API docs for more details. In summary:
+# API docs and other examples. for more details. In summary:
 #
 # * We have seen how to create simple matrix-free linops, so
 #   that they are compatible with the ``skerch`` routines.
