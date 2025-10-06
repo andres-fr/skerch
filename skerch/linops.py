@@ -806,6 +806,6 @@ class TorchLinOpWrapper:
 
     def __repr__(self):
         """Returns a string in the form TorchLinOpWrapper<LinOp ...>."""
-        wrapper = self.__class__.__name__
+        wrapper = "TorchLinOpWrapper"  #  self.__class__.__name__
         result = f"{wrapper}<{super().__repr__()}>"
         return result

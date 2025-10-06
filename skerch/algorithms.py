@@ -593,7 +593,7 @@ def snorm(
             "Measurements must be between 1 and number of rows/columns!"
         )
     if meas_blocksize is None:
-        meas_blocksize = max(lop.shape)
+        meas_blocksize = num_meas
     if adj_meas is None:
         adj_meas = h > w  # this seems to be more accurate
     mop = dispatcher.mop(
@@ -626,7 +626,7 @@ def snorm(
         if norm_type == "op":
             result[norm_type] = torch.linalg.norm(gram, ord=2) ** 0.5
         elif norm_type == "fro":
-            result[norm_type] = gram.diag().sum() ** 0.5
+            result[norm_type] = gram.diag().real.sum() ** 0.5
         else:
             raise ValueError(
                 f"Unsupported norm type! {norm_type}. "

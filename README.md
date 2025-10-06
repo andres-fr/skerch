@@ -60,10 +60,10 @@ TODO:
 
 1. Add integration tests:
 * CLI: python docs/materials/examples/example_deep_learning.py
-* HDF5 files for out-of-core operations
 * noise synthetic matrices and matrix-free noise linops (show blockwise speedups)
 * Low-rank approximations (provide boxplot for runtimes and errors compared to classical. +aposteriori)
 * Diagonal and triangular approximations (also boxplot +aposteriori)
+* HDF5 files for out-of-core operations
 * Approximating deep learning curvature matrices (boxplot? +aposteriori)
 * update readme with reference to examples
 

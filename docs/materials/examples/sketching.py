@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 
-r"""Sketched Decompositions
-===========================
+r"""(Distributed) Noisy Measurements
+====================================
 
-In this tutorial we create noisy, numerically low-rank matrices,
-and compare their exact decomposition with the sketched one.
+In this example we explore the noisy sources, and how to use them to
+perform measurements, either in-core or distributed.
 
 We do this for arbitrary matrices (SVD), as well as symmetric
 ones (Hermitian EIGH), both PSD and non-PSD.
@@ -77,7 +77,13 @@ linop_sym = SynthMat.exp_decay(
     psd=False,
 )
 linop_psd = SynthMat.exp_decay(
-    SHAPE, RANK, EXP_DECAY, symmetric=True, device=DEVICE, dtype=DTYPE, psd=True
+    SHAPE,
+    RANK,
+    EXP_DECAY,
+    symmetric=True,
+    device=DEVICE,
+    dtype=DTYPE,
+    psd=True,
 )
 
 U_asym, S_asym, Vt_asym = torch.linalg.svd(linop_asym)
