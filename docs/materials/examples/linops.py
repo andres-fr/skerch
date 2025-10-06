@@ -16,6 +16,7 @@ In this example we explore the rich linear operator API available in
 This functionality allows us to work with linear operators at scale.
 """
 
+from time import time
 import matplotlib.pyplot as plt
 import torch
 from skerch.utils import gaussian_noise
@@ -231,6 +232,31 @@ fig.tight_layout()
 mop1_blocks_info = [(b.shape, idxs) for b, idxs in mop1.get_blocks(DTYPE)]
 
 # %%
+# To illustrate the necessity of blockwise measurements, consider the
+# following example, where a larger block size results in substantially faster
+# computations:
+
+mop_shape = (mat.shape[1], 100)
+mop_slow = RademacherNoiseLinOp(mop_shape, SEED, blocksize=1, register=False)
+mop_fast = RademacherNoiseLinOp(mop_shape, SEED, blocksize=100, register=False)
+times = [[], []]
+for i in range(20):
+    t0 = time()
+    mat @ mop_slow
+    times[0].append(time() - t0)
+    #
+    t0 = time()
+    mat @ mop_fast
+    times[1].append(time() - t0)
+
+fig, ax = plt.subplots()
+ax.boxplot(times, label=["blocksize=1", "blocksize=100"])
+ax.set_yscale("log")
+fig.suptitle(f"Speedup resulting from blockwise measurements")
+fig.tight_layout()
+
+
+# %%
 #
 # ##############################################################################
 #
@@ -243,4 +269,5 @@ mop1_blocks_info = [(b.shape, idxs) for b, idxs in mop1.get_blocks(DTYPE)]
 #   them to matrices and wrapping them to ensure NumPy compatibility
 #   in-core sketched methods for a broad class of low-rank matrices
 # * We explored other available linear operators, including compositions and
-#   noisy measurement linops.
+#   noisy measurement linops, emphasizing the benefit of blockwise
+#   measurements.
