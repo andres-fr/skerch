@@ -89,7 +89,8 @@ U3, S3, Vh3 = ssvd(
     SKETCH_MEAS,
     seed=SEED,
     noise_type="rademacher",
-    recovery_type="singlepass",
+    recovery_type="nystrom",
+    lstsq_rcond=1e-10,
 )
 t3 = time() - t0
 times = (t1, t2, t3)
