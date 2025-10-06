@@ -25,4 +25,6 @@ def main(
         check_success_flag=ok_flag,
         delete_subfiles_while_merging=delete_subfiles,
     )
-    print(merged_path)
+    print("Merged all sub-files of", all_path, "into monolithic", merged_path)
+    if delete_subfiles:
+        print("Also deleted sub-files.")

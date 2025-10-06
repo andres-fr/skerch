@@ -43,7 +43,7 @@ Last but not least, `skerch` also provides functionality to store and manipulate
 In summary, `skerch` is made to deal with linear objects that are large and slow, resulting in substantially faster and more scalable operations during runtime, and overall faster development times. Give it a try!
 
 <p align="center">
-  <img alt="Intuition for low-rank sketch-and-solve." src="docs/materials/assets/sketch_and_solve.png" width="30%"/>
+  <img alt="Intuition for low-rank sketch-and-solve." src="docs/materials/assets/sketch_and_solve.png" width="18%"/>
 </p>
 
 

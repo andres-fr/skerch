@@ -30,7 +30,7 @@ from skerch.__main__ import main_wrapper as skerch_main
 #
 #   python -m skerch -h
 #
-# The following Python code is equivalent:
+# And the corresponding output looks like this:
 
 
 skerch_main(["-h"])
@@ -40,52 +40,37 @@ skerch_main(["-h"])
 #
 # ##############################################################################
 #
-# A-priori hyperparameter estimation
-# ----------------------------------
-#
-# Sketched decompositions have hyperparameters for the number of inner and outer
-# measurements to be performed. A natural question is, given a limited amount
-# of memory (provided in number of matrix entries), how many inner and outer
-# measurements should we perform to get the best results?
-#
-# For asymmetric matrices, this can be quickly checked as follows::
-#
-#   python -m skerch prio_hpars --shape=100,200 --budget=12345
-#
-# The following Python code is equivalent:
-
-skerch_main(["prio_hpars", "--shape=100,200", "--budget=1234"])
-
-# %%
-# The ``[CHECK]`` field shows that the memory requirements are optimally
-# satisfied for the given solution and constraints (see respective
-# documentation for more details)
-
-# %%
-#
-# ##############################################################################
-#
 # A-posteriori error bounds
 # -------------------------
 #
-# Once a linear operator is approximated via sketched methods, it is possible
-# to efficiently estimate how good of an approximation it is (see respective
-# documentation for more details).
+# It is possible to efficiently estimate the Frobenius distance between
+# any two linear operators via sketches (see other docs for explanations on how
+# to do this with ``skerch``).
 #
-# The quality of this estimation depends only on the number of *a-posteriori*
-# measurements performed and it can be quickly checked as follows::
+# In a nutshell, we apply the same random "test" sketch to both operators, and
+# compare the distance between measurements, which becomes is a proxy for the
+# distance between the operators.
 #
-#   python -m skerch post_bounds --apost_n=30 --apost_err=0.5
+# Since this is a randomized estimation, it is subject to error, and there
+# are probabilistic bounds that allow us to know the probability that a given
+# error may have occurred. Interestingly, this probability does *not* depend
+# on the size of the operators, but on the number of "test" measurements
+# performed (and whether the operators are real-valued or complex).
+#
+# The following CLI call allows us to quickly check these probabilistic bounds
+# for a given configuration (30 complex measurements)::
+#
+#   python -m skerch post_bounds --apost_n=30 --apost_err=0.5 --is_complex
 #
 # The following Python code is equivalent:
 
-skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.75"])
+skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 
 # %%
-# We see in this example that, if we performed 30 measurements and we got an
-# error estimate of :math:`\hat{\varepsilon}`, the probability of the *actual*
-# error :math:`\varepsilon` being outside of the
-# :math:`(0.25\hat{\varepsilon}, 1.75\hat{\varepsilon})` range is provided.
+# This can be interpreted as follows: If we performed 30 test measurements and
+#  got an error estimate of :math:`\hat{\varepsilon}`, the probability of the
+# *actual* error :math:`\varepsilon` being outside of the
+# :math:`(0.5\hat{\varepsilon}, 1.5\hat{\varepsilon})` range is as provided.
 
 
 # %%
@@ -98,40 +83,45 @@ skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.75"])
 # HDF5 files allow to efficiently read and write large numerical arrays in
 # an out-of-core, distributed fashion. This is useful to perform sketched
 # decompositions of (very) large linear operators, since both storage
-# and measurements can be distributed (see respective documentation for details
-# on how to work with these files using ``skerch``.
+# and measurements can be distributed across different processes or machines
+# (see documentation for details on how to work with these files
+# using ``skerch``).
 #
-# A HDF5 layout can be conveniently created as follows::
+# The following ``skerch`` CLI call allows to conveniently create a HDF5
+# layout to store sketched measurements from a linear operator of given
+# ``lop_shape`` and ``dtype``::
 #
-#   python -m skerch create_hdf5_layout --hdf5dir=/tmp/test_skerch \
-#          --dtype=float64 --shape=123,234 --outer=30 --inner=60
+#   python -m skerch create_hdf5_layout_lop --lop_shape=100,200 \
+#          --dtype=complex128 --partsize=10 --lo=30 --ro=30 --inner=60
 #
-# The following Python code is equivalent (up to the use of ``tmpdir``):
+# Equivalent python code (up to ``tmpdir``):
 
 tmpdir = TemporaryDirectory()
 skerch_main(
     [
-        "create_hdf5_layout",
+        "create_hdf5_layout_lop",
         f"--hdf5dir={tmpdir.name}",
-        "--dtype=float64",
-        "--shape=123,234",
-        "--outer=30",
+        "--lop_shape=100,200",
+        "--dtype=complex128",
+        "--partsize=10",
+        "--lo=30",
+        "--ro=30",
         "--inner=60",
     ]
 )
 
-# %%
-# The script prints the paths and main properties of the generated HDF5 files,
-# which comprise several
-# `HDF5 virtual datasets <https://docs.h5py.org/en/stable/vds.html>`_ which act
-# as layouts to hold the left-outer, right-outer and inner measurements.
-# In this example, a sketched decomposition for a ``torch.float64`` operator
-# of height 123 and width 234 is being prepared, comprising 30 outer and 60
-# inner measurements (which can be good if e.g. the effective rank of the
-# operator is around 10).
-#
-# If the ``--sym`` flag is provided, ``rightouter`` files won't be created.
 
+# %%
+# Note that if ``hdf5dir`` is given, it must exist and be empty (if not
+# given, a temporary directory will be suggested).
+# The optional ``lo, ro, inner`` parameters determine whether layouts for
+# (respectively) left-outer, right-outer and inner sketches will be created.
+#
+# Another important detail is that, in order to facilitate concurrent writing,
+# the overall HDF5 layout is divided in smaller chunks, in what is known
+# as a `HDF5 virtual dataset <https://docs.h5py.org/en/stable/vds.html>`_.
+# In this example, each chunk contains ``partsize=10`` measurements, so we
+# end up with 3 chunks for ``lo, ro`` and 6 for ``inner``.
 
 # %%
 #
@@ -143,16 +133,21 @@ skerch_main(
 # Although decentralized measurement and storage via HDF5 virtual datasets has
 # many advantages, some operations may require to process the measurements in
 # a centralized fashion. For instance, many operative systems do not allow a
-# single process to keep thousands of files open at the same time.
+# single process to keep thousands of files open at the same time. Also,
+# many numerical routines may not feature an out-of-core, in-place
+# implementation.
 #
-# A solution is to merge all individual HDF5 files from the virtual dataset
-# into a single, centralized HDF5 file of the same size. The following command
-# merges the previously created left-outer measurement layout::
+# The ``skerch`` solution is to merge all individual HDF5 chunks from the
+# virtual dataset into a single, centralized HDF5 file of the same size.
+# It will still have the same contents, but instead of being a collection of
+# HDF5 files bundled into a virtual dataset, it will be a single, monolithic
+# HDF5 file with contiguous data. The following command merges the previously
+#  created left-outer measurement layout::
 #
 #   python -m skerch merge_hdf5 --delete_subfiles --ok_flag=initialized \
 #          --in_path /tmp/tmp4fswvvk2/leftouter_ALL.h5
 #
-# The following Python code is equivalent (up to the use of ``tmpdir``):
+# Equivalent python code (up to ``tmpdir``):
 
 skerch_main(
     [
@@ -163,16 +158,20 @@ skerch_main(
         os.path.join(tmpdir.name, "leftouter_ALL.h5"),
     ]
 )
+breakpoint()
 tmpdir.cleanup()
 
 # %%
 # Note the following:
 #
-# * If the ``--delete_subfiles`` flag is provided, each individual distributed
-#   HDF5 file will be deleted after being merged.
+# * If the ``--delete_subfiles`` flag is provided, each "chunk" file
+#   file will be deleted after being merged. This ensures disk usage remains
+#   almost constant.
 # * If ``--ok_flag`` is provided, the script will check that all HDF5 flags
 #   match this value before proceeding. This can be used to ensure that all
 #   distributed measurements have been performed before merging/deleting.
 # * The ``--out_path`` flag can also be provided to set the location of the
 #   merged HDF5 file. If none provided, the path of the former virtual dataset
-#   is used. In any case the path of the merged dataset is returned.
+#   is used (and it becomes an actual monolithic dataset instead of a bundle
+#   of virtual references to the chunk files). In either case, this CLI
+#   call returns the path of the merged dataset.

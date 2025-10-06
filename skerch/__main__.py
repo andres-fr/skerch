@@ -106,7 +106,7 @@ def get_argparser():
     Usage examples::
       python -m skerch post_bounds --apost_n=30 --apost_err=0.75 --is_complex
       python -m skerch create_hdf5_layout_lop --dtype float64 \
-        --shape 123,234 --left_outer 30 --inner 60  --partsize 11
+        --shape 123,234 --lo 30 --inner 60  --partsize 11
       python -m skerch merge_hdf5 --in_path=.../inner_ALL.h5 --delete_subfiles
     """
     parser = argparse.ArgumentParser(description="skerch CLI")
@@ -138,7 +138,7 @@ def get_argparser():
     )
     # create HDF5 layout
     parser.add_argument(
-        "--shape",
+        "--lop_shape",
         type=matrix_shape,
         default=(100, 200),
         help="Matrix shape in the form 'height,width' as positive integers.",
@@ -150,13 +150,13 @@ def get_argparser():
         help="Directory to create the HDF5 layout.",
     )
     parser.add_argument(
-        "--left_outer",
+        "--lo",
         default=None,
         type=int,
         help="Number of left outer measurements.",
     )
     parser.add_argument(
-        "--right_outer",
+        "--ro",
         default=None,
         type=int,
         help="Number of right outer measurements.",
@@ -247,10 +247,10 @@ def main():
     main = COMMANDS[cmd]
     # a-priori estimation of hyperparameters
     if cmd == "prio_hpars":
-        shape = args.shape
+        lop_shape = args.lop_shape
         budget = args.budget
         sym = args.sym
-        main(shape, budget, sym)
+        main(lop_shape, budget, sym)
     # a-posteriori error probability bounds
     elif cmd == "post_bounds":
         n = args.apost_n
@@ -260,13 +260,13 @@ def main():
     # create HDF5 layout
     elif cmd == "create_hdf5_layout_lop":
         dirpath = ensure_dirpath(args.hdf5dir)
-        shape = args.shape
+        lop_shape = args.lop_shape
         dtype = args.dtype
         partsize = args.partsize
-        lo = args.left_outer
-        ro = args.right_outer
+        lo = args.lo
+        ro = args.ro
         inner = args.inner
-        main(dirpath, shape, dtype, partsize, lo, ro, inner)
+        main(dirpath, lop_shape, dtype, partsize, lo, ro, inner)
     # merge
     elif cmd == "merge_hdf5":
         inpath = args.in_path
