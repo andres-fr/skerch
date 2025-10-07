@@ -150,6 +150,3 @@ fig, (ax1, ax2) = plt.subplots(ncols=2)
 ax1.plot(ews.cpu())
 ax2.imshow(((evs[-200:] * ews) @ evs[-200:].T).abs().log().cpu())
 fig.suptitle("Recovered Hessian eigenvalues and fragment of $log |H|$")
-
-
-breakpoint()

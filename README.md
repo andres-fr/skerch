@@ -61,7 +61,6 @@ TODO:
 1. Add integration tests:
 * Diagonal and triangular approximations (also boxplot +aposteriori)
 * HDF5 files for out-of-core operations
-* Approximating deep learning curvature matrices (boxplot? +aposteriori)
 * update readme with reference to examples
 
 

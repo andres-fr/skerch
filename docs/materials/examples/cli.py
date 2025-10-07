@@ -83,7 +83,7 @@ skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 # Creating HDF5 layout for distributed sketches
 # ---------------------------------------------
 #
-# `HDF5 <https://www.h5py.org/>` files allow to efficiently read and write
+# `HDF5 <https://www.h5py.org/>`_ files allow to efficiently read and write
 # large numerical arrays in an out-of-core, distributed fashion.
 # This is useful to perform sketched decompositions of (very) large linear
 # operators, since both storage and measurements can be distributed across
