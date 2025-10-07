@@ -21,7 +21,7 @@ full eigendecomposition from a deep neural network, using ``skerch``'s
 sketched EIGH combined with CurvLinOps.
 
 To verify the quality of approximation, we apply the *a-posteriori* test
-method already discussed in :ref:`Sketched Decompositions`.
+method already discussed in :ref:`Sketched Low-Rank Decompositions`.
 
 The result is a pretty good and quick approximation, at scales that would
 otherwise be very slow/large, or even intractable. This procedure also

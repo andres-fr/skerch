@@ -60,18 +60,18 @@ TODO:
 
 1. Add integration tests:
 * Diagonal and triangular approximations (also boxplot +aposteriori)
-* HDF5 files for out-of-core operations
 * update readme with reference to examples
 
 
 2. add remaining todos as GH issues
 * xtrace
 * HDF5 measurement/wrapper API
-* out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask.
+* out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask
 * triang: stairs should include bits of main diag
 * it seems that SSVD busts when we have slow spec decay, unlike PT impls (check lowrank integration test with decay=0.01)
 * JIT optimizations
 * autograd?
+* Add wrapper for sub-indexing
 
 3. Release
 * Review all docstrings, lint... check webdocs and latex look OK

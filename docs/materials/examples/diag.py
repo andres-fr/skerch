@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 
-r"""Sketched Low-Rank Decompositions
+r"""Sketched Diagonal Decompositions
 ====================================
+
+TODO:
+adapt low-rank to diag and triang.
+
 
 In this example we create noisy, numerically low-rank matrices
 and compare their ``skerch`` low-rank SVD with the built-in
