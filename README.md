@@ -59,8 +59,6 @@ pip install skerch
 TODO:
 
 1. Add integration tests:
-* synthmat notebook, with a plot like sketchlord
-* Low-rank approximations (provide boxplot for runtimes and errors compared to classical. +aposteriori)
 * Diagonal and triangular approximations (also boxplot +aposteriori)
 * HDF5 files for out-of-core operations
 * Approximating deep learning curvature matrices (boxplot? +aposteriori)

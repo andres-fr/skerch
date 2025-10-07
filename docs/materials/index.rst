@@ -65,6 +65,11 @@ It also implements:
     Magnitudes and Hessian Eigenspaces at Scale using Sketched Methods”*.
     Transactions on Machine Learning Research.
 
+  * `[DEOFTK] <https://arxiv.org/abs/2501.19183>`_ Felix Dangel, Runa Eschenhagen,
+    Weronika Ormaniec, Andres Fernandez, Lukas Tatzel, Agustinus Kristiadi. 2025.
+    *“Position: Curvature Matrices Should Be Democratized via Linear Operators”*.
+    arXiv 2501.19183.
+
 .. toctree::
    :maxdepth: 2
    :caption: Getting Started
