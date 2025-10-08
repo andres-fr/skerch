@@ -5,26 +5,24 @@ r"""Sketched Low-Rank Decompositions
 
 In this example we create noisy, numerically low-rank matrices
 and compare their ``skerch`` low-rank SVD with the built-in
- PyTorch ones in terms of accuracy and speed:
+ PyTorch ones in terms of interface, accuracy and speed:
 * `Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`
 * `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`
 
-We observe that, for low-rank matrices, both sketched methods are faster and
-more accurate than the full SVD. We also notice that ``skerch`` is a bit slower
-and worse than the sketched PyTorch SVD. This may seem discouraging, but we
-note three mitigating factors:
-* At larger scales, the difference between ``skerch`` and the sketched PyTorch
-  implementation vanishes: due to its modularity, ``skerch`` likely has more
-  overhead and less optimizations (e.g. JIT) to run the algorithm.
-* At large scales, very small errors in sketched methods are rare to obtain
-  since we typically cannot afford enough measurements to cover the spectrum.
-* One main strength of sketched methods is their modularity and flexibility.
-  For a small overhead, ``skerch`` allows to easliy extend and swap different
-  components. Optimized implementations tend to be more rigid.
+We first observe that ``skerch`` only requires a bare-minimum interface
+from its output, unlike the ``torch`` implementations, which crash due to
+their interface requirements.
 
-To conclude, we showcase the a-posteriori functionality, which can be used
-to assess rank and quality of the recovery when the original matrix is not
-known.
+We then observe that, for low-rank matrices, the ``skerch`` implementation
+shows good runtime and accuracy. While being nominally worse than either of
+the alternatives, it is still competitive, and it can be applied to much
+broader types of inputs. The bare-minimum interface provides users with much
+greater flexibility and extendability, for a very small cost in accuracy and
+runtime.
+
+Finally, we showcase the a-posteriori functionality, which also works on a
+bare-minimum interface and can be used to assess rank and quality of the
+recovery when the original matrix is intractable or unknown.
 """
 
 from time import time
@@ -48,7 +46,10 @@ from skerch.linops import CompositeLinOp, DiagonalLinOp
 # We start by sampling an (approximately) low-rank matrix using
 # :class:`skerch.synthmat.RandomLordMatrix`. This is very convenient since
 # it allows us fine control over the rank, spectral decay, symmetry and
-# diagonal strength:
+# diagonal strength.
+#
+# Then we create a bare-bones linear operator from that matrix, to illustrate
+# that most existing routines have more restrictive interfaces:
 
 SEED = 54321
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -56,9 +57,46 @@ DTYPE = torch.complex64
 SHAPE, RANK, DECAY = (1500, 1500), 100, 0.05
 SKETCH_MEAS, TEST_MEAS = 200, 30
 
+
+class MatLinOp:
+    """Bare-bones linear operator, equivalent to the given matrix."""
+
+    def __init__(self, matrix):
+        self.matrix = matrix
+        self.shape = matrix.shape
+
+    def __matmul__(self, x):
+        return self.matrix @ x
+
+    def __rmatmul__(self, x):
+        return x @ self.matrix
+
+
 mat = RandomLordMatrix.exp(
     SHAPE, RANK, DECAY, symmetric=False, device=DEVICE, dtype=DTYPE, psd=False
 )[0]
+lop = MatLinOp(mat)
+
+
+# %%
+#
+# ##############################################################################
+#
+# Compatibility with bare-bones linear operators
+# ----------------------------------------------
+#
+# We now observe that both ``torch.linalg.svd`` and ``torch.svd_lowrank``
+# crash when we try to run them on our bare-bones linear operator:
+
+try:
+    _ = torch.linalg.svd(lop)
+except TypeError as te:
+    print("torch.linalg.svd error on linop:", te)
+
+try:
+    _ = torch.svd_lowrank(lop)
+except AttributeError as te:
+    print("torch.svd_lowrank error on linop:", te)
 
 
 # %%
@@ -68,9 +106,12 @@ mat = RandomLordMatrix.exp(
 # Sketched low-rank approximations
 # --------------------------------
 #
-# We can now conveniently compute our in-core sketched decomposition via
-# :func:`skerch.algorithms.ssvd` (sketched SVD), and compare it with the
-# built-in PyTorch alternatives:
+# We now compute the in-core sketched SVD via :func:`skerch.algorithms.ssvd`.
+# Since the ``torch`` alternatives don't run on ``lop``, we compare their
+# runtime and performance running them on ``mat``.
+# Note that, as already established, this is not a fair comparison in the
+# sense that ``torch`` implementations do not run on our bare-minimum
+# linop interface and may be optimized for tensors (e.g. via JIT compilation):
 
 t0 = time()
 U1, S1, Vh1 = torch.linalg.svd(mat)
@@ -83,7 +124,7 @@ t2 = time() - t0
 #
 t0 = time()
 U3, S3, Vh3 = ssvd(
-    mat,
+    lop,  # runs on lop!
     DEVICE,
     DTYPE,
     SKETCH_MEAS,
@@ -100,9 +141,15 @@ err2 = torch.dist(mat, (U2 * S2) @ Vh2.H).item()
 err3 = torch.dist(mat, (U3 * S3) @ Vh3).item()
 
 fig, (ax1, ax2) = plt.subplots(ncols=2)
-ax1.bar(["torch SVD", "torch sSVD", "skerch sSVD"], times)
-ax2.bar(["torch SVD", "torch sSVD", "skerch sSVD"], (err1, err2, err3))
-fig.suptitle(f"Wallclock times and Frobenius errors for rank={SKETCH_MEAS}")
+ax1.bar(["torch SVD (mat)", "torch sSVD (mat)", "skerch sSVD (lop)"], times)
+ax2.bar(
+    ["torch SVD (mat)", "torch sSVD (mat)", "skerch sSVD (lop)"],
+    (err1, err2, err3),
+)
+fig.suptitle(
+    f"Wallclock times and Frobenius errors for rank={SKETCH_MEAS}. "
+    "Note that PyTorch implementations run on tensors."
+)
 fig.tight_layout()
 
 
@@ -116,9 +163,10 @@ fig.tight_layout()
 # In the code above, we used ``torch.dist`` to measure the error between
 # original and recovery. This required us to express them as matrices.
 #
-# When the linear operator is too large or matrix-free, this kind of exact
-# error analysis is not always possible, and we resort to approximate
-# *a posteriori* methods (see :mod:`skerch.a_posteriori` for more details).
+# When the linear operator is too large or matrix-free, which is the main
+# point of ``skerch`` here, this kind of exact error analysis is not always
+# possible, and we resort to approximate *a posteriori* methods
+# (see :mod:`skerch.a_posteriori` for more details).
 # As usual with ``skerch``, we only require that the input components
 # implement the ``.shape = (height, width)`` attribute and the ``@`` matmul
 # operator:
@@ -206,7 +254,13 @@ ax.legend()
 #
 # And we are done!
 #
-# * We have seen how to perform sketched SVDs with ``skerch``, observing that
-#   sketched decompositions are fast and accurate
-# * We demonstrated matrix-free, scalable methods to verify the quality
-#   of the approximation and to estimate the rank of the original operators
+# * We have seen how to perform sketched SVDs with ``skerch`` on linear
+#   operators that support a bare-minimum interface. This is not directly
+#   possible with other ``torch`` implementations.
+# * We observed that the ``skerch`` implementation provides recoveries that
+#   are competitive with full-blown SVDs, with runtimes that are competitive
+#   with sketched SVDs. While ``skerch`` does worse on both fronts, it
+#   has bare-minimum requirements on the interface of the linear operators
+#   provided.
+# * We also demonstrated matrix-free, scalable methods to verify the quality
+#   of the approximation and to estimate the rank of the original operator.
