@@ -502,7 +502,7 @@ def xdiag(
     if dims == 0:
         raise BadShapeError("Only nonempty operators supported!")
     if meas_blocksize is None:
-        meas_blocksize = max(*lop.shape) + defl_dims + extra_gh_meas
+        meas_blocksize = max(*lop.shape) + x_dims
     # figure out recovery settings
     if x_dims > dims:
         raise ValueError("More measurements than max linop rank!")

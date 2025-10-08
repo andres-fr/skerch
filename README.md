@@ -58,11 +58,6 @@ pip install skerch
 ```
 TODO:
 
-1. Add integration tests:
-* for lowrank test, emphasize that our interface is much less restrictive (use try-except)
-* Diagonal and triangular approximations (also boxplot +aposteriori)
-* update readme with reference to examples
-
 
 2. Release
 * Review all docstrings, lint... check webdocs and latex look OK
