@@ -10,14 +10,14 @@ This is particularly relevant for sketched methods, in the cases where
 linear operators have intractable sizes and/or it takes a long time to
 perform linear measurements.
 
-`HDF5 <https://www.h5py.org/>`_ is a popular way of storing numerical data
-persistently. From python, it looks mostly like a NumPy array, but it is
+`HDF5 <https://www.h5py.org/>`_ is a popular way to store numerical data
+persistently. From Python, it looks mostly like a NumPy array, but it is
 stored in disk, and it can be partitioned across multiple sub-files in the
 filesystem. This allows us to work with very large arrays while satisfying
 our memory constraints. Also, the different sub-files can be processed
 by different machines independently, with the resulting speedup.
 
-In this example we illustrate the functionality provided by :mod:`skerch.hdf5`
+In this example we illustrate the functionality provided in :mod:`skerch.hdf5`
 in order to facilitate out-of-core operations. We first create a distributed
 HDF5 numerical array, and then simulate multiple independent processes to
 populate it with data. Finally, we test its correctness. Note that ``skerch``

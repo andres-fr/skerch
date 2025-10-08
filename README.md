@@ -58,7 +58,6 @@ pip install skerch
 ```
 TODO:
 
-
 2. Release
 * Review all docstrings, lint... check webdocs and latex look OK
 * Check all makefile functions run OK

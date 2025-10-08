@@ -11,16 +11,18 @@ The `CurvLinOps library <https://github.com/f-dangel/curvlinops>`_
 provides curvature linear operators that satisfy this requirement, for a
 variety of very useful objects such as the Hessian, the Jacobian and the
 Generalized Gauss-Newton (GGN). It is also implemented with PyTorch as a
-backend, but the ``CurvLinOps`` operators actually implement SciPy's
+backend, but the ``curvlinops`` operators actually implement SciPy's
 `LinearOperator <https://docs.scipy.org/doc/scipy-1.15.2/reference/generated/scipy.sparse.linalg.LinearOperator.html>`_
 interface, so they can also be used with most of the LinAlg routines available
 in SciPy.
 
-In this example, we show how to approximate a GPU-accelerated Hessian
-full eigendecomposition from a deep neural network, using ``skerch``'s
-sketched EIGH combined with CurvLinOps.
+In this example, we show how to obtain an accurate and full Hessian
+eigendecomposition from a deep learning setup, using ``skerch``'s
+sketched EIGH combined with ``curvlinops``. The full example runs in under
+a minute on CPU, and it can also be GPU-accelerated thanks to the ``pytorch``
+backend.
 
-To verify the quality of approximation, we apply the *a-posteriori* test
+To verify the quality of our approximation, we apply the *a-posteriori* test
 method already discussed in :ref:`Sketched Low-Rank Decompositions`.
 
 The result is a pretty good and quick approximation, at scales that would
@@ -51,13 +53,24 @@ from skerch.a_posteriori import apost_error
 # For this example, we create a synthetic dataset and a model with >30000
 # parameters, resulting in a Hessian of >1 billion entries.
 
+
 SEED = 12345780
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float32
-DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
-MLP_DIMS = (784, 50, 50, 10)
-OUTER_MEAS, INNER_MEAS, TEST_MEAS = 6_000, 9_000, 100
-MEAS_BLOCKSIZE = 5_000
+if False:
+    # set to True to test larger scales locally
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
+    MLP_DIMS = (784, 50, 50, 10)
+    OUTER_MEAS, INNER_MEAS, TEST_MEAS = 6_000, 9_000, 100
+    MEAS_BLOCKSIZE = 5_000
+else:
+    # lighter-weight config to run on autodoc CPU server
+    DEVICE = "cpu"
+    DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
+    MLP_DIMS = (784, 50, 10)
+    OUTER_MEAS, INNER_MEAS, TEST_MEAS = 2000, 3_000, 30
+    MEAS_BLOCKSIZE = 3_000
+
 
 # synthetic dataset, model and loss function
 X = gaussian_noise(DATASET_SHAPE, seed=SEED, dtype=DTYPE, device=DEVICE)
@@ -107,7 +120,7 @@ class TorchHessianLinearOperator(TorchLinOpWrapper, HessianLinearOperator):
 #   is slower (less parallel measurements at once)
 
 H = TorchHessianLinearOperator(
-    model, loss_function, params, dataloader, progressbar=True
+    model, loss_function, params, dataloader, progressbar=False
 )
 print(H)
 
@@ -137,16 +150,15 @@ sH = CompositeLinOp((("Q", evs), ("Lbd", DiagonalLinOp(ews)), ("Qt", evs.T)))
     H, sH, DEVICE, DTYPE, num_meas=TEST_MEAS, seed=SEED + num_params
 )
 
-rel_err = (err_sq / frob_sq) ** 0.5
-print("Estimated Hessian Norm:", frob_sq.item() ** 0.5)
-print("Estimated Frobenius Error:", err_sq.item() ** 0.5)
-print("RELATIVE ERROR:", (err_sq / frob_sq).item() ** 0.5)
 
-
-# Finally plot recovered eigenvalues and a fragment of the recovered Hessian,
-# showcasing the usual "tartan" pattern
-
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(ews.cpu())
-ax2.imshow(((evs[-200:] * ews) @ evs[-200:].T).abs().log().cpu())
+ax2.imshow(
+    ((evs[-200:] * ews) @ evs[-200:].T).abs().log().cpu(), aspect="auto"
+)
 fig.suptitle("Recovered Hessian eigenvalues and fragment of $log |H|$")
+
+rel_err = (err_sq / frob_sq) ** 0.5
+print("Estimated Hessian norm:", frob_sq.item() ** 0.5)
+print("Estimated approximation error:", err_sq.item() ** 0.5)
+print("RELATIVE ERROR:", (err_sq / frob_sq).item() ** 0.5)

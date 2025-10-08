@@ -3,22 +3,27 @@
 r"""Sketched Low-Rank Decompositions
 ====================================
 
-In this example we create noisy, numerically low-rank matrices
-and compare their ``skerch`` low-rank SVD with the built-in
- PyTorch ones in terms of interface, accuracy and speed:
-* `Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`
-* `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`
+In this example we create noisy, numerically low-rank matrices and compare
+their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts in
+terms of  interface, accuracy and speed:
+* `Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_
+* `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_
 
-We first observe that ``skerch`` only requires a bare-minimum interface
-from its output, unlike the ``torch`` implementations, which crash due to
-their interface requirements.
+A key observation here is that **``skerch`` only requires a bare-minimum
+interface**: linear operators must have a ``.shape = (height, width)``
+attribute and implement the ``@`` matmul operator. Trying to run such a
+simple object using the ``torch`` implementations does not work, because
+ they have more interface requirements.
 
 We then observe that, for low-rank matrices, the ``skerch`` implementation
-shows good runtime and accuracy. While being nominally worse than either of
-the alternatives, it is still competitive, and it can be applied to much
-broader types of inputs. The bare-minimum interface provides users with much
-greater flexibility and extendability, for a very small cost in accuracy and
-runtime.
+shows good runtime and accuracy: while being nominally worse than either of
+the alternatives, it is still competitive.
+
+This showcases a tradeoff: for this small cost in accuracy and runtime,
+``skerch`` allows us to work in much broader settings, also providing
+substantial flexibility and extendability (it is simple to
+incorporate custom noise sources and recovery methods, see
+:ref:`Extending With Custom Functionality` for examples).
 
 Finally, we showcase the a-posteriori functionality, which also works on a
 bare-minimum interface and can be used to assess rank and quality of the

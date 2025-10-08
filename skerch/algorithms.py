@@ -71,6 +71,8 @@ class SketchedAlgorithmDispatcher:
       ``dispatcher=MyDispatcher`` arguments.
 
     Now ``ssvd`` should perform all measurements using ``MyNoise`` instances.
+
+    See also the documentation examples for more details.
     """
 
     @staticmethod

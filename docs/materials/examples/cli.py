@@ -3,16 +3,20 @@
 r"""Command Line Interface
 ==========================
 
-This example demonstrates the functionality in ``skerch`` that can be directly
-accessed from the command line interface (CLI). Relevant references:
+This example demonstrates the ``skerch`` functionality that can be directly
+accessed from the command line interface (CLI).
 
-* :module:`skerch.a_posteriori`
-* :module:`skerch.hdf5`
+The commands showcased here use functionality that can also be directly
+accessed from Python at the following modules (check the API docs for
+comprehensive information):
 
-To run it, we simply assume that ``skerch`` is accessible to the available
-``python`` interpreter.
+* :mod:`skerch.a_posteriori`
+* :mod:`skerch.hdf5`
 
-The following (standard) imports are only needed to exemplify the Python code:
+
+To run these commands, we simply assume that ``skerch`` is accessible to the
+available ``python`` interpreter. The following (standard) imports are only
+needed to run this example:
 """
 
 
@@ -47,8 +51,9 @@ skerch_main(["-h"])
 # -------------------------
 #
 # It is possible to efficiently estimate the Frobenius distance between
-# any two linear operators via sketches (see e.g. :module:`skerch.a_posteriori`
-# or other tutorials for examples doing this with ``skerch``).
+# any two linear operators via sketches (see e.g. :mod:`skerch.a_posteriori`
+# or e.g. :ref:`Sketched Low-Rank Decompositions` for more information and
+# examples on how to run this estimation with ``skerch``).
 #
 # In a nutshell, we apply the same random "test" sketch to both operators, and
 # compare the distance between measurements, which becomes is a proxy for the
@@ -70,9 +75,10 @@ skerch_main(["-h"])
 skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 
 # %%
+#
 # This can be interpreted as follows: If we performed 30 test measurements and
-#  got an error estimate of :math:`\hat{\varepsilon}`, the probability of the
-# *actual* error :math:`\varepsilon` being outside of the
+#  got an error estimate of :math:`\hat{\varepsilon}`, the probability
+# of the *actual* error :math:`\varepsilon` being outside of the
 # :math:`(0.5\hat{\varepsilon}, 1.5\hat{\varepsilon})` range is as provided.
 
 
@@ -87,8 +93,9 @@ skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 # large numerical arrays in an out-of-core, distributed fashion.
 # This is useful to perform sketched decompositions of (very) large linear
 # operators, since both storage and measurements can be distributed across
-# different processes or machines (see documentation for details on how to
-# work with these files using ``skerch``).
+# different processes or machines (see :mod:`skerch.hdf5` and
+# :ref:`Out-of-core Operations via HDF5` for details on how to work with
+# these files using ``skerch``).
 #
 # The following ``skerch`` CLI call allows to conveniently create a HDF5
 # layout to store sketched measurements from a linear operator of given
@@ -97,7 +104,7 @@ skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 #   python -m skerch create_hdf5_layout_lop --lop_shape=100,200 \
 #          --dtype=complex128 --partsize=10 --lo=30 --ro=30 --inner=60
 #
-# Equivalent python code (up to ``tmpdir``):
+# Equivalent python code (up to use of ``tmpdir``):
 
 tmpdir = TemporaryDirectory()
 skerch_main(
@@ -161,7 +168,7 @@ skerch_main(
         os.path.join(tmpdir.name, "leftouter_ALL.h5"),
     ]
 )
-breakpoint()
+
 tmpdir.cleanup()
 
 # %%

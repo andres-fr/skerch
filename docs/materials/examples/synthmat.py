@@ -11,6 +11,7 @@ matrices with a spectrum that decays in a specific way).
 In this example, we explore the functionality in :mod:`skerch.synthmat`, which
 allows us to generate a broad class of synthetic matrices with desired
 properties. Specifically:
+
 * Random (approximately) low-rank plus diagonal matrices
 """
 
@@ -27,11 +28,12 @@ from skerch.synthmat import RandomLordMatrix
 # Low-rank plus diagonal (LoRD) matrices
 # --------------------------------------
 #
-# The :class:`synthmat.RandomLordMatrix` class allows to generate matrices
-# in the form :math:`L + \xi D`, where :math:`D` is diagonal and :math:`L`
-# is approximately low-rank,has ``RANK`` singular values fixed to 1,
+# The :class:`skerch.synthmat.RandomLordMatrix` class allows to generate
+# matrices in the form :math:`L + \xi D`, where :math:`D` is diagonal and
+# :math:`L` is approximately low-rank,has ``RANK`` singular values fixed to 1,
 # followed by a configurable spectral decay.
-# Here, :math:`\xi` is ``diag_ratio``:
+# The :math:`\xi` scalar (in the code: ``diag_ratio``) represents the
+# *diagonal dominance* of the matrix: the larger, the closer to a diagonal.
 
 SEED = 1337
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -59,11 +61,7 @@ for exp_decay in SV_DECAYS:
 
 # %%
 #
-# Let's plot the matrices and their singular values to get a better
-# intuition! We see how increasing ``diag_ratio`` makes the diagonal
-# more prominent but contaminates the singular values, making the matrix
-# less low-rank. We also see how the ``exp_decay`` ratio also determines
-# how quickly do the singular values decay after ``RANK``.
+# Let's plot the matrices and their singular values to get a better picture!
 
 
 def plot_matrix(ax, mat, cmap="seismic", aspect="auto", dampen=4.0):
@@ -97,3 +95,12 @@ for i, exp_decay in enumerate(SV_DECAYS):
 
 fig.suptitle(f"Sampled LoRD matrices, with singular values plotted on top")
 fig.tight_layout()
+
+
+# %%
+#
+# We see now how increasing ``diag_ratio`` makes the diagonal
+# more prominent and at the same time leaks into the singular values,
+# making the matrix less low-rank. We also see that the ``exp_decay``
+# ratio also determines how quickly do the singular values decay after
+# ``RANK``.
