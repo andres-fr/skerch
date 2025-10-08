@@ -59,30 +59,36 @@ pip install skerch
 TODO:
 
 1. Add integration tests:
+* for lowrank test, emphasize that our interface is much less restrictive (use try-except)
 * Diagonal and triangular approximations (also boxplot +aposteriori)
 * update readme with reference to examples
 
 
-2. add remaining todos as GH issues
-* xtrace
-* HDF5 measurement/wrapper API
-* out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask
-* triang: stairs should include bits of main diag
-* it seems that SSVD busts when we have slow spec decay, unlike PT impls (check lowrank integration test with decay=0.01)
-* JIT optimizations
-* autograd?
-* Add wrapper for sub-indexing
-
-3. Release
+2. Release
 * Review all docstrings, lint... check webdocs and latex look OK
 * Check all makefile functions run OK
 * no dumb files or text hanging (_old?)
 * Merge PR (changelog?)
 
-4. Verify
+3. Verify
 * check online docs
 * follow instructions from scratch to reproduce all examples
 * run utests, all should pass
+
+4. add remaining todos as GH issues
+* xtrace, check numerically
+* HDF5 measurement/wrapper API
+* out-of-core linalg routines compatible with HDF5 (QR, SVD, LSTSQ). Mention issues with dask
+* triang: stairs should include bits of main diag
+* Triang: support matrix-matrix products
+* it seems that SSVD busts when we have slow spec decay, unlike PT impls (check lowrank integration test with decay=0.01)
+* JIT optimizations
+* autograd?
+* Add wrapper for sub-indexing
+* Pivoted cholesky and randomized row-norm estimation
+  - https://drive.google.com/file/d/1r7UFgencPza2BGoDxzMtQqtoQFYrLm6Q/view?pli=1
+
+
 
 
 CHANGELOG:
