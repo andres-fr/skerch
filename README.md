@@ -29,22 +29,41 @@
 * A-posteriori verification tools to test accuracy of sketched approximations
 * modular and extendible design, for easy adaption to new settings and operations
 
-# Why sketches? Why `skerch`?
+# Why sketches?
 
 Sketched methods are a good choice whenever we are dealing with *large* objects that can be approximated by *smaller* substructures (e.g. a low-rank approximation of a large matrix).
 Thanks to the random measurements (i.e. the "sketches"), we can directly obtain the *small* approximations, without having to store or compute the *large* object. This works with very few assumptions about how the smaller substructure looks like.
 
 For example, if we have a large linear operator of dimensionality `(N, N)` that doesn't fit in memory, but has rank `k`, we can directly retrieve its top-`k` singular components with only `O(Nk)` storage, as opposed to the intractable `O(N^2)` (see picture below for an intuition). As a bonus, this technique is numerically stable and can be parallelized, which often results in substantial speedups.
 
-And since `skerch` is built on top of PyTorch and with very few dependencies otherwise, it supports a broad variety of platforms and datatypes, including e.g. complex datatypes on GPU.
-Its modular and extendible design, featuring many common components of sketches, is also meant to reduce development times whenever new settings or methods are being explored.
-Last but not least, `skerch` also provides functionality to store and manipulate large tensors in a distributed fashion via `HDF5` tensor databases, useful for out-of-core computations.
-
-In summary, `skerch` is made to deal with linear objects that are large and slow, resulting in substantially faster and more scalable operations during runtime, and overall faster development times. Give it a try!
-
 <p align="center">
-  <img alt="Intuition for low-rank sketch-and-solve." src="docs/materials/assets/sketch_and_solve.png" width="18%"/>
+  <img alt="Intuition for low-rank sketch-and-solve." src="docs/materials/assets/sketch_and_solve.png" width="15%"/>
 </p>
+
+# Why `skerch`?
+
+On paper, sketched methods only require our linear operators to satisfy the following *bare bones interface*:
+
+```
+class MyLinOp:
+    def __init__(self, shape):
+        self.shape = shape
+
+    def __matmul__(self, x):
+        return "... implement A @ x ..."
+
+    def __rmatmul__(self, x):
+        return "... implement x @ A ..."
+```
+
+Anything more than this is not really required. In most cases, libraries do require more complicated interfaces, and this limits the application scenarios, or introduces substantial overhead to developers.
+
+`skerch` is specifically designed to work on this bare-bones interface. Furthermore, its highly modular architecture allows users to exchange and modify different components of the sketched methods.
+
+As a bonus, `skerch` is built on top of PyTorch, and with very few dependencies otherwise, so it supports a broad variety of platforms and datatypes (including e.g. complex datatypes on GPU).
+`skerch` also supports in-core and out-of-core parallelizations (e.g. via [HDF5](https://www.h5py.org/) tensor databases), providing good scalability in memory and runtime. The documentation [examples](https://skerch.readthedocs.io/en/latest/examples/index.html) illustrate all of the above points.
+
+In summary, `skerch` brings sketched methods to you with minimal overhead, and retaining good performance, resulting in overall faster development times. Give it a try!
 
 
 # Installation and basic usage
@@ -54,6 +73,72 @@ Install via:
 ```bash
 pip install skerch
 ```
+
+Then, given any linear operator `lop` that implements the bare-minimum interface `.shape = (h, w)` and `lop @ x, x @ lop`, we can compute the sketched SVD as follows (``skerch`` also provides functionality to estimate EIGH, norm, diagonals...):
+
+
+```python
+from skerch.algorithms import ssvd
+
+U, S, Vh = ssvd(lop, device, dtype, num_outer, seed=12345, recovery_type="nystrom")
+```
+
+With the `nystrom` recovery, this method requires a total of `2 * num_outer` measurements, and yields a *thin* SVD estimation where `lop` is approximated by `(U * S) @ Vh`, and  `U.shape = (h, num_outer)`, `S.shape = (num_outer,)`, `Vh.shape = (num_outer, w)`.
+
+If `num_outer` is close enough to covering the rank of `lop`, this yields an accurate recovery (see documentation [examples](https://skerch.readthedocs.io/en/latest/examples/index.html)). But how can we make sure?
+
+The library also implements cheap *a-posteriori* methods to estimate the error of the obtained sketched approximation, without requiring to know `lop`:
+
+
+```python
+from skerch.a_posteriori import apost_error, apost_error_bounds
+from skerch.linops import CompositeLinOp, DiagonalLinOp
+
+lop_approx = CompositeLinOp([("U", U), ("S", DiagonalLinOp(S)), ("Vh", Vh)])
+
+(lop_f2, approx_f2, err2), _ = apost_error(lop, lop_approx, device, dtype, num_meas=30, seed=54321)
+
+print("Estimated Frob(op):", lop_f2**0.5)
+print("Estimated Frob(sketched_op):", approx_f2**0.5)
+print("Estimated Frobenius Error:", err2**0.5)
+```
+
+
+This technique makes use of a number of test measurements that must be independent from `lop` and the sketch measurements (make sure to use a different seed). For 30 measurements and complex-valued `lop`, the probability of `err2**0.5` being wrong by at most 50% can be queried as follows:
+
+```bash
+python -m skerch post_bounds --apost_n=30 --apost_err=0.5 --is_complex
+# returns {'LOWER: P(err<=0.5x)': 0.0030445096757934554, 'HIGHER: P(err>=1.5x)': 0.05865709397802224}
+```
+
+
+See the documentation [examples](https://skerch.readthedocs.io/en/latest/examples/index.html) and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
+
+# Developers
+
+Contributions are welcome under this repo's [LICENSE](LICENSE).
+
+Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, feature requests, etc.
+
+The documentation also contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo and propose pull requests.
+
+
+# Researchers
+
+If this library is useful for your work, please consider citing it:
+
+```
+@manual{fernandez2024skerch,
+  title={{S}kerch: Sketched matrix decompositions for {PyTorch}},
+  author={Andres Fernandez},
+  year={2024},
+  url={https://github.com/andres-fr/skerch},
+}
+```
+
+
+
+
 
 ```
 TODO:
@@ -105,91 +190,4 @@ CHANGELOG:
   - Efficient support for Hermitian versions
   - Dispatcher for modularized use of noise sources and recovery types
   - Matrix-free a-posteriori error verification
-```
-
-The sketched SVD of a linear operator `op` of shape `(h, w)` can be then computed simply via:
-
-
-```python
-from skerch.decompositions import ssvd
-
-q, u, s, vt, pt = ssvd(
-    op,
-    op_device=DEVICE,
-    op_dtype=DTYPE,
-    outer_dim=NUM_OUTER,
-    inner_dim=NUM_INNER,
-)
-```
-
-Where the number of outer and inner measurements for the sketch is specified, and `q @ u @ diag(s) @ vt @ pt` is a PyTorch matrix that approximates `op`, where `q, p` are *thin* orthonormal matrices of shape `(h, NUM_OUTER)` and `(NUM_OUTER, w)` respectively, and `u, vt` are *small* orthogonal matrices of shape `(NUM_OUTER, NUM_OUTER)`.
-
-The `op` object must simply satify the following criteria:
-
-* It must have a `op.shape = (height, width)` attribute
-* It must implement the `w = op @ v` right-matmul operator, receiving and returning PyTorch vectors/matrices
-* It must implement the `w = v @ op` left-matmul operator, receiving and returning PyTorch vectors/matrices
-
-`skerch` provides a convenience PyTorch wrapper for the cases where `op` interacts with NumPy arrays instead (e.g. [SciPy linear operators](https://docs.scipy.org/doc/scipy/reference/generated/scipy.sparse.linalg.LinearOperator.html) like the ones used in [CurvLinOps](https://github.com/f-dangel/curvlinops)).
-
-To get a good suggestion of the number of measurements required for a given shape and budget, simply run:
-
-```bash
-python -m skerch prio_hpars --shape=100,200 --budget=12345
-```
-
-The library also implements cheap *a-posteriori* methods to estimate the error of the obtained sketched approximation:
-
-
-```python
-from skerch.a_posteriori import a_posteriori_error
-from skerch.linops import CompositeLinOp, DiagonalLinOp
-
-# (q, u, s, vt, pt) previously computed via ssvd
-sketched_op = CompositeLinOp(
-    (
-        ("Q", q),
-        ("U", u),
-        ("S", DiagonalLinOp(s)),
-        ("Vt", vt),
-        ("Pt", pt),
-    )
-)
-
-(f1, f2, frob_err) = a_posteriori_error(
-    op, sketched_op, NUM_A_POSTERIORI, dtype=DTYPE, device=DEVICE
-)[0]
-print("Estimated Frob(op):", f1**0.5)
-print("Estimated Frob(sketched_op):", f2**0.5)
-print("Estimated Frobenius Error:", frob_err**0.5)
-```
-
-For a given `NUM_A_POSTERIORI` measurements (30 is generally OK), the probability of `frob_err**0.5` being wrong by a certain amount can be queried as follows:
-
-```bash
-python -m skerch post_bounds --apost_n=30 --apost_err=0.5
-```
-
-See [Getting Started](https://skerch.readthedocs.io/en/latest/getting_started.html), [Examples](https://skerch.readthedocs.io/en/latest/examples/index.html), and [API docs](https://skerch.readthedocs.io/en/latest/skerch.html) for more details.
-
-# Developers
-
-Contributions are welcome under this repo's [LICENSE](LICENSE).
-
-Feel free to open an [issue](https://github.com/andres-fr/skerch/issues) with bug reports, feature requests, etc.
-
-The documentation also contains a [For Developers](https://skerch.readthedocs.io/en/latest/for_developers.html) section with useful guidelines to interact with this repo and propose pull requests.
-
-
-# Researchers
-
-If this library is useful for your work, please consider citing it:
-
-```
-@manual{fernandez2024skerch,
-  title={{S}kerch: Sketched matrix decompositions for {PyTorch}},
-  author={Andres Fernandez},
-  year={2024},
-  url={https://github.com/andres-fr/skerch},
-}
 ```
