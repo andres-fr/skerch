@@ -37,7 +37,7 @@ from skerch.algorithms import snorm
 # ##############################################################################
 #
 # Creating a ``skerch``-compatible linop
-# -------------------------------------
+# --------------------------------------
 #
 # To work with ``skerch``, linear operators must satisfy only 2 requirements:
 # * They must support left- and right-matrix multiplication via ``@``
@@ -102,10 +102,10 @@ op_norm = snorm(
 print("Lop norm:", torch.linalg.svdvals(lopmat).max().item())
 print("Sketched norm:", op_norm.item())
 
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 4))
 ax1.plot(ramp.cpu(), label="original")
 ax1.plot(lop @ ramp.cpu(), label="scaled and flipped")
-ax2.imshow(lopmat)
+ax2.imshow(lopmat, aspect="auto")
 ax1.legend()
 fig.suptitle("The matrix-free linop and its action")
 fig.tight_layout()
@@ -185,7 +185,7 @@ lop_k = CompositeLinOp(
     [("U_k", U[:, :k]), ("S_k", DiagonalLinOp(S[:k])), ("Vh_k", Vh[:k, :])]
 )
 
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.imshow(mat.real.cpu())
 ax2.imshow(linop_to_matrix(lop_k, dtype=mat.dtype, device="cpu").real)
 fig.suptitle(f"Matrix and its top-{k} matrix-free approximation [{lop_k}]")
@@ -220,7 +220,7 @@ mop2 = GaussianNoiseLinOp(SHAPE, SEED, blocksize=blocksize)
 mop3 = PhaseNoiseLinOp(SHAPE, SEED, blocksize=blocksize)
 mop4 = SsrftNoiseLinOp(SHAPE, SEED, blocksize=blocksize)
 
-fig, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4)
+fig, (ax1, ax2, ax3, ax4) = plt.subplots(ncols=4, figsize=(8, 2))
 ax1.imshow(mop1.to_matrix(DTYPE, "cpu").real)
 ax2.imshow(mop2.to_matrix(DTYPE, "cpu").real)
 ax3.imshow(mop3.to_matrix(DTYPE, "cpu").real)
@@ -252,7 +252,7 @@ for i in range(20):
     mat @ mop_fast
     times[1].append(time() - t0)
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(8, 3))
 ax.boxplot(times, label=["blocksize=1", "blocksize=100"])
 ax.set_yscale("log")
 fig.suptitle(f"Speedup resulting from blockwise measurements")

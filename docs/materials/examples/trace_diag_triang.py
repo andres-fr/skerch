@@ -64,7 +64,7 @@ lomat = RandomLordMatrix.exp(
     shape, RANK, 100, seed=SEED, device=DEVICE, dtype=DTYPE
 )[0]
 
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(torch.linalg.svdvals(mat.cpu()))
 ax2.plot(torch.linalg.svdvals(lomat.cpu()))
 ax1.set_title("Smooth decay")
@@ -158,7 +158,7 @@ diag1_err = relerr(mat_diag, diag1, squared=False).item()
 diag2_err = relerr(lomat_diag, diag2, squared=False).item()
 
 beg, end = 0, 80
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(mat_diag[beg:end].cpu(), color="black", label="original")
 ax1.plot(diag1[beg:end].cpu(), color="pink", linestyle="--", label="approx")
 ax1.set_title("Smooth")
@@ -168,6 +168,7 @@ ax2.plot(diag2[beg:end].cpu(), color="pink", linestyle="--", label="approx")
 ax2.legend()
 ax2.set_title("Steep")
 fig.suptitle("Hutch++ diagonal approximations for unitary and low-rank linops")
+fig.tight_layout()
 
 print("Trace relative error (smooth):", tr1_err)
 print("Trace relative error (steep):", tr2_err)
@@ -217,7 +218,7 @@ w2_err = relerr(w2, ltri_w2, squared=False).item()
 
 
 beg, end = 0, 200
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(w1[beg:end].cpu(), color="black", label="original")
 ax1.plot(ltri_w1[beg:end].cpu(), color="pink", linestyle="--", label="approx")
 ax1.set_title("$tril(A) v$")
@@ -226,6 +227,7 @@ ax2.plot(w2[beg:end].cpu(), color="black", label="original")
 ax2.plot(ltri_w2[beg:end].cpu(), color="pink", linestyle="--", label="approx")
 ax2.set_title("$v^T tril(A) $")
 ax2.legend()
+fig.tight_layout()
 
 
 print("Lower-triangular relative error:", w1_err)

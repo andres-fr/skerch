@@ -5,15 +5,14 @@ r"""Sketched Low-Rank Decompositions
 
 In this example we create noisy, numerically low-rank matrices and compare
 their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts in
-terms of  interface, accuracy and speed:
-* `Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_
-* `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_
+terms of  interface, accuracy and speed (see
+`Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_ and `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_).
 
 A key observation here is that **``skerch`` only requires a bare-minimum
 interface**: linear operators must have a ``.shape = (height, width)``
 attribute and implement the ``@`` matmul operator. Trying to run such a
 simple object using the ``torch`` implementations does not work, because
- they have more interface requirements.
+they have more interface requirements.
 
 We then observe that, for low-rank matrices, the ``skerch`` implementation
 shows good runtime and accuracy: while being nominally worse than either of
@@ -145,7 +144,7 @@ err1 = torch.dist(mat, (U1 * S1) @ Vh1).item()
 err2 = torch.dist(mat, (U2 * S2) @ Vh2.H).item()
 err3 = torch.dist(mat, (U3 * S3) @ Vh3).item()
 
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(12, 5))
 ax1.bar(["torch SVD (mat)", "torch sSVD (mat)", "skerch sSVD (lop)"], times)
 ax2.bar(
     ["torch SVD (mat)", "torch sSVD (mat)", "skerch sSVD (lop)"],
@@ -192,7 +191,7 @@ lop3 = CompositeLinOp([("U", U3), ("S", DiagonalLinOp(S3)), ("Vh_k", Vh3)])
 
 
 width = 0.2
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(8, 4))
 
 # Bars for each tuple
 ax.bar(torch.arange(3) - width / 2, (err1, err2, err3), width, label="Exact")
@@ -244,7 +243,7 @@ scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
     svals**2
 ).sum()
 
-fig, ax = plt.subplots()
+fig, ax = plt.subplots(figsize=(8, 3))
 ax.plot(scree_lo.cpu(), label="lower", ls="--", linewidth=2)
 ax.plot(scree_true.cpu(), label="ACTUAL", linewidth=2)
 ax.plot(scree_hi.cpu(), label="higher", ls="--", linewidth=2)
