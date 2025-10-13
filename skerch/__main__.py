@@ -235,7 +235,8 @@ def main_wrapper(cli_args=None):
             try:
                 main()
             except SystemExit:
-                # ArgParser exits with '-h', we don't want that
+                # ArgParser exits with '-h', we don't want that, because this
+                # wrapper is intended to run within a live process
                 # https://stackoverflow.com/a/58367457
                 pass
 
@@ -248,14 +249,8 @@ def main():
     cmd = args.command
     assert cmd in COMMANDS, f"Unknown command! {cmd}"
     main = COMMANDS[cmd]
-    # a-priori estimation of hyperparameters
-    if cmd == "prio_hpars":
-        lop_shape = args.lop_shape
-        budget = args.budget
-        sym = args.sym
-        main(lop_shape, budget, sym)
     # a-posteriori error probability bounds
-    elif cmd == "post_bounds":
+    if cmd == "post_bounds":
         n = args.apost_n
         err = args.apost_err
         cplx = args.is_complex
