@@ -2,9 +2,29 @@
 # -*- coding: utf-8 -*-
 
 
-"""Command Line Interface interaction via ``python -m skerch ...``.
+"""Command Line Interface (CLI) interaction via ``python -m skerch ...``.
 
-This script acts in connection with the :mod:`.cli` submodule.
+This script acts in connection with the :mod:`skerch.cli` submodule, in order
+to make ``skerch`` functionality (oterwise accessible via Python) available
+from CLI for convenience purposes.
+
+Usage examples::
+
+  # printing module help
+  python -m skerch -h
+
+  # printing a-posteriori error bounds
+  python -m skerch post_bounds --apost_n=30 --apost_err=0.5 --is_complex
+
+  # creating HDF5 layout
+  python -m skerch create_hdf5_layout_lop --lop_shape=100,200 \
+         --dtype=complex128 --partsize=10 --lo=30 --ro=30 --inner=60
+
+  # merging HDF5 layout
+  python -m skerch merge_hdf5 --delete_subfiles --ok_flag=initialized \
+       --in_path /tmp/tmp4fswvvk2/leftouter_ALL.h5
+
+See documentation examples for more explanations and usage instructions.
 """
 
 
@@ -46,7 +66,7 @@ class PluginLoader:
 
     @classmethod
     def get(cls):
-        """Loads all plugins from :mod:`.cli`.
+        """Loads all plugins from :mod:`skerch.cli`.
 
         :returns: A dictionary in the form ``plugin_name: plugin_fn``, where
           each name corresponds to a file in the :mod:`.cli` submodule, and
@@ -104,13 +124,7 @@ def get_argparser():
       with the ``command`` to be executed (must be one of the dict keys
       returned by :meth:`PluginLoader.get`), and then accepts optional
       arguments that may be applicable to that particular command. Call
-      with ``-h`` for details.
-
-    Usage examples::
-      python -m skerch post_bounds --apost_n=30 --apost_err=0.75 --is_complex
-      python -m skerch create_hdf5_layout_lop --dtype float64 \
-        --shape 123,234 --lo 30 --inner 60  --partsize 11
-      python -m skerch merge_hdf5 --in_path=.../inner_ALL.h5 --delete_subfiles
+      with ``-h`` for details, and see module docstring for examples.
     """
     parser = argparse.ArgumentParser(description="skerch CLI")
     parser.add_argument(
@@ -213,8 +227,9 @@ def main_wrapper(cli_args=None):
     """Wrapped :func:`main` function.
 
     This wrapper gives the option to programmatically mock CLI arguments if
-    desired. When running normally, e.g. via ``python -m ...``, it does
-    nothing.
+    desired, which can be useful to e.g. run programatic unit/integration
+    tests mocking CLI functionality. When running normally, e.g. via
+    ``python -m ...``, it simply forwards the call to :func:`main`.
 
     :param cli_args: If none given, CLI arguments from ``sys.argv`` are left
       untouched. Otherwise, ``sys.argv[1:]`` will be mocked to have the given
@@ -242,7 +257,7 @@ def main_wrapper(cli_args=None):
 
 
 def main():
-    """Entry point for ``python -m skerch``."""
+    """Main entry point for ``python -m skerch``."""
     # parse args and check that action is recognized
     parser = get_argparser()
     args = parser.parse_args()

@@ -245,7 +245,7 @@ apost_error_bounds(TEST_MEAS, 0.5)
 # accurately and clearly reflect the given ``RANK`` of the original operator
 # (signaled with a vertical line):
 
-scree_lo, scree_hi = scree_bounds(S3, f3sq**0.5, err3sq**0.5)
+scree_lo, scree_hi = scree_bounds(S3, err3sq**0.5)
 svals = torch.linalg.svdvals(mat)
 scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
     svals**2

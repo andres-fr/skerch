@@ -1,29 +1,37 @@
 :code:`skerch`
 ==================================
 
-``skerch``: Sketched linear operations for `PyTorch <https://pytorch.org/>`_.
+**Sketched linear operations for** `PyTorch <https://pytorch.org/>`_.
 
 Consider a matrix or linear operator :math:`A \in \mathbb{C}^{M \times N}`,
-typically of intractable size and/or very costly measurements :math:`v \to Av`,
-but allowing for a tractable approximation :math:`\hat{A}` featuring a simpler
-sub-structure, such as low-rank or diagonal.
+typically of intractable size and/or very costly measurements :math:`v \to Av`.
+
+In many cases, such large operators feature a much smaller but hidden
+sub-structure (such as low-rank or banded), which allows for an
+approximation :math:`\hat{A}` of scalable size.
 Typical examples of this are kernel matrices for large datasets, Hessian
 matrices for deep learning, large-scale datasets and the throughput
 of high-resolution simulations.
 
-Due to the intractable nature of :math:`A`, it is not possible to *compress*
-it in order to obtain :math:`\hat{A}`. Instead, we aim to *directly obtain*
-:math:`\hat{A}` *without having to fully scan* :math:`A`. For many types of
-approximations, this can be achieved via random measurements, or *sketches*.
+But obtaining :math:`\hat{A}` through traditional compression methods is
+not feasible, since we would need to fully store or scan :math:`\hat{A}`
+first. Instead, we *directly obtain* :math:`\hat{A}` from just
+a few random :math:`y_i = A v_i` measurements, or *sketches*
+(i.e. :math:`v_i` follows some random distribution). Luckily, this is
+possible for a variety of :math:`\hat{A}` structures, and the
+:math:`A v_i` measurements are typically parallelizable, allowing us
+to work at large scales.
 
-Sketched methods only require the ability to draw a few *parallelizable*
-matrix-vector measurements in the form :math:`Av, vA`. In Python,
-and for finite dimensions, this means providing the ``A.shape``
-attribute and implementing matrix-vector multiplication.
+From an operational point of view, sketched methods only require the
+ability to draw a few matrix-vector measurements in the form
+:math:`Av, vA`. In Python, and for finite dimensions, this means
+providing an ``A.shape`` attribute and implementing the
+*matrix-multiplication* ``@`` operation.
 
 One core advantage of ``skerch`` is that this is the *only* requirement
-that :math:`A` needs to fulfill. In code, we just need to ensure that ``A``
-satisfies the following interface:
+that :math:`A` needs to fulfill (unlike other libraries which require
+``A`` to implement more attributes and/or operations). In code, we just
+need to ensure that ``A`` satisfies the following interface:
 
 .. code-block:: python
 
@@ -37,8 +45,9 @@ satisfies the following interface:
     def __rmatmul__(self, x):
         return "... implement x @ A ..."
 
-With this, we will be able to run ``skerch`` routines such as diagonalizations,
-operator norms and triangular approximations. Other advantages of ``skerch``:
+Any operator implementing this interface will run on ``skerch`` routines
+such as diagonalizations, operator norms and triangular approximations.
+Other advantages of ``skerch``:
 
 * Built on top of PyTorch, naturally supports CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
 * Rich API for matrix-free linear operators, including matrix-free noise sources (Rademacher, Gaussian, SSRFT...)

@@ -4,19 +4,8 @@
 
 """A-posteriori utilities for sketched decompositions.
 
-Given a (potentially matrix-free) linear operator, and our obtained low-rank
-decomposition, we would like to know how similar they are. In
-`[TYUC2019] <https://arxiv.org/abs/1902.08651>`_, a method is presented to
-estimate the Frobenius residual error. Furthermore, a probabilistic bound to
-said estimator is presented, providing confidence bounds for the estimation.
-More measures increase said confidence.
-
-Finally, a "scree plot" method is also introduced, providing upper and lower
-bounds to estimate the resudual Frobenius error as a function of the rank.
-This can be used to estimate the actual rank of our original linear operator,
-and to choose the rank of our recovery.
-
-This module implements this functionality.
+This module implements scalable utilities to assess the quality of a
+sketched approximation, once it has been obtained.
 """
 
 import math
@@ -31,19 +20,35 @@ from .algorithms import SketchedAlgorithmDispatcher
 def apost_error_bounds(num_measurements, rel_err, is_complex=False):
     """Probabilistic bounds for a-posteriori sketch error estimation.
 
-    Retrieves probabilistic error bounds presented in
-    `[TYUC2019, 6.4] <https://arxiv.org/abs/1902.08651>`_, see module docstring
-    for details. Note that this function does not perform the error estimation,
-    it merely informs about how noisy would be the estimation given the desired
-    number of measurements.
 
-    :param int num_measurements: How many Gaussian measurements will be
-      performed for the a-posteriori error estimation. More measurements means
-      tighter error bounds.
+    The Frobenius error between any two linear operators can be estimated
+    from sketches using :func:`apost_error`. But this estimation is random
+    and subject to error.
+
+    This function retrieves the probabilistic error bounds presented in
+    `[TYUC2019, 6.4] <https://arxiv.org/abs/1902.08651>`_, which tell us
+    the probability that the estimated error is wrong by a given amount.
+    Interestingly, these bounds only depend on the number of measurements
+    and data type, and *not* on the operator dimension.
+
+    .. note::
+
+      This function does not perform the error estimation itself, it merely
+      informs about the probabilistic bounds associated with a given error.
+      For the error estimation, see :func:`apost_error`.
+
+    :param int num_measurements: How many measurements (assumed Gaussian iid)
+      will be performed for the a-posteriori error estimation. More
+      measurements means tighter error bounds (i.e. the output of our error
+      estimation is more reliable).
     :param float rel_err: A float between 0 and 1, indicating the relative
       error that we want to consider. If ``x`` is the actual error we want to
       estimate, and ``y`` is our estimation, this function will return the
       probability that ``y`` is in the range ``[(1-rel_err)x, (1+rel_err)x]``.
+    :param is_complex: The returned probabilities will be tighter if the
+      error is measured on complex linear operators, using complex Gaussian
+      noise. This boolean flag allows to specify this (assumed real-valued if
+      false).
     :returns: Probabilities that, given the indicated number
       of measurements, the a-posteriori method yields values outside of
       ``actual_error * (1 +/- rel_err)``. Ideally, we want a sufficient number
@@ -82,36 +87,37 @@ def apost_error(
     dispatcher=SketchedAlgorithmDispatcher,
     adj_meas=None,
 ):
-    r"""A-posteriori sketch error estimation.
+    r"""A-posteriori sketched error estimation.
 
     This function implements the error estimation procedure discussed in
     `[TYUC2019, 6] <https://arxiv.org/abs/1902.08651>`_.
-
-    It performs ``num_measurements`` random vector multiplications on linear
-    operators ``lop1`` and ``lop2``, resulting in estimators for their
-    respective Frobenius norms, as well as for their difference.
+    Given two linear operators :math:`A, \hat{A}`, it performs
+    ``num_measurements`` random vector multiplications
+    :math:`y_i = Av_i, \hat{y}_i = \hat{A}v_i`, and the :math:`y` outputs can
+    then be used to estimate the norms
+    :math:`\lVert A \rVert_F^2, \lVert \hat{A} \rVert_F^2`, as well as the
+    error :math:`\lVert A - \hat{A} \rVert_F`.
 
     .. note::
       The test measurements performed here are assumed to be random and
       independent of how either ``lop`` was obtained. For this reason, it is
-      advised to pick a combination of ``noise_type`` and ``seed`` that does
-      not overlap with anything used before.
+      important to pick a combination of ``noise_type`` and ``seed`` that does
+      not overlap with any other noise generation procedure used before.
 
     :param lop1: Linear operator with a ``shape=(h, w)`` attribute and
       implementing a left (``x @ mat``) or right ``(mat @ x)`` matmul op.
       It is assumed to match the given ``device`` and ``dtype``.
     :param lop2: Linear operator to compare ``lop1`` against. It must match
       in shape, device and dtype.
-    :param num_meas: Number of measurements that will be performed on ``lop1``
-      and ``lop2``.
+    :param num_meas: Number of test measurements that will be performed on
+      ``lop1`` and ``lop2``.
     :param adjoint: If true, left-matmul is used, otherwise right-matmul.
-    :returns: A tuple ``((f1_mean, f2_mean, diff_mean), (f1, f2, diff))``,
-      where the last 3 elements are lists with the ``L_2^2`` norms of each
-      random measurement for the first matrix (f1), second matrix (f2) and
-      difference between matrices (diff). The first 3 elements are the averages
-      over all given measurements. The final estimate for the error between
-      ``lop1`` and ``lop2`` is then ``diff_mean``. To get confidence bounds
-      on this estimate, use ``a_posteriori_error_bounds``.
+    :returns: A tuple ``((f1, f2, e), (F1, F2, E))``, where ``f1, f2`` are the
+      estimated Frobenius norms squared of ``lop1, lop2`` and ``e`` is the
+      estimated Frobenius error squared. The uppercase counterparts are lists
+      containing all ``num_meas`` individual measurements (which are averaged
+      to obtain the estimates). To get confidence bounds on this estimate,
+      use :func:`apost_error_bounds`.
     """
     h, w = lop1.shape
     h2, w2 = lop2.shape
@@ -167,52 +173,54 @@ def apost_error(
 # ##############################################################################
 # # SCREE
 # ##############################################################################
-def scree_bounds(S, ori_frob, err_frob):
+def scree_bounds(S, err_frob):
     """A-posteriori scree bounds for low-rank approximations.
 
     Reference: `[TYUC2019, 6.5] <https://arxiv.org/abs/1902.08651>`_.
 
-    When we do a sketched eigen- or singular-decomposition of a linear operator,
-    we don't generally know a-priori where is the effective rank of said
-    operator. A scree analysis is an a-posteriori tool to estimate the smallest
-    rank that captures a sufficient amount of the actual matrix.
+    When we do a sketched eigen- or singular-decomposition of a linear
+    operator, we often don't know what is the effective rank of said operator,
+    and whether we took enough sketched measurements to cover it.
+    A scree analysis is a tool to estimate the smallest rank that captures
+    a sufficient amount of the actual matrix, typically by looking at
+    inflection points in the curve associated with sharp decays in
+    spectral norm.
 
-    It does so by efficiently retrieving upper and lower bounds for the actual
-    proportion of residual energy that remains, as we increase the rank of our
-    estimated matrix. Typically we look for an initial sharp decay, followed
-    by an "elbow" at a low point, after which residual energy stops decaying
-    fast. The location of the elbow is a good indicator for the effective rank,
-    but quantitative methods are also possible (see [TYUC2019]).
+    A common issue with sketched methods is that we don't have access to the
+    actual spectrum, and thus we can't perform a scree analysis. Instead,
+    it is possible to use estimates from :func:`apost_error` to retrieve
+    upper and lower scree bounds, which ideally would still inform us about
+    the effective rank of the original operator.
 
     :param S: Vector of the estimated eigen/singular values, expected to
       contain entries in non-ascending magnitude.
-    :param ori_frob: Estimate (or exact if available) ``frob_norm(M)``, where
-      ``M`` is the original linop that we are decomposing. This quantity is
-      estimated by :func:`.a_posteriori_error`, but note that it returns
-      ``frob_norm^2``, while this function requires the Frobenius norm itself.
     :param err_frob: A-posteriori estimate of ``frob_norm(M - M')``, where
-      ``M'`` is the recovery of ``M`` with singular values ``S``.
+      ``M'`` is the recovery of ``M`` with singular values ``S``, as returned
+      by :func:`apost_error` (note that here the norm is not squared).
 
     Usage example::
 
-      f1_pow2, f2_pow2, res_pow2 = a_posteriori_error(M, M', ...)
-      S = get_singular_values(M')  # in non-ascending magnitude
-      scree_lo, scree_hi = scree_bounds(S, f1_pow2**0.5, res_pow2**0.5)
-      # plot the scree bounds to find an elbow as a cutting point for rank(M).
+      U, S, Vh = ssvd(A)
+      Ahat = CompositeLinOp((("US", U * S), ("Vh", Vh)))
+      (f1, _, err), _ = apost_error(A, Ahat, "...")
+      scree_lo, scree_hi = scree_bounds(S, err**0.5)
     """
     if (abs(S).diff() > 0).any():
         raise ValueError(
             "Provided S must be given in non-ascending magnitude!"
         )
-    # residuals is a vector of len(S), where the ith entry contains the
-    # Frobenius norm of M' after an ith-rank deflation, while progressing by
-    # descending magnitude. The first entry has a rank 0 deflation, i.e. it
-    # contains frob(M') entirely. The last entry has a rank R-1 deflation, i.e.
-    # it is the magnitude of the smallest value in S.
+    approx_norm = S.norm()
+    # Nonincreasing curve with the (estimated) residual energies, going from
+    # approx_norm down to 0
     residuals = (S**2).flip(0).cumsum(0).flip(0) ** 0.5
-    # now instead of normalizing dividing by sum(S_squared)**0.5, which uses M',
-    # we obtain both the lower and upper bounds by using M instead, this is
-    # given by ori_frob.
-    lo_scree = (residuals / ori_frob) ** 2
-    hi_scree = ((residuals + err_frob) / ori_frob) ** 2
+    # the lower scree bound is assumed to be given by the normalized
+    # residuals, since the least-squares recovery scree tends to decay faster
+    # than hte actual scree. Note that we divide by approx_norm, because the
+    # lower bound must start at 1 (dividing estimated residuals by original
+    # norm causes a mismatch and the resulting curve is not a scree)
+    lo_scree = (residuals / approx_norm) ** 2
+    # now the upper scree bound is given by adding the estimated error on
+    # top of the lower bound.
+    hi_scree = ((residuals + err_frob) / approx_norm) ** 2
+    #
     return lo_scree, hi_scree

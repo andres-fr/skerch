@@ -2,7 +2,13 @@
 # -*- coding: utf-8 -*-
 
 
-"""CLI plugin to create a HDF5 layout to hold outer and inner measurements."""
+"""CLI plugin to create a HDF5 layout used to hold sketched measurements.
+
+See also:
+
+* :class:`skerch.hdf5.DistributedHDF5Tensor`
+* :func:`skerch.hdf5.create_hdf5_layout_lop`
+"""
 
 
 import os
@@ -25,7 +31,7 @@ def main(
     ro_meas=None,
     inner_meas=None,
 ):
-    """See :func:`.hdf5.create_hdf5_layout`."""
+    """Entry point for this CLI script. See module docstring."""
     if os.listdir(dirpath):
         raise RuntimeError("Directory must be empty!")
     lo = lo_meas is not None

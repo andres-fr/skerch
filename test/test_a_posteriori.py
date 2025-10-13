@@ -236,7 +236,7 @@ def test_scree_formal():
     S = torch.linalg.svdvals(mat)
     # non-ascending S raises error
     with pytest.raises(ValueError):
-        _ = scree_bounds(S.flip(0), 1, 1)
+        _ = scree_bounds(S.flip(0), 1)
 
 
 def test_scree_correctness(
@@ -309,8 +309,7 @@ def test_scree_correctness(
                         adj_meas=False,
                     )
                     f1, err = f1**0.5, err**0.5
-                    f2 = S.norm()
-                    scree_lo, scree_hi = scree_bounds(S, f2, err)
+                    scree_lo, scree_hi = scree_bounds(S, err)
                     # scree_lo begins with 1
                     assert torch.isclose(
                         scree_lo[0], torch.ones_like(scree_lo[0]), atol=tol
