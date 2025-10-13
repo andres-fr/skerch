@@ -94,6 +94,14 @@ class MatBBLinOp(ByBlockLinOp):
         return result
 
 
+class MissingBase(BaseLinOp):
+    """Extending base but not implementing matmuls"""
+
+
+class MissingBlock(ByBlockLinOp):
+    """Extending by-block but not implementing get_block"""
+
+
 # ##############################################################################
 # # TESTS
 # ##############################################################################
@@ -101,13 +109,20 @@ def test_baselinop_formal():
     """Test case for input shape consistency and value errors
 
     For forward and adjoint matmul with ``BaseLinOp``, test:
+    * matmuls must be implemented
     * Providing empty or malformed shapes raises error
+    * assignment matmul is unsupported (matrix-free)
     * Providing vectors of mismatching shape raises ``BadShapeError``
     * Providing tensors that aren't vectors/matrices raises ``BadShapeError``
     * Expected repr behaviour
     * Trying to transpose a transposedlinop raises ``ValueError``
     * No matmat implemented raises warning/error when running on matrices
     """
+    base0 = MissingBase((2, 2))
+    with pytest.raises(NotImplementedError):
+        base0 @ torch.ones(2)
+    with pytest.raises(NotImplementedError):
+        torch.ones(2) @ base0
     with pytest.raises(ValueError):
         _ = BaseLinOp("NOT A SHAPE")
     with pytest.raises(ValueError):
@@ -126,6 +141,9 @@ def test_baselinop_formal():
         _ = BaseLinOp((3, 0))
     #
     lop = BaseLinOp((10, 20))
+    # assignment matmul not supported
+    with pytest.raises(NotImplementedError):
+        lop @= torch.ones((20, 20))
     #
     v1, v2 = torch.empty(lop.shape[0] + 1), torch.empty(lop.shape[1] + 1)
     with pytest.raises(BadShapeError):
@@ -190,15 +208,20 @@ def test_baselinop_formal():
 
 
 def test_byblock_formal(torch_devices, dtypes_tols):
-    """Formal correctness test for by-block linops.
+    """Formal test for by-block linops.
 
     Creates small-shaped by-block linops and checks that:
 
+    * get_block must be extended
     * Repr creates correct strings
     * Negative blocksizes trigger error
     * out-of-bounds block idxs trigger error in get_vector_idxs
     * out-of-bounds vector idxs trigger error in get_idx_coords
     """
+    block0 = MissingBlock((5, 5))
+    with pytest.raises(NotImplementedError):
+        block0.get_block(0, torch.float32, "cpu")
+    #
     shape = (5, 7)
     # repr
     s = str(ByBlockLinOp(shape, by_row=True, batch=10, blocksize=2))
@@ -380,3 +403,15 @@ def test_linop_correctness(
                             assert (
                                 bbTT is bb1
                             ), f"Wrong by-block double transp?{msg}"
+
+
+def test_transposed_formal():
+    """Formal test for transposed linop.
+
+    * repr output
+    """
+    lop = BaseLinOp((3, 3))
+    lopT = TransposedLinOp(lop)
+    lopT2 = lop.t()
+    assert str(lopT) == f"({str(lop)}).H", "Unexpected lop.H string!"
+    assert str(lopT) == str(lopT2), "Tr(lop) and lop.t() different string?"

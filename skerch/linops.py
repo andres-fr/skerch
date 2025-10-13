@@ -88,8 +88,6 @@ class BaseLinOp:
             h, w = shape
         except Exception as e:
             raise ValueError(f"Malformed shape? {shape}")
-        if len(shape) != 2:
-            raise BadShapeError("Shape must be a (height, width) pair!")
         if h <= 0 or w <= 0:
             raise BadShapeError(f"Empty linop with shape {shape}?")
         self.shape = shape
@@ -411,10 +409,10 @@ class CompositeLinOp:
 
     def __init__(self, named_operators):
         """Initializer. See class docstring."""
+        if not named_operators:
+            raise ValueError(f"Empty linop collection? {named_operators}")
         self.names, self.operators = zip(*named_operators)
         shapes = [o.shape for o in self.operators]
-        if not shapes:
-            raise ValueError(f"Empty linop collection? {named_operators}")
         for (_h1, w1), (h2, _w2) in zip(shapes[:-1], shapes[1:]):
             if w1 != h2:
                 raise BadShapeError(f"Mismatching shapes in {shapes}!")
@@ -463,10 +461,12 @@ class SumLinOp(BaseLinOp):
 
     def __init__(self, named_signed_operators):
         """Instantiates a summation linear operator. See class docstring."""
+        if not named_signed_operators:
+            raise ValueError(
+                f"Empty linop collection? {named_signed_operators}"
+            )
         self.names, self.signs, self.operators = zip(*named_signed_operators)
         shapes = [o.shape for o in self.operators]
-        if not shapes:
-            raise ValueError(f"Empty linop collection? {named_operators}")
         for shape in shapes:
             if shape != shapes[0]:
                 raise BadShapeError(f"All shapes must be equal! {shapes}")
@@ -660,14 +660,16 @@ class BandedLinOp(BaseLinOp):
             raise BadShapeError(
                 f"Inconsistent diagonal indices/lengths! {diag_lengths}, "
                 + f"triggered by indices {inconsistent_idxs} "
-                + f" for shape {(height, width)}"
+                + f" for shape {(height, width)} and symmetric={symmetric}."
             )
-        # if symmetric, linop must be square
-        if symmetric:
-            if height != width:
-                raise BadShapeError(
-                    f"Symmetric banded linop must be square! {diag_lengths}"
-                )
+        # diags must be of same dtype and device
+        # diag_dtypes = [d.dtype for d in indexed_diags.values()]
+        # diag_devices = [d.device for d in indexed_diags.values()]
+        diag_dtypes, diag_devices = zip(
+            *((d.dtype, d.device) for d in indexed_diags.values())
+        )
+        if len(set(diag_dtypes)) != 1 or len(set(diag_devices)) != 1:
+            raise ValueError(f"Inconsistent diagonal dtypes/devices!")
         # done checking, initialize object
         self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
         self.symmetric = symmetric
@@ -728,10 +730,6 @@ class BandedLinOp(BaseLinOp):
         dtypes, devices = zip(
             *((d.diag.dtype, d.diag.device) for d in self.diags.values())
         )
-        if len(set(dtypes)) > 1:
-            raise RuntimeError(f"Inconsistent diagonal dtypes! {dtypes}")
-        if len(set(devices)) > 1:
-            raise RuntimeError(f"Inconsistent diagonal devices! {devices}")
         # create and populate resulting matrix
         result = torch.zeros(self.shape, dtype=dtypes[0], device=devices[0])
         for idx, diag in self.diags.items():

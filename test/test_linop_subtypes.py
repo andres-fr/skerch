@@ -81,6 +81,7 @@ def test_diagonal_formal():
     Tests that:
     * Provided diagonal must be a vector, otherwise BadShapeError
     * Repr creates correct strings
+    * Input can be vector and matrix
     """
     # scalar input
     with pytest.raises(BadShapeError):
@@ -96,6 +97,9 @@ def test_diagonal_formal():
     assert (
         str(lop) == "<DiagonalLinOp(2x2)[1.0, 1.0]>"
     ), "Unexpected repr for diagonal linop!"
+    # input can be vec and mat
+    assert (lop @ torch.ones(2) == lop.diag).all(), "wrong D @ 1 matvec?"
+    assert (lop @ torch.ones(2, 2) == lop.diag).all(), "wrong D @ matmat?"
 
 
 def test_diagonal_correctness(
@@ -160,6 +164,7 @@ def test_banded_formal():
     * BadShapeError for negative diag idxs in symmetric linops
     * BadShapeError for inconsistent length/idx inputs
     * BadShapeError for nonsquare input if symmetric is True
+    # ValueError for inconsistent diag dtypes or devices
     """
     # repr
     diags = {0: torch.zeros(5)}
@@ -199,6 +204,13 @@ def test_banded_formal():
     diags = {0: torch.zeros(5), 1: torch.zeros(5)}
     with pytest.raises(BadShapeError):
         _ = BandedLinOp(diags, symmetric=True)
+    # diags must be of same dtype and device
+    diags = {
+        0: torch.ones(3, dtype=torch.float32, device="cpu"),
+        1: torch.ones(2, dtype=torch.float64),
+    }
+    with pytest.raises(ValueError):
+        _ = BandedLinOp(diags)
 
 
 def test_banded_correctness(

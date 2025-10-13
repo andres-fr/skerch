@@ -50,6 +50,10 @@ class NumpyScalarLinOp:
         """Adjoint (left) matrix-vector multiplication ``x @ self``."""
         return self.__matmul__(x)
 
+    def __repr__(self):
+        """Test string"""
+        return f"NumpyScalarLinOp({self.scalar})"
+
 
 class TorchScalarLinOp(TorchLinOpWrapper, NumpyScalarLinOp):
     """A scalar matrix-free linop wrapped to work with torch tensors."""
@@ -67,6 +71,7 @@ def test_torchwrapper_formal(torch_devices, dtypes_tols):
     * feeding tensor to lop raises error
     * feeding tensor of all types to wrapped lop now works and delivers correct
       results on correct device
+    * repr
     """
     lop = NumpyScalarLinOp(2)
     torchlop = TorchScalarLinOp(2)
@@ -89,3 +94,6 @@ def test_torchwrapper_formal(torch_devices, dtypes_tols):
             assert (v == 2 * tnsr).all(), "Incorrect adj wrapper?"
             assert v.dtype == tnsr.dtype, "Incorrect dtype in adj wrapper?"
             assert v.device == tnsr.device, "Incorrect dtype in adj wrapper?"
+            # repr
+            s1, s2 = str(lop), str(torchlop)
+            assert s2 == f"TorchLinOpWrapper<{s1}>", "Wrong torchwrapper repr!"

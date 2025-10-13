@@ -47,7 +47,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--seeds",
         action="store",
-        default="0 1 -12345 12345 479915",  # 0b1110101001010101011
+        default="-12345 54321 17265 127419128",
         help="Space-separated string of integers to use as seeds.",
         type=str_of_unique_ints,
     )

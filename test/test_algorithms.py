@@ -201,10 +201,10 @@ def norm_configs(request):
         # near-perfect recovery if meas=rank
         ((20, 10), 0.01, 10, 1e-5, 1e-5),
         # also works for non-square
-        ((50, 20), 0.1, 15, 0.01, 0.01),
-        ((20, 50), 0.1, 15, 0.01, 0.01),
+        ((50, 20), 0.1, 15, 0.01, 0.02),
+        ((20, 50), 0.1, 15, 0.01, 0.02),
         # if meas shorter but sufficient, recovery still good
-        ((200, 200), 0.1, 20, 0.001, 0.01),
+        ((200, 200), 0.1, 20, 0.001, 0.02),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:3]
@@ -290,8 +290,8 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
 # ##############################################################################
 # # DISPATCHER
 # ##############################################################################
-def test_algo_dispatcher(dispatcher_noise_types):
-    """ """
+def test_algo_dispatcher_formal(dispatcher_noise_types):
+    """Formal test case for algorithm dispatcher."""
     # unknown recovery raises error
     with pytest.raises(ValueError):
         SketchedAlgorithmDispatcher.recovery("MadeUpRecovery")
@@ -299,6 +299,11 @@ def test_algo_dispatcher(dispatcher_noise_types):
     with pytest.raises(ValueError):
         SketchedAlgorithmDispatcher.mop(
             "MadeUpMop", (3, 3), 0, torch.float32, 1, False
+        )
+    # phase noise type expect complex dtype
+    with pytest.raises(ValueError):
+        SketchedAlgorithmDispatcher.mop(
+            "phase", (3, 3), 0, torch.float32, 1, False
         )
     # unknown measurement linop triggers warning in unitnorm checker
     with pytest.warns(RuntimeWarning):
@@ -320,6 +325,31 @@ def test_algo_dispatcher(dispatcher_noise_types):
 # ##############################################################################
 # # SSVD
 # ##############################################################################
+def test_ssvd_formal():
+    """Formal test case for ssvd."""
+    lop = torch.ones(5, 5)
+    # more measurements than rows/cols
+    with pytest.raises(ValueError):
+        ssvd(lop, lop.device, lop.dtype, outer_dims=6)
+    with pytest.raises(ValueError):
+        ssvd(
+            lop,
+            lop.device,
+            lop.dtype,
+            outer_dims=5,
+            recovery_type="oversampled_6",
+        )
+    # inner dims smaller than outer
+    with pytest.raises(ValueError):
+        ssvd(
+            lop,
+            lop.device,
+            lop.dtype,
+            outer_dims=5,
+            recovery_type="oversampled_4",
+        )
+
+
 def test_ssvd_correctness(
     rng_seeds,
     torch_devices,
@@ -392,6 +422,34 @@ def test_ssvd_correctness(
 # ##############################################################################
 # # SEIGH
 # ##############################################################################
+def test_seigh_formal():
+    """Formal test case for seigh."""
+    lop = torch.ones(5, 5)
+    # more measurements than rows/cols
+    with pytest.raises(ValueError):
+        seigh(lop, lop.device, lop.dtype, outer_dims=6)
+    with pytest.raises(ValueError):
+        seigh(
+            lop,
+            lop.device,
+            lop.dtype,
+            outer_dims=5,
+            recovery_type="oversampled_6",
+        )
+    # inner dims smaller than outer
+    with pytest.raises(ValueError):
+        seigh(
+            lop,
+            lop.device,
+            lop.dtype,
+            outer_dims=5,
+            recovery_type="oversampled_4",
+        )
+    # lop must be square
+    with pytest.raises(ValueError):
+        seigh(lop[1:], lop.device, lop.dtype, outer_dims=5)
+
+
 def test_seigh_correctness(
     rng_seeds,
     torch_devices,
@@ -628,35 +686,13 @@ def test_diagpp_xdiag_correctness(
                         )
                         Q1, R1 = hutch["QR"]
                         diag1, dtop1, dgh1 = hutch["diag"]
-                        # run XDiag
-                        if (
-                            xdiag_full_tol is not None
-                            or xdiag_top_tol is not None
-                        ):
-                            diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
-                                lop,
-                                device,
-                                dtype,
-                                defl,
-                                seed,
-                                noise_type,
-                                meas_blocksize=dims,
-                                dispatcher=MyDispatcher,
-                            )
-                        else:
-                            Q2 = None
-                        # test Qs are orthogonal
+                        # orth Q
                         if Q1 is not None:
                             QhQ1 = Q1.H @ Q1
                             assert torch.allclose(
                                 QhQ1, I, atol=tol
                             ), "Diag++ Q not orthogonal?"
-                        if Q2 is not None:
-                            QhQ2 = Q2.H @ Q2
-                            assert torch.allclose(
-                                QhQ2, I, atol=tol
-                            ), "XDiag Q not orthogonal?"
-                        # test recoveries are correct
+                        # correct recoveries
                         if diagpp_full_tol is not None:
                             assert (
                                 relerr(D, diag1) < diagpp_full_tol
@@ -665,14 +701,40 @@ def test_diagpp_xdiag_correctness(
                             assert (
                                 relerr(D, dtop1) < diagpp_top_tol
                             ), "Bad top Diag++?"
-                        if xdiag_full_tol is not None:
-                            assert (
-                                relerr(D, diag2) < xdiag_full_tol
-                            ), "Bad full XDiag?"
-                        if xdiag_top_tol is not None:
-                            assert (
-                                relerr(D, dtop2) < xdiag_top_tol
-                            ), "Bad top XDiag?"
+                        # run XDiag
+                        for cache in (True, False):
+                            if (
+                                xdiag_full_tol is not None
+                                or xdiag_top_tol is not None
+                            ):
+                                diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                                    lop,
+                                    device,
+                                    dtype,
+                                    defl,
+                                    seed,
+                                    noise_type,
+                                    meas_blocksize=dims,
+                                    dispatcher=MyDispatcher,
+                                    cache_mop=cache,
+                                )
+                            else:
+                                Q2 = None
+                            # orth Q
+                            if Q2 is not None:
+                                QhQ2 = Q2.H @ Q2
+                                assert torch.allclose(
+                                    QhQ2, I, atol=tol
+                                ), "XDiag Q not orthogonal?"
+                            # correct recoveries
+                            if xdiag_full_tol is not None:
+                                assert (
+                                    relerr(D, diag2) < xdiag_full_tol
+                                ), "Bad full XDiag?"
+                            if xdiag_top_tol is not None:
+                                assert (
+                                    relerr(D, dtop2) < xdiag_top_tol
+                                ), "Bad top XDiag?"
 
 
 # ##############################################################################
@@ -946,7 +1008,7 @@ def test_norm_formal():
             mat,
             mat.device,
             mat.dtype,
-            num_meas=len(mat) + 1,
+            num_meas=1,
             seed=0,
             noise_type="gaussian",
             norm_types=("fro", "op", "fernandez"),

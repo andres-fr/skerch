@@ -110,6 +110,7 @@ def bad_decay_types():
 def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
     """Various formal tests for synthetic matrices.
 
+    * in-place mix_matrix_and_diag
     * _decay_helper svals mut be real, and also >=0 if PSD
     * shape must be matrix-compatible
     * ``diag_ratio`` must be >= 0
@@ -117,6 +118,18 @@ def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
     * noise matrix must be square
     * unsupported decay types for get_decay_svals
     """
+    # in-place mix_matrix_and_diag
+    mat, diag = torch.ones(2, 2), torch.ones(2)
+    _ = RandomLordMatrix.mix_matrix_and_diag(mat, diag, 2.0, inplace=False)
+    assert (mat == 1).all(), "mix matrix was inplace? (mat)?"
+    assert (diag == 1).all(), "mix matrix was inplace? (diag)"
+    #
+    mat2, diag2, _ = RandomLordMatrix.mix_matrix_and_diag(
+        mat, diag, 2.0, inplace=True
+    )
+    assert (mat2 == mat).all(), "mix matrix was NOT inplace? (mat)"
+    assert (diag2 == diag).all(), "mix matrix was NOT inplace? (diag)"
+    #
     for device in torch_devices:
         # _decay_helper svals mut be real, and also >=0 if PSD
         svals_neg = torch.zeros(10, dtype=torch.float32) - 1

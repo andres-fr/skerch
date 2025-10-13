@@ -372,6 +372,7 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
 
     For the SSRFT transform and/or linop (wherever applicable), tests:
     * Repr creates correct strings
+    * Register triggers error if overlapping seeds are used if active
     * Non-orthogonal normalization raises NotImplementederror
     * Too large or too small out_dims for ssrft
     * Invalid shape to SSRFT linop triggers error (must be square or fat)
@@ -386,6 +387,11 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     lop = SsrftNoiseLinOp(hw, 0, norm="ortho", register=False)
     s = "<SsrftNoiseLinOp(10x10), by col, blocksize=1, seed=0, norm=ortho>"
     assert str(lop) == s, "Unexpected repr for SSRFT noise linop!"
+    # register overlap triggers error
+    lop = SsrftNoiseLinOp((3, 3), seed=12345, register=True)
+    with pytest.raises(BadSeedError):
+        _ = SsrftNoiseLinOp((3, 3), seed=12345, register=True)
+    SsrftNoiseLinOp.REGISTER.clear()
     # non-orthogonal norm raises error (transform)
     with pytest.raises(NotImplementedError):
         SSRFT.ssrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")

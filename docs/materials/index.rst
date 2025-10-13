@@ -1,45 +1,56 @@
 :code:`skerch`
 ==================================
 
-``skerch``: Sketched matrix decompositions for `PyTorch <https://pytorch.org/>`_.
+``skerch``: Sketched linear operations for `PyTorch <https://pytorch.org/>`_.
 
-Consider a matrix or linear operator :math:`A \in \mathbb{R}^{M \times N}`,
-typically of intractable size and/or very costly measurement :math:`w = Av`,
-but of low-rank structure. A typical example of this are
-`kernel matrices for Gaussian Processes <https://arxiv.org/abs/2107.00243>`_
-or the `Hessian matrices for Deep Learning <https://arxiv.org/abs/1706.04454>`_.
+Consider a matrix or linear operator :math:`A \in \mathbb{C}^{M \times N}`,
+typically of intractable size and/or very costly measurements :math:`v \to Av`,
+but allowing for a tractable approximation :math:`\hat{A}` featuring a simpler
+sub-structure, such as low-rank or diagonal.
+Typical examples of this are kernel matrices for large datasets, Hessian
+matrices for deep learning, large-scale datasets and the throughput
+of high-resolution simulations.
 
-Furthermore, consider its `Singular Value Decomposition <https://en.wikipedia.org/wiki/Singular_value_decomposition>`_:
+Due to the intractable nature of :math:`A`, it is not possible to *compress*
+it in order to obtain :math:`\hat{A}`. Instead, we aim to *directly obtain*
+:math:`\hat{A}` *without having to fully scan* :math:`A`. For many types of
+approximations, this can be achieved via random measurements, or *sketches*.
 
-.. math::
+Sketched methods only require the ability to draw a few *parallelizable*
+matrix-vector measurements in the form :math:`Av, vA`. In Python,
+and for finite dimensions, this means providing the ``A.shape``
+attribute and implementing matrix-vector multiplication.
 
-  A := U \Sigma V^T
+One core advantage of ``skerch`` is that this is the *only* requirement
+that :math:`A` needs to fulfill. In code, we just need to ensure that ``A``
+satisfies the following interface:
 
+.. code-block:: python
 
-If :math:`A` has rank :math:`k`, sketched methods allow us to approximate it while requiring only in the order of:
+   class MyLinOp:
+    def __init__(self, shape):
+        self.shape = shape
 
-* :math:`\mathcal{O}(\text{max}(M, N) \cdot k)` memory
-* :math:`\mathcal{O}(\text{max}(M, N) \cdot k^2)` arithmetic
-* :math:`\mathcal{O}(k)` *parallelizable* measurements
+    def __matmul__(self, x):
+        return "... implement A @ x ..."
 
-This is in stark contrast with traiditional methods (e.g. QR-based, orthogonal iterations, Arnoldi...), which entail more memory requirements, arithmetic overhead, sequential measurements and/or numerical instability (see `[HMT2009] <https://arxiv.org/abs/0909.4061>`_ for extensive discussion). With the help of sketched methods, **explicit representation and SVD of otherwise intractable operators becomes now practical at unprecedented scales**.
+    def __rmatmul__(self, x):
+        return "... implement x @ A ..."
 
-This package implements functionality to perform such sketched decompositions
-for any arbitrary matrix or linear operator :math:`A`.
-**This includes non-square, non-PSD, and matrix-free operators**. Furthermore,
-operations are implemented using ``PyTorch``, which means that **CPU/CUDA can
-be used in a device-agnostic way and automatic differentiation is available**.
+With this, we will be able to run ``skerch`` routines such as diagonalizations,
+operator norms and triangular approximations. Other advantages of ``skerch``:
 
-It also implements:
+* Built on top of PyTorch, naturally supports CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
+* Rich API for matrix-free linear operators, including matrix-free noise sources (Rademacher, Gaussian, SSRFT...)
+* Efficient parallelized and distributed computations
+* Support for out-of-core operations via HDF5
+* A-posteriori verification tools to test accuracy of sketched approximations modular and extendible design, for easy adaption to new settings and operations
+* Modular and extendible design
 
-* Efficient *a priori* methods to choose meaningful hyperparameters for the sketched algorithms
-* Efficient *a posteriori* methods to estimate the quality and rank of the sketched approximations
-* Matrix-free estimation of (sub-)diagonals for square linear operators
-* Matrix-free estimation of matrix-vector products for upper- and lower-triangular portions of square linear operators.
+See the API docs and examples for illustrations of the above points.
+
 
 .. seealso::
-
-  The contents of this repository are based on the following publications:
 
   * `[HMT2009] <https://arxiv.org/abs/0909.4061>`_: Nathan Halko, Per-Gunnar
     Martinsson, Joel A. Tropp. 2011. *“Finding Structure with Randomness:
@@ -65,7 +76,7 @@ It also implements:
     Magnitudes and Hessian Eigenspaces at Scale using Sketched Methods”*.
     Transactions on Machine Learning Research.
 
-  * `[DEOFTK] <https://arxiv.org/abs/2501.19183>`_ Felix Dangel, Runa Eschenhagen,
+  * `[DEOFTK2025] <https://arxiv.org/abs/2501.19183>`_ Felix Dangel, Runa Eschenhagen,
     Weronika Ormaniec, Andres Fernandez, Lukas Tatzel, Agustinus Kristiadi. 2025.
     *“Position: Curvature Matrices Should Be Democratized via Linear Operators”*.
     arXiv 2501.19183.

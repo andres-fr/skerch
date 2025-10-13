@@ -39,7 +39,7 @@ Full tests and coverage can be run via following command in the repo root:
 
   make test
 
-They can take several hours though. A quicker (few minutes), yet still representative subset of the tests can be run via:
+But they can take a substantial amount of time. A quicker (few minutes), yet still representative subset of the tests can be run via:
 
 .. code:: bash
 

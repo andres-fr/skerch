@@ -108,15 +108,6 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         return result
 
     def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
-        clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"seed={self.seed}, by_row={self.by_row})>"
-        )
-        return s
-
-    def __repr__(self):
         """Returns a string in the form <classname(shape), attr=value, ...>."""
         clsname = self.__class__.__name__
         byrow_s = ", by row" if self.by_row else ", by col"
@@ -496,21 +487,6 @@ class SsrftNoiseLinOp(ByBlockLinOp):
             norm=self.norm,
         ).transpose(0, 1)
         return result
-
-    def __repr__(self):
-        """Returns a string: <classname(shape, seed=..., by_row=...)>."""
-        clsname = self.__class__.__name__
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}, seed={self.seed})>"
-        return s
-
-    def __repr__(self):
-        """Returns a string: <classname(shape, seed=...)>."""
-        clsname = self.__class__.__name__
-        s = (
-            f"<{clsname}({self.shape[0]}x{self.shape[1]}, "
-            + f"seed={self.seed})>"
-        )
-        return s
 
     def __repr__(self):
         """Returns a string in the form <classname(shape), attr=value, ...>."""

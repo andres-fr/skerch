@@ -85,12 +85,15 @@ def matrix_shape(shape):
 
     If given ``shape`` is a string with two positive, coma-separated integers
     like '100,200', returns a tuple in the form ``(100, 200)``. Otherwise
-    raises an ``AssertionError``.
+    raises a ``ValueError``.
     """
-    h, w = shape.split(",")
-    h, w = int(h), int(w)
-    assert h > 0, "Height must be positive!"
-    assert w > 0, "Width must be positive!"
+    try:
+        h, w = shape.split(",")
+        h, w = int(h), int(w)
+        assert h > 0, "Height must be positive!"
+        assert w > 0, "Width must be positive!"
+    except Exception as e:
+        raise ValueError(f"Malformed matrix shape! {shape}") from e
     return (h, w)
 
 

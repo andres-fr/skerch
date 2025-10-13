@@ -220,6 +220,9 @@ def test_dtype_utils():
     dtype = torch.int64
     assert "int64" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
     assert torch.int64 == complex_dtype_to_real(dtype), "Bad real(dtype) cast!"
+    # unknown dtype:
+    with pytest.raises(ValueError):
+        complex_dtype_to_real("float1234567891011")
 
 
 # ##############################################################################
@@ -400,6 +403,17 @@ def test_noise_sources(
                                 m1_conj,
                                 atol=tol,
                             ), "phase_shift not conjugating mask correctly?"
+                            # phase shift: inplace
+                            phase_shift(
+                                ones,
+                                sd,
+                                inplace=True,
+                                rng_device=device,
+                                conj=False,
+                            )
+                            assert (
+                                ones == noise1
+                            ).all(), "phase_shift not inplace?"
 
 
 # ##############################################################################

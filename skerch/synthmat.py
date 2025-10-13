@@ -38,9 +38,7 @@ class RandomLordMatrix:
     """Static class to produce different random lowrank + diagonal matrices."""
 
     @staticmethod
-    def mix_matrix_and_diag(
-        mat, diag, diag_ratio=1.0, inplace=True, diag_dtype=torch.float64
-    ):
+    def mix_matrix_and_diag(mat, diag, diag_ratio=1.0, inplace=True):
         """
         :param diag_ratio: The ratio ``diag.norm() / v_norm``, where ``v_norm``
           is a mean-vector norm of the matrix across the smaller dimension,
