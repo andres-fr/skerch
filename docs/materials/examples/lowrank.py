@@ -8,9 +8,10 @@ their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts in
 terms of  interface, accuracy and speed (see
 `Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_ and `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_).
 
-A key observation here is that **``skerch`` only requires a bare-minimum
-interface**: linear operators must have a ``.shape = (height, width)``
-attribute and implement the ``@`` matmul operator. Trying to run such a
+A key observation here is that ``skerch`` **only requires a bare-minimum
+interface**: compatible linear operators must simply feature a
+``.shape = (height, width)`` attribute and implement the ``@`` matmul
+operator from the left and right handside. Trying to run such a
 simple object using the ``torch`` implementations does not work, because
 they have more interface requirements.
 
@@ -22,11 +23,11 @@ This showcases a tradeoff: for this small cost in accuracy and runtime,
 ``skerch`` allows us to work in much broader settings, also providing
 substantial flexibility and extendability (it is simple to
 incorporate custom noise sources and recovery methods, see
-:ref:`Extending With Custom Functionality` for examples).
+:ref:`Extending With Custom Functionality`).
 
-Finally, we showcase the a-posteriori functionality, which also works on a
+Finally, we showcase the a-posteriori functionality, which also works on the
 bare-minimum interface and can be used to assess rank and quality of the
-recovery when the original matrix is intractable or unknown.
+recovery, even when the original matrix is still unknown or intractable.
 """
 
 from time import time
@@ -50,7 +51,7 @@ from skerch.linops import CompositeLinOp, DiagonalLinOp
 # We start by sampling an (approximately) low-rank matrix using
 # :class:`skerch.synthmat.RandomLordMatrix`. This is very convenient since
 # it allows us fine control over the rank, spectral decay, symmetry and
-# diagonal strength.
+# diagonal strength (see :ref:`Synthetic Matrices`).
 #
 # Then we create a bare-bones linear operator from that matrix, to illustrate
 # that most existing routines have more restrictive interfaces:
@@ -111,11 +112,11 @@ except AttributeError as te:
 # --------------------------------
 #
 # We now compute the in-core sketched SVD via :func:`skerch.algorithms.ssvd`.
-# Since the ``torch`` alternatives don't run on ``lop``, we compare their
-# runtime and performance running them on ``mat``.
-# Note that, as already established, this is not a fair comparison in the
-# sense that ``torch`` implementations do not run on our bare-minimum
-# linop interface and may be optimized for tensors (e.g. via JIT compilation):
+# Since the ``torch`` alternatives don't run on the bare-bones ``lop``
+# interface, we run them using the explicit ``mat``.
+# Note that, as already established, this is not a fair comparison in terms
+# of scope (plus they may also be optimized for tensors, e.g. via JIT
+# compilation).
 
 t0 = time()
 U1, S1, Vh1 = torch.linalg.svd(mat)
@@ -159,6 +160,12 @@ fig.tight_layout()
 
 # %%
 #
+# Despite this not being a fair comparison, we see that ``skerch`` yields
+# competitive results in terms of high speed and low error.
+
+
+# %%
+#
 # ##############################################################################
 #
 # Approximate error analysis
@@ -171,9 +178,9 @@ fig.tight_layout()
 # point of ``skerch`` here, this kind of exact error analysis is not always
 # possible, and we resort to approximate *a posteriori* methods
 # (see :mod:`skerch.a_posteriori` for more details).
-# As usual with ``skerch``, we only require that the input components
-# implement the ``.shape = (height, width)`` attribute and the ``@`` matmul
-# operator:
+# Crucially, this also works on the bare-bones interface: we only require
+# that the input components implement the ``.shape = (height, width)``
+# attribute and the ``@`` matmul operator:
 
 lop1 = CompositeLinOp([("U", U1), ("S", DiagonalLinOp(S1)), ("Vh_k", Vh1)])
 lop2 = CompositeLinOp([("U", U2), ("S", DiagonalLinOp(S2)), ("Vh_k", Vh2.H)])
@@ -233,7 +240,8 @@ apost_error_bounds(TEST_MEAS, 0.5)
 #
 # These upper and lower bounds can be used to estimate the effective rank of
 # the original operator, e.g. by looking for "elbows" in the scree curve.
-# case we have a simple synthetic matrix, we can see how the scree bounds
+# In this case, we have a simple synthetic matrix and a good sketched
+# apporximation, so we can see how the scree bounds
 # accurately and clearly reflect the given ``RANK`` of the original operator
 # (signaled with a vertical line):
 
@@ -245,7 +253,7 @@ scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
 
 fig, ax = plt.subplots(figsize=(8, 3))
 ax.plot(scree_lo.cpu(), label="lower", ls="--", linewidth=2)
-ax.plot(scree_true.cpu(), label="ACTUAL", linewidth=2)
+ax.plot(scree_true.cpu(), label="actual", linewidth=2)
 ax.plot(scree_hi.cpu(), label="higher", ls="--", linewidth=2)
 ax.axvline(RANK, color="red", linewidth=2)
 ax.set_yscale("log")
@@ -260,11 +268,10 @@ ax.legend()
 #
 # * We have seen how to perform sketched SVDs with ``skerch`` on linear
 #   operators that support a bare-minimum interface. This is not directly
-#   possible with other ``torch`` implementations.
-# * We observed that the ``skerch`` implementation provides recoveries that
-#   are competitive with full-blown SVDs, with runtimes that are competitive
-#   with sketched SVDs. While ``skerch`` does worse on both fronts, it
-#   has bare-minimum requirements on the interface of the linear operators
-#   provided.
+#   possible with other ``torch`` implementations
+# * We observed that the ``skerch`` implementation has bare-minimum
+#   requirements on the interface of the linear operators provided, working
+#   where other implementations don't, with competitive runtime and accuracy
 # * We also demonstrated matrix-free, scalable methods to verify the quality
-#   of the approximation and to estimate the rank of the original operator.
+#   of the sketched approximation and to estimate the rank of the original
+#   operator

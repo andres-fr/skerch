@@ -3,17 +3,18 @@
 r"""Linear Operators and Matrix-Freedom
 =======================================
 
-In this example we explore the rich linear operator API available in
-``skerch``, specifically:
+In this example we explore some of the functionality from the ``skerch``
+linear operator API, specifically:
 
-* Creation of a ``skerch``-compatible linear operator
+* Creation of a ``skerch``-compatible linear operator (bare-minimum interface)
 * Matrix-free transposition
-* Wrapping numpy-only linear operators into PyTorch
-* Matrix-free composition and addition of linear operators
+* Wrapping NumPy-only linear operators into PyTorch
+* Composition and addition of linear operators
 * Matrix-free diagonal linear operators
 * Matrix-free noisy linear operators for sketching
 
-This functionality allows us to work with linear operators at scale.
+This functionality allows us to perform sketches and  work with linear
+operators at scale.
 """
 
 from time import time
@@ -39,7 +40,9 @@ from skerch.algorithms import snorm
 # Creating a ``skerch``-compatible linop
 # --------------------------------------
 #
-# To work with ``skerch``, linear operators must satisfy only 2 requirements:
+# To work with ``skerch``, linear operators must satisfy only 2 requirements,
+# resulting in a *bare-minimum linop interface*:
+#
 # * They must support left- and right-matrix multiplication via ``@``
 # * They must feature a ``.shape = (height, width)`` attribute
 #
@@ -63,11 +66,17 @@ fig.tight_layout()
 
 
 # %%
-# But often we don't have full matrices. Instead, we have some matrix-free
-# linear operator at a potentially very large scale, defined by its shape
-# and matmul functionality. As an example, the following matrix-free operator
-# will be compatible with all numerical routines provided in ``skerch``,
-# because it provides ``.shape`` and ``@``:
+# But matrices also allow for other operations such as arbitrary
+# indexing like ``mat[5, 7]``. This is something that many linear operators
+# don't or cannot provide without substantial overhead.
+#
+# In those restricted cases, we are dealing with a *matrix-free* linear
+# operator, of potentially very large scale, defined mainly by its dimensions
+# and matmul functionality.
+#
+# As an example, the following linop implements the bare-minimum interface.
+# We see that, despite this limitation, we can successfully apply
+# :func:`skerch.algorithms.snorm` to estimate its operator norm:
 
 
 class SomeLinOp:
@@ -99,15 +108,12 @@ op_norm = snorm(
     noise_type="gaussian",
     norm_types=["op"],
 )[0]["op"]
-print("Lop norm:", torch.linalg.svdvals(lopmat).max().item())
+print("Actual norm:", torch.linalg.svdvals(lopmat).max().item())
 print("Sketched norm:", op_norm.item())
 
-fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 4))
-ax1.plot(ramp.cpu(), label="original")
-ax1.plot(lop @ ramp.cpu(), label="scaled and flipped")
-ax2.imshow(lopmat, aspect="auto")
-ax1.legend()
-fig.suptitle("The matrix-free linop and its action")
+fig, ax = plt.subplots(figsize=(8, 4))
+ax.imshow(lopmat)
+fig.suptitle("The linear operator, in matrix form")
 fig.tight_layout()
 
 
@@ -123,7 +129,7 @@ fig.tight_layout()
 
 lopT = TransposedLinOp(lop)
 
-fig, (ax1, ax2) = plt.subplots(ncols=2)
+fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.imshow(linop_to_matrix(lop, dtype=ramp.dtype, device="cpu"))
 ax2.imshow(linop_to_matrix(lopT, dtype=ramp.dtype, device="cpu"))
 fig.suptitle("The linear operator and its transpose")
@@ -137,7 +143,8 @@ fig.tight_layout()
 # ---------------
 #
 # Since ``skerch`` is built on PyTorch, it won't directly work on numpy
-# linops that don't accept PyTorch inputs. This can be solved with the wrapper:
+# linops that don't accept PyTorch inputs. This can be solved with the
+# wrapper, which also tracks the ``torch.device``:
 
 
 class NumpyFlipLinOp:
@@ -176,7 +183,7 @@ print("Wrapped linop on torch data:", torch_lop @ ramp)
 #
 # We can perform matrix-free compositions and additions of linear operators.
 # Other matrix-free structured linops, such as diagonal and banded, are also
-# available (see :module:`skerch.linops`):
+# available (see :mod:`skerch.linops`). Here we exemplify composition:
 
 k = 2
 U, S, Vh = torch.linalg.svd(mat.cpu())
@@ -188,7 +195,7 @@ lop_k = CompositeLinOp(
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.imshow(mat.real.cpu())
 ax2.imshow(linop_to_matrix(lop_k, dtype=mat.dtype, device="cpu").real)
-fig.suptitle(f"Matrix and its top-{k} matrix-free approximation [{lop_k}]")
+fig.suptitle(f"Matrix and its rank-{k} matrix-free approximation [{lop_k}]")
 fig.tight_layout()
 
 # %%
@@ -200,17 +207,15 @@ fig.tight_layout()
 #
 # In order to run the sketches, ``skerch`` provides built-in support for noisy
 # measurements in the form of matrix-free linear operators. In order to
-# facilitate parallelized measurements, these linops are a bit more
-# restrictive: besides the ``.shape`` and ``@`` properties required by all
-# ``skerch`` linops, they must also implement a ``get_blocks`` iterator, that
-# yields blocks of columns and their indices.
+# facilitate parallelized measurements, these linops have a bit more
+# restrictive requirements than the *bare-minimum* interface discussed above:
+# Besides the ``.shape`` and ``@`` properties required by all
+# ``skerch`` linops, they also must also implement a ``get_blocks`` iterator,
+# that yields blocks of columns with their indices.
 #
-# A good way to add new types of noise into existing ``skerch`` algorithms is
-# then to extend :class:`skerch.linops.ByBlockLinOp` with ``get_blocks``,
-# and then extending :class:`skerch.algorithms.SketchedAlgorithmDispatcher`
-# adding the newly created type of noise to the register (see e.g. the
-# source code for :class:`skerch.measurements.RademacherNoiseLinOp` and
-# :func:`skerch.algorithms.snorm` for examples).
+# A good way to satisfy this interface and add a new noise type to ``skerch``
+# is to extend :class:`skerch.linops.ByBlockLinOp` with ``get_block`` (see
+# :ref:`Extending With Custom Functionality` for an example).
 #
 # The figure below illustrates some of the already supported types of noise:
 
@@ -225,6 +230,11 @@ ax1.imshow(mop1.to_matrix(DTYPE, "cpu").real)
 ax2.imshow(mop2.to_matrix(DTYPE, "cpu").real)
 ax3.imshow(mop3.to_matrix(DTYPE, "cpu").real)
 ax4.imshow(mop4.to_matrix(DTYPE, "cpu").real)
+#
+ax1.set_title("Rademacher")
+ax2.set_title("Gaussian")
+ax3.set_title("Phase")
+ax4.set_title("SSRFT")
 fig.suptitle(f"Different types of noise matrices")
 fig.tight_layout()
 
@@ -232,7 +242,8 @@ fig.tight_layout()
 # %%
 # And the line below illustrates the behaviour of ``get_blocks``:
 
-mop1_blocks_info = [(b.shape, idxs) for b, idxs in mop1.get_blocks(DTYPE)]
+[(b.shape, idxs) for b, idxs in mop1.get_blocks(DTYPE)]
+
 
 # %%
 # To illustrate the necessity of blockwise measurements, consider the
@@ -267,10 +278,10 @@ fig.tight_layout()
 # API docs and other examples. for more details. In summary:
 #
 # * We have seen how to create simple matrix-free linops, so
-#   that they are compatible with the ``skerch`` routines.
+#   that they are compatible with the ``skerch`` routines
 # * We also saw how to manipulate said linops, by transposing them, converting
 #   them to matrices and wrapping them to ensure NumPy compatibility
 #   in-core sketched methods for a broad class of low-rank matrices
 # * We explored other available linear operators, including compositions and
 #   noisy measurement linops, emphasizing the benefit of blockwise
-#   measurements.
+#   measurements

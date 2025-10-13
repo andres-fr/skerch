@@ -13,23 +13,24 @@ variety of very useful objects such as the Hessian, the Jacobian and the
 Generalized Gauss-Newton (GGN). It is also implemented with PyTorch as a
 backend, but the ``curvlinops`` operators actually implement SciPy's
 `LinearOperator <https://docs.scipy.org/doc/scipy-1.15.2/reference/generated/scipy.sparse.linalg.LinearOperator.html>`_
-interface, so they can also be used with most of the LinAlg routines available
-in SciPy.
+interface, so not only they are compatible with ``skerch``: they can also be
+used with most of the LinAlg routines available in SciPy.
 
 In this example, we show how to obtain an accurate and full Hessian
 eigendecomposition from a deep learning setup, using ``skerch``'s
-sketched EIGH combined with ``curvlinops``. The full example runs in under
-a minute on CPU, and it can also be GPU-accelerated thanks to the ``pytorch``
-backend.
+sketched EIGH combined with ``curvlinops``. To verify the high quality of the
+resulting sketched approximation, we apply the *a-posteriori* test method
+discussed in :ref:`Sketched Low-Rank Decompositions` (see also
+:mod:`skerch.a_posteriori`).
 
-To verify the quality of our approximation, we apply the *a-posteriori* test
-method already discussed in :ref:`Sketched Low-Rank Decompositions`.
-
-The result is a pretty good and quick approximation, at scales that would
-otherwise be very slow/large, or even intractable. This procedure also
-scales to much larger networks (with parameters up to the millions) and
-datasets (with thousands of samples) see e.g.
-`this paper <https://openreview.net/forum?id=yGGoOVpBVP>`_.
+This small-scale example, which runs in under a minute on CPU, is already
+borderline intractable using traditional linear algebra routines. Thanks to
+the ``pytorch`` backend, we can also use GPU acceleration with minimal
+changes reaching substantially larger scales. And we can also reach even
+larger scales if we make use of out-of-core, distributed computations (see
+:ref:`Out-of-core Operations via HDF5` for guidelines and
+`this paper <https://openreview.net/forum?id=yGGoOVpBVP>`_ for an application
+example).
 """
 
 import matplotlib.pyplot as plt
@@ -105,8 +106,10 @@ print("Number of Hessian entries:", num_params**2)
 # While ``CurvLinOps`` interfaces with ``SciPy/NumPy``, ``skerch`` does expect
 # that the linear operators input and output ``PyTorch`` tensors. To overcome
 # this discrepancy, ``skerch`` provides a
-# :class:`skerch.linops.TorchLinOpWrapper` class. With this, ``seigh``
-# can be directly applied to the wrapped ``CurvLinOps`` operator!
+# :class:`skerch.linops.TorchLinOpWrapper` class that simply converts between
+# ``SciPy/NumPy`` and ``PyTorch`` at input/output, and keeps track of the
+# right device. With this, ``seigh`` can be directly applied to the wrapped
+# ``CurvLinOps`` operator!
 
 
 class TorchHessianLinearOperator(TorchLinOpWrapper, HessianLinearOperator):

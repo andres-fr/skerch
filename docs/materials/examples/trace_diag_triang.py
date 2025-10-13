@@ -4,18 +4,18 @@ r"""Traces, Diagonals, Triangles
 ================================
 
 In this example we explore the following ``skerch`` functionality:
+
 * Trace and diagonal estimations
-* Triangular matrix-vectors
+* Triangular matrix-vector multiplications
 
 Given a linear operator :math:`A`, we first perform the trace and diagonal
 estimation using variations of the Girard-Hutchinson sketched method. The
 computations needed for both estimations are very similar and can be mostly
 recycled to compute both quantities at once.
-
 To illustrate the benefits of low-rank deflation for diagonal estimation, we
 run these methods on a full-rank and a low-rank matrix.
 
-Then, we move onto triangular mat-vec estimation :math:`tril(A) v` and
+Then, we move onto triangular mat-vec estimation, i.e. :math:`tril(A) v` and
 :math:`triu(A) v`, which also makes use of a modification of Girard-Hutchinson
 combined with deterministic measurements.
 
@@ -25,11 +25,12 @@ actual quantities.
 .. note::
   One core feature of Girard-Hutchinson is its rather slow convergence rate:
   in general, doing just a few noisy measurements can introduce large amounts
-  of error (especially if the noise spans multiple orders of magnitude).
+  of error and be worse that not doing it at all (especially if entries in
+  the measurement vectors span multiple orders of magnitude).
   To obtain reliable estimates at scale, typically measurements must be
   in the order of thousands (see Table 1 in
   `[BN2022] <https://arxiv.org/abs/2201.10684>`_ for bounds). This is still
-  fine for linear operators with larger ambient dimension.
+  fine nonetheless for linear operators with large ambient dimension.
 """
 
 from time import time
@@ -161,12 +162,12 @@ beg, end = 0, 80
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(mat_diag[beg:end].cpu(), color="black", label="original")
 ax1.plot(diag1[beg:end].cpu(), color="pink", linestyle="--", label="approx")
-ax1.set_title("Smooth")
+ax1.set_title("Smooth spectral decay")
 ax1.legend()
 ax2.plot(lomat_diag[beg:end].cpu(), color="black", label="original")
 ax2.plot(diag2[beg:end].cpu(), color="pink", linestyle="--", label="approx")
 ax2.legend()
-ax2.set_title("Steep")
+ax2.set_title("Steep spectral decay")
 fig.suptitle("Hutch++ diagonal approximations for unitary and low-rank linops")
 fig.tight_layout()
 
@@ -217,7 +218,7 @@ w1_err = relerr(w1, ltri_w1, squared=False).item()
 w2_err = relerr(w2, ltri_w2, squared=False).item()
 
 
-beg, end = 0, 200
+beg, end = 0, 100
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(w1[beg:end].cpu(), color="black", label="original")
 ax1.plot(ltri_w1[beg:end].cpu(), color="pink", linestyle="--", label="approx")
@@ -241,6 +242,7 @@ print("Lower-triangular relative error (adjoint):", w2_err)
 # And we are done!
 #
 # * We have seen how to estimate traces, diagonals and triangular matrix
-#   multiplications using ``skerch``.
+#   multiplications using ``skerch``, and only requiring the *bare-minimum*
+#   interface for linear operators
 # * We illustrated the effectiveness of low-rank deflation as well as the
-#   tendency of Girard-Hutchinson to need more measurements.
+#   tendency of Girard-Hutchinson to need more measurements

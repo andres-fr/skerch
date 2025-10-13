@@ -3,12 +3,11 @@
 r"""Command Line Interface
 ==========================
 
-This example demonstrates the ``skerch`` functionality that can be directly
-accessed from the command line interface (CLI).
+This example demonstrates ``skerch`` functionality directly accessible
+from the command line interface (CLI).
 
-The commands showcased here use functionality that can also be directly
-accessed from Python at the following modules (check the API docs for
-comprehensive information):
+Note that all CLI functionality can also be directly accessed from Python.
+Check the API docs for comprehensive information, e.g.:
 
 * :mod:`skerch.a_posteriori`
 * :mod:`skerch.hdf5`
@@ -75,9 +74,8 @@ skerch_main(["-h"])
 skerch_main(["post_bounds", "--apost_n=30", "--apost_err=0.5", "--is_complex"])
 
 # %%
-#
 # This can be interpreted as follows: If we performed 30 test measurements and
-#  got an error estimate of :math:`\hat{\varepsilon}`, the probability
+# got an error estimate of :math:`\hat{\varepsilon}`, the probability
 # of the *actual* error :math:`\varepsilon` being outside of the
 # :math:`(0.5\hat{\varepsilon}, 1.5\hat{\varepsilon})` range is as provided.
 
@@ -152,7 +150,7 @@ skerch_main(
 # It will still have the same contents, but instead of being a collection of
 # HDF5 files bundled into a virtual dataset, it will be a single, monolithic
 # HDF5 file with contiguous data. The following command merges the previously
-#  created left-outer measurement layout::
+# created left-outer measurement layout::
 #
 #   python -m skerch merge_hdf5 --delete_subfiles --ok_flag=initialized \
 #          --in_path /tmp/tmp4fswvvk2/leftouter_ALL.h5

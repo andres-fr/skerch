@@ -29,10 +29,10 @@ from skerch.synthmat import RandomLordMatrix
 # --------------------------------------
 #
 # The :class:`skerch.synthmat.RandomLordMatrix` class allows to generate
-# matrices in the form :math:`L + \xi D`, where :math:`D` is diagonal and
+# matrices in the form :math:`L + \alpha D`, where :math:`D` is diagonal and
 # :math:`L` is approximately low-rank,has ``RANK`` singular values fixed to 1,
 # followed by a configurable spectral decay.
-# The :math:`\xi` scalar (in the code: ``diag_ratio``) represents the
+# The :math:`\alpha` scalar (in the code: ``diag_ratio``) represents the
 # *diagonal dominance* of the matrix: the larger, the closer to a diagonal.
 
 SEED = 1337

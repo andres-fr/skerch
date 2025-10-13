@@ -5,10 +5,10 @@ r"""Out-of-core Operations via HDF5
 
 In-core operations are generally faster and convenient, but they have
 limited scalability: if we distribute our operations across several machines,
-we can make use of more memory, and parallelize computations.
+we can make use of more memory and parallelize computations.
 This is particularly relevant for sketched methods, in the cases where
-linear operators have intractable sizes and/or it takes a long time to
-perform linear measurements.
+linear operators have intractable sizes and/or linop evaluations take a
+long time.
 
 `HDF5 <https://www.h5py.org/>`_ is a popular way to store numerical data
 persistently. From Python, it looks mostly like a NumPy array, but it is

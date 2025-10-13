@@ -9,10 +9,9 @@ Specifically:
 * Adding a new recovery method for low-rank sketched algorithms
 * Adding a new noise source
 
-This showcases the practicality of ``skerch``: Not only it works on linops
-that satisfy very simple interfaces with fair speed and accuracy,
-but it can also be easily extended and modified to facilitate new applications
-and research directions.
+This showcases the versatility of ``skerch``: Not only it works on linops
+that satisfy very simple interfaces but it can also be extended
+and modified with low coding overhead.
 """
 
 from collections import defaultdict
@@ -71,8 +70,9 @@ print(
 # Testing a new recovery method
 # -----------------------------
 #
-# Let's now test a wild theory: since random matrices are so cool, maybe a
+# Let's now test a new theory: Since random matrices are so cool, maybe a
 # random sample is also a good recovery? With ``skerch``, all we need to do is:
+#
 # 1. Define our new recovery method
 # 2. Extend the dispatcher to provide the recovery as needed
 # 3. Feed the requested string and dispatcher to the existing SVD algorithm
@@ -121,15 +121,15 @@ print(
 
 # %%
 #
-# Oops! It seems that BogoRecovery is not a good method, and we should
+# Oops! It seems that ``bogo_recovery`` is not a good method, and we should
 # stick to the big guns. Good to know, and all in a couple dozen lines
 # of code!
 #
 # .. note::
 #   Currently, recovery methods and dispatcher must fulfill particular
 #   interfaces (see :mod:`skerch.recovery` for examples). To try methods
-#   that deviate from those, the best practice is probably to copypaste
-#   the ``ssvd`` function and adjust the parts that break compatibility.
+#   that deviate from those, the best practice is probably copypasting
+#   the ``ssvd`` function and adjusting the parts that break compatibility.
 
 
 # %%
@@ -140,11 +140,12 @@ print(
 # --------------------------------------
 #
 # OK but hear me out: since random matrices are so cool, maybe some other
-# arbitrary form of noise also provides a good recovery? Or maybe you
-# suspect that a particular type of noise is best suited for a particular
-# family of linear operators? With ``skerch``, this can be easily tested:
-# 1. Define our new measurement linop by extending
-#   :class:`skerch.measurements.ByBlockLinOp`
+# arbitrary form of random measurement also provides a good recovery? Or
+# maybe we suspect that a particular type of noise is best suited for a
+# particular setting of linear operators and algorithms? With ``skerch``,
+# this can be easily tested:
+#
+# 1. Define our new measurement linop by extending :class:`skerch.linops.ByBlockLinOp`
 # 2. Extend the dispatcher to provide the measurement linop as needed
 # 3. Feed the requested string and dispatcher to the existing SVD algorithm
 
@@ -207,8 +208,16 @@ print(
 
 # %%
 #
-# So this actually works? Maybe random matrices aren't that bad after
+# So this actually works! Maybe random matrices aren't that bad after
 # all...
+#
+# .. note::
+#   While ``skerch`` only requires the bare-minimum interface of
+#   ``.shape = (height, width)`` and ``@`` matmul for its *inputs*, the
+#   interface for its *measurement linops* is marginally more complex:
+#   in order to support batched measurements, new measurement linops are
+#   also expected to implement a ``get_blocks`` iterator, as shown in this
+#   example (see also :ref:`Linear Operators and Matrix-Freedom`).
 
 
 # %%
@@ -220,9 +229,9 @@ print(
 # -----------
 #
 # * We have seen how to extend ``skerch`` with new low-rank recovery methods
-#   with just a few lines of code.
-# * Similarly, we can also add new noise sources with little effort.
+#   with just a few lines of code
+# * Similarly, we can also add new noise sources with little effort
 # * Still, some interfaces must be satisfied to run built-in code. Whenever
 #   your interfaces collide (e.g. you require a new type of input), best
 #   advice is to copypaste and modify the algorithm, which thanks to the
-#   modularity of ``skerch`` is also fairly low-effort.
+#   modularity of ``skerch`` is also fairly low-effort
