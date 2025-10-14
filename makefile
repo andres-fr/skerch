@@ -54,7 +54,7 @@ docs-prepare:
 	@sphinx-apidoc -M -o $(DOCSDIR) skerch -T \
 		-t docs/materials/apidoc_templates
 	@cp docs/materials/*.rst $(DOCSDIR)
-	# Add metadata to all rst files ("edit on GitHub" link):
+	#  Add metadata to all rst files ("edit on GitHub" link):
 	for path in $(shell find $(DOCSDIR) -iname "*.rst");
 	do
 	  @echo "adding GH link to" $$path
@@ -73,12 +73,19 @@ docs-html:
 
 .PHONY: docs-pdf
 docs-pdf:
-	@sphinx-build -M latexpdf $(DOCSDIR) $(DOCSDIR)/_build \
+	# run sphinx to generate latex files, but no pdflatex yet
+	@sphinx-build -M latex $(DOCSDIR) $(DOCSDIR)/_build \
 	    -D html_theme="sphinx_rtd_theme" \
 	    -D html_favicon=../materials/assets/favicon.ico \
 	    -D html_logo=../materials/assets/skerch_horizontal.svg \
 	    -D suppress_warnings="autosectionlabel" \
-	    -D html_theme_options.logo_only=true
+	    -D html_theme_options.logo_only=true \
+	# Manually invoke pdflatex with nonstopmode to skip errors, and
+	# run several times to ensure references are processed
+	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
+	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
+	@cd $(DOCSDIR)/_build/latex && makeindex skerch.idx
+	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
 
 .PHONY: docs
 docs: docs-prepare docs-html docs-pdf
