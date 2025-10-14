@@ -58,7 +58,7 @@ class SketchedAlgorithmDispatcher:
         """Returns recovery funtion with given specs.
 
         :param recovery_type: String specifying which recovery type to be used
-          (e.g. "singlepass", "nystrom", "oversampled_500").
+          (e.g. ``"singlepass"``, ``"nystrom"``, ``"oversampled_500"``).
         :returns: A tuple ``(fn, inner_dims)``, where ``fn`` is a recovery
           function with the same interface as the ones in
           :mod:`skerch.recovery`. If ``inner_dims`` is None, ``fn`` should
@@ -88,6 +88,7 @@ class SketchedAlgorithmDispatcher:
 
         The returned linop must follow the same interface as
         :class:`skerch.linops.ByBlockLinOp`, i.e. must support:
+
         * Left and right matmul to matrices via ``@``
         * A ``get_blocks(dtype, device)`` method that returns pairs in the form
           ``(block, idxs)``, where ``block`` is a subset of vectors, assumed to
@@ -95,11 +96,17 @@ class SketchedAlgorithmDispatcher:
           ``idxs``.
 
         :param mop_type: A string defining the measurement linop type (e.g.
-          "rademacher", "gaussian", "ssrft", "phase").
+          ``"rademacher"``, ``"gaussian"``, ``"ssrft"``, ``"phase"``).
         :param hw: Tuple ``(height, width)`` with the desired linop shape.
         :param seed: Random seed for the measurement linop.
-        :param blocksize: See :class:`skerch.linops.ByBlockLinOp`.
-        :param register: See :class:`skerch.measurements.RademacherNoiseLinOp`.
+        :param blocksize: How many measurements should be done at once.
+          Ideally, as many as it fits in memory.
+          See :class:`skerch.linops.ByBlockLinOp` for more details.
+        :param register: Whether to register this linop in a global tracker
+          that will raise an exception if other linops with overlapping
+          seeds have been already created (useful to debug new methods
+          if they have issues due to correlated noise). See
+          :class:`skerch.measurements.RademacherNoiseLinOp`.
         """
         supported = "rademacher, gaussian, ssrft, phase"
         if mop_type == "rademacher":
@@ -642,33 +649,39 @@ def snorm(
 class TriangularLinOp(BaseLinOp):
     r"""Given a square linop, compute products with one of its triangles.
 
-    The triangle of a linear operator can be approximated from the full operator
-    via a "staircase pattern" of exact measurements, whose computation is exact
-    and fast. For example, given an operator of shape ``(1000, 1000)``, and
-    stairs of size 100, yields 9 exact measurements strictly under the diagonal,
-    the first one covering ``lop[100:, :100]``, the next one
-    ``lop[200:, 100:200]``, and so on. The more measurements, the more closely
-    the full triangle is approximated.
+    The triangle of a linear operator can be approximated from the full
+    operator via a "staircase pattern" of exact measurements. For example,
+    given an operator of shape ``(1000, 1000)``, and
+    stairs of size 100, we could obtain 9 exact measurements strictly under
+    the diagonal, the first one covering ``lop[100:, :100]``, the next one
+    ``lop[200:, 100:200]``, and so on. And we would leave out only 9 small
+    triangles near the diagonal in a sort of "serrated" pattern.
+    The smaller the stair size, the more measurements we do and the more
+    closely the full triangle is approximated (a stair size of 1 results
+    in an exact method, doing full measurements).
 
-    Note that this staircase pattern leaves a block-triangular section of the
-    linop untouched (near the main diagonal). This part can be then estimated
-    with the help of  :func:`serrated_hadamard_pattern`, completing the
-    triangular approximation, as follows:
-
-
-    Given a square linear operator :math:`A`, and random vectors
-    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^T] = I`, consider
-    the generalized Hutchinson diagonal estimator:
+    The interesting thing is that the "serrated" part can be estimated
+    with a variation of the Girard-Hutchinson estimator:
 
     .. math::
 
       f(A) =
-      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(v) \odot Av \big]
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \varphi(\bar{v}) \odot Av \big]
 
-    In this case, if the :math:`\varphi` function follows a "serrated
-    Hadamard pattern", :math:`f(A)` will equal a block-triangular subset of
-    :math:`A`.
+    Where :math:`\varphi` follows a
+    :func:`skerch.utils.serrated_hadamard_pattern`.
+    By linearity, it can be shown that this expectation samples entries of
+    :math:`A` from the block-triangles near the diagonal.
 
+    Finally, we add the exact step-wise measurements and the
+    serrated Girard-Hutchinson estimation, resulting in a triangular
+    estimation.
+
+    Usage example::
+
+      lop = MyLinOp("...")
+      lop_tril = TriangularLinOp(lop, stair_width=10, num_gh_meas=1000)
+      w = lop_tril @ v
 
     :param lop: A square linear operator of order ``dims``, such that
       ``self @ v`` will equal ``triangle(lop) @ v``. It must implement a
@@ -681,11 +694,10 @@ class TriangularLinOp(BaseLinOp):
       regulates this trade-off: Ideally, we want as many exact measurements
       as possible, but not too many. If no value is provided, ``dims // 2``
       is chosen by default, such that only 1 exact measurement is performed.
-    :param num_hutch_measurements: The leftover entries from the
-      staircase measurements are approximated here using an extension of
-      the Hutchinson diagonal estimator. This estimator generally requires
+    :param num_hutch_measurements: Number of measurements for the
+      serrated estimation. This estimator generally requires
       many measurements to be informative, and it can even be counter-
-      productive if not enough measurements are given. If ``lop``is not
+      productive if not enough measurements are given. If ``lop`` is not
       diagonally dominant, consider setting this to 0 for a sufficiently
       good approximation via ``staircase_measurements``. Otherwise,
       make sure to provide a sufficiently high number of measurements.
@@ -695,10 +707,15 @@ class TriangularLinOp(BaseLinOp):
       in the triangle, otherwise excluded. If you already have precomuted
       the diagonal elsewhere, consider excluding it from this approximation,
       and adding it separately.
-    :param seed: Seed for the random SSRFT measurements used in the
-      Hutchinson estimator.
     :param use_fft: Whether to use FFT for the Hutchinson estimation. See
-      :func:`subdiag_hadamard_pattern` for more details.
+      :func:`skerch.utils.subdiag_hadamard_pattern` for more details.
+    :param seed: Seed for the random measurements used in the
+      serrated estimator.
+    :param noise_type: String indicating noise type to be used in the
+      serrated estimator. Must be supported by the given ``dispatcher``.
+    :param meas_blocksize: How many serrated measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
     """
 
     LOP_REPR_CHARS = 30
@@ -801,7 +818,11 @@ class TriangularLinOp(BaseLinOp):
         lower=True,
         use_fft=False,
     ):
-        """Helper method to perform serrated Girard-Hutchinson measurements."""
+        """Helper method to perform serrated measurements.
+
+        It is a variation of the Girard-Hutchinson diagonal estimator, see
+        class docstring for more details.
+        """
         dtype, device = x.dtype, x.device
         result = torch.zeros_like(x)
         for block, idxs in mop.get_blocks(dtype, device):

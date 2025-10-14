@@ -407,7 +407,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 
     Given a square linear operator :math:`A`, and random vectors
     :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^H] = I`, consider
-    this generalized formulation of the Hutchinson diagonal estimator:
+    this generalized formulation of the Girard-Hutchinson diagonal estimator:
 
     .. math::
 
@@ -478,7 +478,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
 def serrated_hadamard_pattern(
     v, blocksize, with_main_diagonal=True, lower=True, use_fft=False
 ):
-    """Shifted copies of vectors for block-triangular Hutchinson estimation.
+    """Shifted copies of vectors for block-triangular Girard-Hutchinson.
 
 
     :param v: Torch tensor expected to contain zero-mean, uncorrelated entries.
