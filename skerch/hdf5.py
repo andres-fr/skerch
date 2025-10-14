@@ -30,11 +30,15 @@ class DistributedHDF5Tensor:
     See docs for more examples, also on how to create and merge HDF5 datasets
     directly from command line.
 
-    In the virtual mode, all files are created in the same directory following
-    a consistent naming convention, and this is expected to remain unchanged.
-    Since this class is naturally intended for multiple concurrent
-    processes/devices, it is designed in the form of a static class.
+    .. note:
 
+      This class creates all files with a given naming pattern that should
+      not be modified. All files are created, and expected to be in the same
+      directory, which should be uniquely dedicated to a particular dataset.
+      To ensure correct function, avoid manual modification of filepaths
+      and use this class to create, modify and merge datasets.
+      Since this is a static class, it can also work across multiple
+      concurrent processes/devices.
     """
 
     MAIN_PATH = "ALL"
@@ -56,7 +60,7 @@ class DistributedHDF5Tensor:
 
     @staticmethod
     def get_idxs_format(max_idx):
-        """ """
+        """Helper method, retrieves format strings to index HDF5 chunks."""
         result = (
             "{0:0" + str(len(str(max_idx)) + 1) + "d}-"
             "{1:0" + str(len(str(max_idx)) + 1) + "d}"
@@ -74,19 +78,22 @@ class DistributedHDF5Tensor:
     ):
         """Create a distributed HDF5 measurement dataset.
 
-        :param str base_path: Format string with the path to store created HFG5
-          files, in the form ``<DIR>/my_dataset_{}.h5``.
-        :param num_files: Number of HDF5 files to be created, each
-          corresponding to one measurement.
-        :param shape: Shape of the global tensorarray inside each individual
-          file. For linear measurements, this is a vector, e.g. ``(1000,)``.
+        :param basepath_fmt: Format string with the directory and dataset
+          name to store created HDF5 files, in the form
+          ``<DIR>/my_dataset_{}.h5``. Directory must be empty.
+        :param shape: Shape of the global tensor corresponding to the whole
+          HDF5 dataset.
+        :param partition_size: The HDF5 dataset will be partitioned across
+          its first axis on sub-files. E.g. a shape of ``(10, 20)`` with a
+          partition size of 6 will result in 2 files of shapes ``(6, 20)``
+          and ``(4, 20)``.
         :param dtype: Datatype of the HDF5 arrays to be created.
-        :param filedim_last: If true, the virtual dataset result of merging
-          all files will be of shape ``shape + (num_files,)``. Otherwise,
-          ``(num_files,) + shape``.
-        :returns: The pair ``(all_path, subpaths)``, where ``all_path`` is the
-          path of the virtual dataset encompassing all subpaths, which
-          correspond to the individual files.
+        :returns: The tuple ``(all_path, subpaths, begs_ends)``, where
+          ``all_path`` is the  path of the virtual dataset encompassing
+          the global tensor, ``subpaths`` are the paths to the respective
+          chunk HDF5 files, and ``begs_ends`` are the begining (included)
+          and end (excluded) indices that were used to partition the global
+          tensor on subfiles, across its first axis.
         """
         # extract total idxs and figure how are they partitioned into subfiles
         max_idx = shape[0]
@@ -145,12 +152,12 @@ class DistributedHDF5Tensor:
 
     @classmethod
     def load(cls, path, filemode="r+"):
-        """Load an individual dataset.
+        """Load the given HDF5 dataset.
 
-        Load an individual dataset, such as the ones created via
-        :meth:`.create` or merged via :meth:`merge_all`.
+        Load an individual dataset, such as the virtual ones created via
+        :meth:`.create` or the monolithic ones merged via :meth:`merge`.
 
-        :param path: One of the subpaths returned by :meth:`.create`.
+        :param path: Path to the HDF5 file.
         :param filemode: Default is 'r+', read/write, file must preexist. See
           documentation of ``h5py.File`` for more details.
         :returns: ``(data, flag, h5f)``, where ``data`` is the dataset
@@ -178,16 +185,19 @@ class DistributedHDF5Tensor:
         """Merges distributed HDF5 dataset into a single, monolithic HDF5 file.
 
         :param all_path: The ``all_path`` of a virtual HDF5 dataset like the
-          ones created via :meth:`.create`.
+          ones created via :meth:`.create`. It must be a "virtual" dataset,
+          i.e. composed of chunks that are distributed across other files.
         :param out_path: If None, merged dataset will be written over the given
-          ``all_path``. Otherwise, path of the resulting HDF5 monolithic file.
+          ``all_path``, i.e. it will be converted from virtual into monolithic
+          in-place. Otherwise, path for a new HDF5 monolithic file where
+          the contents will be written into.
         :param check_success_flag: If given, this method will check that all
-          HDF5 flags equal this value, raise an ``AssertionError`` otherwise.
+          HDF5 flags equal this value, raise an error otherwise.
         :param bool delete_subfiles_while_merging: If true, each distributed
           HDF5 file that is visited will be deleted right after it is merged
           onto the monolithic HDF5 file. Useful to avoid large memory
           overhead.
-        :returns: ``out_path``.
+        :returns: Path of the merged HDF5 file.
         """
         all_data, all_flags, all_h5 = cls.load(all_path)
         shape = all_data.shape
@@ -278,20 +288,26 @@ def create_hdf5_layout_lop(
 ):
     """Creation of persistent HDF5 files to store linop sketches.
 
-    :param str dirpath: Where to store the HDF5 files.
+    This convenience method prepaers the HDF5 placeholders that can be used
+    to store sketches from a linop of shape ``lop_shape``.
+    It supports independent creation of left-, right- and inner measurements,
+    thus supporting most use cases involving linear sketches.
+
+    :param root: Where to store the created HDF5 files. Must be an empty
+      directory.
     :param lop_shape: Shape of linear operator to sketch from, in the form
       ``(height, width)``.
-    :param lop_dtype: Torch dtype of the operator, e.g. ``torch.float32``. The
+    :param dtype: Torch dtype of the operator, e.g. ``torch.float32``. The
       HDF5 arrays will be of same type.
-    :param int num_outer_measurements: Left outer measurement layout contains
-      ``(width, outer)`` entries, and right outer layout ``(height, outer)``.
-    :param int num_inner_measurements: Inner measurement layout contains
-      ``(inner, inner)`` entries.
-    :lo_fmt: Format string for the left-outer HDF5 filenames.
-    :ro_fmt: Format string for the right-outer HDF5 filenames.
-    :inner_fmt: Format string for the inner HDF5 filenames.
-    :param with_ro: If false, no right outer layout will be created (useful
-      when working with symmetric matrices where only one side is needed).
+    :param partition_size: Each created HDF5 will be split into chunks of this
+      many vectors (see :meth:`DistributedHDF5Tensor.create` for more details).
+    :param lo_meas: If given, a dataset of shape ``(lo_meas, w)`` will be
+      created under the name given by ``lo_fmt``.
+    :param ro_meas: If given, a dataset of shape ``(h, ro_meas)`` will be
+      created under the name given by ``ro_fmt``.
+    :param inner_meas: If given, a dataset of shape
+      ``(inner_meas, inner_meas)`` will be created under the name given by
+      ``inner_fmt``.
     """
     h, w = lop_shape
     #
