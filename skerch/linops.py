@@ -2,15 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Utilities for linear operators.
-
-This PyTorch library is intended to work with (potentially matrix-free) linear
-operators that support left- and right- matrix multiplication (via e.g.
-``v @ lop`` and ``lop @ v``) as well as the ``.shape`` attribute.
-
-This module implements basic support for said functionality, as well as some
-default linear operators (composite, diagonal...).
-"""
+"""Utilities for (matrix-free) linear operators."""
 
 
 import warnings
@@ -23,7 +15,13 @@ from .utils import BadShapeError, htr, COMPLEX_DTYPES
 # # CORE LINOP FUNCTIONALITY
 # ##############################################################################
 def linop_to_matrix(lop, dtype=torch.float32, device="cpu", adjoint=False):
-    """Convert a linop to a matrix via one-hot matrix-vector products."""
+    """Convert a linop to a matrix via one-hot matrix-vector products.
+
+    :param adjoint: If true, one-hot products are done via ``v_i @ lop``.
+      Otherwise ``lop @ v_i``.
+    :returns: Matrix equivalent to the given ``lop``, on the given ``dtype``
+      and ``device``.
+    """
     h, w = lop.shape
     result = torch.zeros(lop.shape, dtype=dtype, device=device)
     if adjoint:
@@ -43,12 +41,13 @@ def linop_to_matrix(lop, dtype=torch.float32, device="cpu", adjoint=False):
 
 
 def check_linop_input(x, lop_shape, adjoint):
-    """Checking that input is a mat/vec of the right shape.
+    """Checks that input is a matrix or vector of the right shape.
 
     :param x: The input to this linear operator. It should be either a
-      vector or a matrix of matching shape.
-    :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
-      ``self @ x``.
+      vector or a matrix of matching shape to ``lop_shape``.
+    :param bool adjoint: If true, ``x @ lop`` is assumed, otherwise
+      ``lop @ x``.
+    :raises: :class:`BadShapeError` if there is any shape mismatch.
     """
     if not len(x.shape) in {1, 2}:
         raise BadShapeError("Only vector or matrix supported!")
@@ -70,16 +69,19 @@ class BaseLinOp:
     Implements the ``.shape`` attribute and basic matmul functionality with
     vectors and matrices (also via the ``@`` operator). Intended to be
     extended with further functionality via :meth:`.matmul` and
-    :meth:`.rmatmul` (implementations are responsibe to handle matrix-matrix
-    parallelization).
+    :meth:`.rmatmul`. See documentation and codebase for examples.
+
+    .. note::
+      Inputs to ``matmul, rmatmul`` can be vectors or matrices, but
+      implementations are responsibe to handle matrix-matrix parallelization.
 
     :param shape: ``(height, width)`` of linear operator.
     :param batch: When calling ``self @ x`` against a matrix with several
       vectors, the default ``batch=None`` will call :meth:`.matmul` with the
       whole ``x`` matrix at once. If a different batch is provided, ``x``
       will be split in chunks of ``batch`` vectors, which will be fed to
-      :meth:`.matmul` sequentially. This is useful to eg. prevent out-of-memory
-      errors.
+      :meth:`.matmul` sequentially. This is useful to eg. prevent
+      out-of-memory errors due to processing too large chunks at once.
     """
 
     def __init__(self, shape, batch=None):
@@ -101,7 +103,12 @@ class BaseLinOp:
         return s
 
     def _matmul_helper(self, x, adjoint=False):
-        """ """
+        """Reshape and distribute input to the corresponding operation.
+
+        :param x: Vector or matrix to be multiplied with.
+        :param adjoint: True if adjoint matmul is intended.
+        :returns: Result of the matrix multiplication.
+        """
         check_linop_input(x, self.shape, adjoint)
         xvec = len(x.shape) == 1
         num_vecs = 1 if xvec else x.shape[0 if adjoint else 1]
@@ -139,7 +146,7 @@ class BaseLinOp:
     def __imatmul__(self, x):
         """Assignment matmul operator ``@=``.
 
-        .. note::
+        .. warning::
           This method is deactivated by default since linear operators may be
           matrix-free.
         """
@@ -161,15 +168,20 @@ class BaseLinOp:
 
 
 class ByBlockLinOp(BaseLinOp):
-    """Matrix-free linop computed by blocks of vectors.
+    """Matrix-free operator computed by blocks of submatrices.
 
-    This matrix-free operator generates each block of rows (or columns) one by
-    one during matrix multiplication. Useful when memory is a bottleneck.
+    Consider a large matrix that does not fit in memory. Still, we can perform
+    matrix multiplications by sequentially loading smaller blocks in memory,
+    and then aggregating the result. This is the main motivation for this
+    by-block linear operator:
 
-    Users can decide which modality to use at instantiation via the ``by_row``
-    boolean flag. They can also decide how many vectors per block to use.
-    Extensions of this class should implement :meth:`.get_block`
-    accordingly to return blocks of the right shape.
+    * At instantiation, users determine the ``by_row`` and ``blocksize``
+      parameters, which determine how many rows/columns will be internally
+      used at once.
+    * At runtime, this class calls sequentially the :meth:`get_block` method,
+      performs the partial matrix-multiplications and aggregates them.
+    * At development, extensions of this class only have to implement
+      :meth:`.get_block` accordingly to return blocks of the right shape.
 
     .. note::
       The ``by_row`` flag has implications in terms of memory and runtime.
@@ -177,15 +189,19 @@ class ByBlockLinOp(BaseLinOp):
       ``lop @ x`` matrix-vector multiplication will call :meth:`.get_vector``
       ``h`` times, and perform ``h`` dot products of dimension ``w``. If false,
       it will perform ``w`` scalar products of dimension ``h``. In the case of
-      ``x @ lop``, the scalar and dot products are swapped.
+      ``x @ lop``, the number of scalar and dot products are swapped.
 
       Therefore, developers need to override :meth:`.get_block` taking this
       flag into account, and users should set it to the scenario that is most
       efficient (e.g. by-column is generally more efficient when ``h > w``).
+      See :class:`skerch.measurements` for examples.
 
     :param by_row: If true, blocks are groups of rows, otherwise columns.
     :param blocksize: If integer, determines how many rows/columns each block
       has, and a row will be a matrix.
+    :param batch: If the input to matmul is a matrix itself, this determines
+      how many vectors are computed at once. Note that this is different to
+      ``blocksize``, which refers to the blocks of *this* linop.
     """
 
     def __init__(self, shape, by_row=False, batch=None, blocksize=1):
@@ -199,11 +215,11 @@ class ByBlockLinOp(BaseLinOp):
         self.num_blocks = self.get_idx_coords(self.num_vecs - 1)[0] + 1
 
     def get_vector_idxs(self, block_idx):
-        """Retrieve vector indices corresponding to a block.
+        """Retrieves a range with vector indices corresponding to a block.
 
         :param block_idx: Integer between ``0`` and ``self.num_blocks - 1``.
         :returns: ``range(beg, end)`` with the vector indices corresponding
-          to this block (``end`` is excluded).
+          to the ``block_idx`` block.
         """
         if not (0 <= block_idx < self.num_blocks):
             raise ValueError(f"Block idx out of bounds! {block_idx}")
@@ -215,9 +231,10 @@ class ByBlockLinOp(BaseLinOp):
     def get_idx_coords(self, idx):
         """Retrieve vector index in block coordinates.
 
-        Useful if we want to retrieve a given vector: this method tells us
-        which block should we retrieve, and where to find the vector within
-        the retrieved block.
+        Useful if we want to retrieve a given vector from this linop: since
+        this linop is defined in a by-block fashion, we first need to know
+        which block to retrieve, and then which vector index within the
+        retrieved block.
 
         :param idx: Integer between ``0`` and ``N - 1``, where ``N`` is
           the number of rows, if ``by_row`` is true, or columns otherwise.
@@ -239,8 +256,8 @@ class ByBlockLinOp(BaseLinOp):
 
         .. note::
           If ``blocksize==1``, returning vectors may work in some cases, but
-          it is recommended to return matrices (where one of the dimensions
-          equals 1).
+          it is recommended to still return matrices (where one of the
+          dimensions equals 1).
 
         :param block_idx: Index of the block to be returned. Use the auxiliary
           method :meth:`get_vector_idxs` if you need to know which vector
@@ -256,14 +273,14 @@ class ByBlockLinOp(BaseLinOp):
         raise NotImplementedError
 
     def get_blocks(self, dtype, device="cpu"):
-        """Yield all blocks in ascending order and their corresponding idxs."""
+        """Yields all blocks in ascending order with the corresponding idxs."""
         for b_i in range(self.num_blocks):
             block = self.get_block(b_i, dtype, device)
             idxs = self.get_vector_idxs(b_i)
             yield block, idxs
 
     def to_matrix(self, dtype, device="cpu"):
-        """Fetch all blocks into a matrix."""
+        """Converts this linop to a matrix of given ``dtype``, ``device``."""
         result = torch.empty(self.shape, dtype=dtype, device=device)
         #
         for block, idxs in self.get_blocks(dtype, device):
@@ -275,7 +292,12 @@ class ByBlockLinOp(BaseLinOp):
         return result
 
     def _bb_matmul_helper(self, x, adjoint=False):
-        """ """
+        """Reshape and distribute input to the corresponding operation.
+
+        :param x: Vector or matrix to be multiplied with.
+        :param adjoint: True if adjoint matmul is intended.
+        :returns: Result of the matrix multiplication.
+        """
         h, w = self.shape
         if adjoint:
             n, xw = x.shape
@@ -300,11 +322,11 @@ class ByBlockLinOp(BaseLinOp):
         return result
 
     def matmul(self, x):
-        """ """
+        """Performs right matrix-multiplication."""
         return self._bb_matmul_helper(x, adjoint=False)
 
     def rmatmul(self, x):
-        """ """
+        """Performs left (adjoint) matrix-multiplication."""
         return self._bb_matmul_helper(x, adjoint=True)
 
     def __repr__(self):
