@@ -2,11 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""
-"""
-
-from concurrent.futures import ProcessPoolExecutor
-from functools import partial
+"""Functionality to perform sketched measurements."""
 
 from collections import defaultdict
 import warnings
@@ -33,17 +29,21 @@ from .utils import (
 class RademacherNoiseLinOp(ByBlockLinOp):
     """Random linear operator with i.i.d. Rademacher entries.
 
+    .. warning::
+
+      Since this linop uses random generators and seeds to fetch the blocks,
+      it is important that two different instances do not overlap in seeds,
+      to prevent correlated noise. Use sufficiently far away seeds and
+      ``register=True`` to test this behaviour.
+
     :param shape: Shape of the linop as ``(h, w)``.
-    :param seed: Random seed used in ``get_vector`` to deterministically sample
-      random vectors. Each vector with ``idx`` is sampled from ``seed + idx``,
-      for this reason is important that two different linops are instantiated
-      with sufficiently distant seeds, to prevent overlaps.
-    :param dtype: Dtype of the generated noise.
-    :param by_row: See :class:`ByBlockLinOp`.
-    :param register: If true, when the linop is created, its seed range is
-      added to a global register, which checks if there are any overlapping
-      ranges, in which case a ``BadSeedError`` is triggered. If false, this
-      behaviour is disabled.
+    :param seed: Random seed used in :meth:`get_block` to sample random blocks.
+    :param by_row: See :class:`skerch.linops.ByBlockLinOp`.
+    :param register: If true, when the linop is created, its seed range
+      (going from ``seed`` to ``seed + max(h, w)``) is added to a class-wide
+      register, which raises a :class:`skerch.utils.BadSeedError` if there
+      are any other instances of this class with overlapping ranges. If
+      false, this behaviour is disabled.
     """
 
     REGISTER = defaultdict(list)
@@ -123,7 +123,7 @@ class RademacherNoiseLinOp(ByBlockLinOp):
 class GaussianNoiseLinOp(RademacherNoiseLinOp):
     """Random linear operator with i.i.d. Gaussian entries.
 
-    See superclass docstring for more details.
+    Like :class:`RademacherNoiseLinOp`, but with Gaussian noise.
     """
 
     REGISTER = defaultdict(list)
@@ -145,9 +145,9 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
         self.std = std
 
     def get_block(self, block_idx, input_dtype, input_device):
-        """Samples a vector with Rademacher i.i.d. noise.
+        """Samples a vector with Gaussian i.i.d. noise.
 
-        See base class definition for details.
+        See base class for details.
         """
         idxs = self.get_vector_idxs(block_idx)
         h, w = self.shape
@@ -181,10 +181,11 @@ class GaussianNoiseLinOp(RademacherNoiseLinOp):
 class PhaseNoiseLinOp(RademacherNoiseLinOp):
     """Random linear operator with i.i.d. complex entries in the unit circle.
 
+    Like :class:`RademacherNoiseLinOp`, but with phase noise. Must be of
+    complex datatype.
+
     :param conj: For the same seed, the linear operators with true and false
       ``conj`` values are complex conjugates of each other.
-
-    See superclass docstring for more details.
     """
 
     REGISTER = defaultdict(list)
@@ -204,7 +205,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
         self.conj = conj
 
     def get_block(self, block_idx, input_dtype, input_device):
-        """Samples a vector with Rademacher i.i.d. noise.
+        """Samples a vector with i.i.d. phase noise.
 
         See base class definition for details.
         """
@@ -239,28 +240,28 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # # SSRFT
 # ##############################################################################
 class SSRFT:
-    """ """
+    """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
+
+    This static class implements the forward and adjoint SSRFT, as described
+    in `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_:
+
+    .. math::
+
+      \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
+
+    Where :math:`R` is a random index-picker, \mathcal{F} is either a
+    DCT or a FFT (if ``x`` is complex), and :math:`\Pi, \Pi'` are
+    random permutations which also multiply entries by Rademacher or
+    phase noise (if ``x`` is complex).
+    """
 
     @staticmethod
     def ssrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
-        r"""Forward SSRFT.
-
-        This function implements a matrix-free, right-matmul operator of the
-        Scrambled Subsampled Randomized Fourier Transform (SSRFT), see e.g.
-        `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_.
-
-        .. math::
-
-          \text{SSRFT} = R\,\mathcal{F}\,\Pi\,\mathcal{F}\,\Pi'
-
-        Where :math:`R` is a random index-picker, \mathcal{F} is either a
-        DCT or a FFT (if ``x`` is complex), and :math:`\Pi, \Pi'` are
-        random permutations which also multiply entries by Rademacher or
-        phase noise (if ``x`` is complex).
+        r"""Forward SSRFT (see class docstring for definition).
 
         :param x: Matrix to be projected, such that ``y = SSRFT @ x``
         :param out_dims: Number of rows in ``y`` with ``rows(y) <= rows(x)``
-        :param seed: Random seed
+        :param seed: Random seed for the SSRFT.
         :param norm: Norm for the FFT and DCT. Currently only ``ortho`` is
           supported to ensure orthogonality.
         """
@@ -316,13 +317,14 @@ class SSRFT:
 
     @staticmethod
     def issrft(x, out_dims, seed=0b1110101001010101011, norm="ortho"):
-        r"""Inverse SSRFT.
+        r"""Adjoint SSRFT (see class docstring for definition).
 
-        Inversion of the SSRFT, such that for a square ssrft,
+        Inversion of the SSRFT, such that for a square SSRFT,
         ``x == issrft(ssrft(x))`` holds.
+
         Note that this means that, for complex ``x``, the adjoint operation
-        involves complex conjugation as well.
-        See :meth:`.ssrft` for more details.
+        involves complex conjugation as well. See class docstring and
+        :meth:`ssrft` for more details.
 
         :param out_dims: In this case, instead of random index-picker, which
           reduces dimension, we have an index embedding, which increases
@@ -395,11 +397,14 @@ class SSRFT:
 
 
 class SsrftNoiseLinOp(ByBlockLinOp):
-    """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
+    """Linop for the Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
     This class encapsulates the forward and adjoint SSRFT transforms into a
-    single linear operator with orthogonal columns, which is deterministic for
-    the same shape and seed (also across different torch devices).
+    single linear operator with fixed shape and orthonormal columns, which is
+    deterministic for the same dtype, shape and seed (also across different
+    torch devices).
+
+    See :class:`SSRFT` for more details.
 
 
     .. note::
@@ -411,15 +416,16 @@ class SsrftNoiseLinOp(ByBlockLinOp):
       This slight change in format that doesn't really affect the semantics of
       the SSRFT, and it makes it more compatible with other noise linops, which
       are typically also tall instead of fat. It is also more common to think
-      about orthogonal columns than rows.
+      about orthogonal columns than rows. To make it fat,
+      :class:`skerch.linops.TransposedLinOp` can still be used.
 
     .. note::
 
-    Unlike classes extending :class:`ByBlockLinOp`, in this case it is not
-    efficient to apply this operator by row/column. Instead, this
-    implementation applies the SSRFT directly to the input, by vector,
-    but it also provides ``get_vector`` functionality via one-hot vecmul to
-    facilitate parallel measurements via :func:`perform_measurements`.
+      Unlike classes extending :class:`ByBlockLinOp`, in this case it is not
+      efficient to apply this operator by row/column. Instead, this
+      implementation applies the SSRFT directly to the input, by vector,
+      but it also provides ``get_vector`` functionality via one-hot vecmul to
+      facilitate parallel measurements via :func:`perform_measurements`.
     """
 
     REGISTER = defaultdict(list)
