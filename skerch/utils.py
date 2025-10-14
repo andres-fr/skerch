@@ -46,7 +46,11 @@ def torch_dtype_as_str(dtype):
 
 
 def complex_dtype_to_real(dtype):
-    """"""
+    """Given a complex datatype, returns its real counterpart.
+
+    :param dtype: Complex torch dtype, e.g. ``torch.complex128``.
+    :returns: Float torch dtype, e.g. ``torch.float64``.
+    """
     out_dtype = None
     if dtype in REAL_DTYPES:
         out_dtype = dtype
@@ -84,7 +88,13 @@ def uniform_noise(shape, seed=None, dtype=torch.float64, device="cpu"):
 
     :returns: A tensor of given shape, dtype and device, containing uniform
       random noise between 0 and 1 (analogous to ``torch.rand``), but with
-      reproducible behaviour fixed to given random seed.
+      reproducible behaviour fixed to given random seed and device.
+
+    .. warning::
+      PyTorch does not ensure RNG reproducibility across
+      devices. The ``device`` parameter determines the device to generate the
+      noise from. If you want cross-device reproducibility, make sure that the
+      noise is always generated from the same device.
     """
     rng = torch.Generator(device=device)
     if seed is not None:
@@ -100,7 +110,13 @@ def gaussian_noise(
 
     :returns: A tensor of given shape, dtype and device, containing gaussian
       noise with given mean and std (analogous to ``torch.normal``), but with
-      reproducible behaviour fixed to given random seed.
+      reproducible behaviour fixed to given random seed and device.
+
+    .. warning::
+      PyTorch does not ensure RNG reproducibility across
+      devices. The ``device`` parameter determines the device to generate the
+      noise from. If you want cross-device reproducibility, make sure that the
+      noise is always generated from the same device.
     """
     rng = torch.Generator(device=device)
     if seed is not None:
@@ -121,14 +137,13 @@ def rademacher_noise(shape, seed=None, device="cpu"):
 
     .. warning::
       PyTorch does not ensure RNG reproducibility across
-      devices. This parameter determines the device to generate the noise from.
-      If you want cross-device reproducibility, make sure that the noise is
-      always generated from the same device.
+      devices. The ``device`` parameter determines the device to generate the
+      noise from. If you want cross-device reproducibility, make sure that the
+      noise is always generated from the same device.
 
     :param shape: Shape of the output tensor with Rademacher noise.
     :param seed: Seed for the randomness.
     :param device: Device of the output tensor and also source for the noise.
-      See warning.
     """
     noise = (
         uniform_noise(shape, seed=seed, dtype=torch.float32, device=device)
@@ -138,11 +153,17 @@ def rademacher_noise(shape, seed=None, device="cpu"):
 
 
 def randperm(n, seed=None, device="cpu", inverse=False):
-    """Reproducible randperm of ``n`` integers from  0 to (n-1) (both included).
+    """Reproducible randperm of ``n`` integers from  0 to (n-1), both included.
 
     :param bool inverse: If False, a random permutation ``P`` is provided. If
       true, an inverse permutation ``Q`` is provided, such that both
       permutations are inverse to each other, i.e. ``v == v[P][Q] == v[Q][P]``.
+
+    .. warning::
+      PyTorch does not ensure RNG reproducibility across
+      devices. The ``device`` parameter determines the device to generate the
+      noise from. If you want cross-device reproducibility, make sure that the
+      noise is always generated from the same device.
     """
     rng = torch.Generator(device=device)
     if seed is not None:
@@ -150,7 +171,7 @@ def randperm(n, seed=None, device="cpu", inverse=False):
     #
     perm = torch.randperm(n, generator=rng, device=device)
     if inverse:
-        # we take the O(N) approach since we anticipate large N
+        # we take the O(N) approach to allow for larger N
         inv = torch.empty_like(perm)
         inv[perm] = torch.arange(perm.size(0), device=perm.device)
         perm = inv
@@ -167,12 +188,16 @@ def phase_noise(
       noise. If ``x`` itself has been generated using ``uniform_noise``, make
       sure to use a different seed to mitigate correlations.
 
+    .. warning::
+      PyTorch does not ensure RNG reproducibility across
+      devices. The ``device`` parameter determines the device to generate the
+      noise from. If you want cross-device reproducibility, make sure that the
+      noise is always generated from the same device.
+
     :param conj: If true, the generated noise is the complex conjugate of the
       noise if all other parameters were equal.
-      i.e. the complex noise is complex conjugated.
     :returns: A tensor of given shape, dtype and device, containing complex
       i.i.d. noisy entries uniformly distributed around the unit circle.
-      Behaviour is reproducible for a given random seed.
     """
     if dtype not in {torch.complex32, torch.complex64, torch.complex128}:
         raise ValueError(f"Dtype must be complex! was {dtype}")
@@ -188,13 +213,14 @@ def phase_noise(
 def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
     """Reproducible random sign flip using Rademacher noise.
 
-    .. note::
-      This function makes use of :func:`uniform_noise` to sample the Rademacher
-      noise. If ``x`` itself has been generated using ``uniform_noise``, make
-      sure to use a different seed to mitigate correlations.
+    Variation of :func:`rademacher_noise`, where ``x`` can be any tensor
+    of any type, and it gets multiplied with Rademacher noise.
 
-    .. warning::
-      See :func:`rademacher_noise` for notes on reproducibility and more info.
+    :param inplace: Whether the input tensor gets multiplied in-place.
+    :returns: The pair ``(x * rademacher_mask, rademacher_mask).
+
+    .. seealso::
+      :func:`rademacher_noise` for notes on reproducibility and more info.
     """
     mask = rademacher_noise(x.shape, seed, device=rng_device).to(x.device)
     if inplace:
@@ -207,13 +233,12 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
 def phase_shift(x, seed=None, inplace=True, rng_device="cpu", conj=False):
     """Reproducible phase shift using phase noise.
 
-    .. note::
-      This function makes use of :func:`uniform_noise` to sample the Rademacher
-      noise. If ``x`` itself has been generated using ``uniform_noise``, make
-      sure to use a different seed to mitigate correlations.
+    Like :func:`rademacher_flip`, but applying the complex counterpart of
+    Rademacher noise, i.e. multiplies with phase noise on the complex unit
+    circle.
 
-    .. warning::
-      See :func:`rademacher_noise` for notes on reproducibility and more info.
+    .. seealso::
+      :func:`phase_noise` and :func:`rademacher_flip`.
     """
     shift = phase_noise(
         x.shape, seed, x.dtype, device=rng_device, conj=conj
@@ -230,6 +255,8 @@ def phase_shift(x, seed=None, inplace=True, rng_device="cpu", conj=False):
 # ##############################################################################
 def qr(A, in_place_q=False, return_R=False):
     """Thin QR-decomposition of given matrix.
+
+    PyTorch/NumPy/HDF5 wrapper.
 
     :param A: Matrix to orthogonalize, needs to be compatible with either
       ``scipy.linalg.qr`` or ``torch.linalg.qr``. It must be square or tall.
@@ -260,6 +287,8 @@ def qr(A, in_place_q=False, return_R=False):
 def pinv(A):
     """Pseudo-inversion of a given matrix.
 
+    PyTorch/NumPy/HDF5 wrapper.
+
     :param A: matrix to pseudo-invert, of shape ``(h, w)``. It needs to be
       compatible with either ``scipy.linalg.pinv`` or ``torch.linalg.qr``.
     :returns: Pseudoinverse of ``A`` with shape ``(w, h)``.
@@ -274,6 +303,10 @@ def pinv(A):
 def lstsq(A, b, rcond=1e-6):
     """Least-squares solver.
 
+    PyTorch/NumPy/HDF5 wrapper.
+
+    :param rcond: Cutoff value, any singular values of ``A`` smaller than
+      ``rcond * largest_singular_value`` are considered zero.
     :returns: ``x`` such that ``frob(Ax - b)`` is minimized.
     """
     if isinstance(A, torch.Tensor):
@@ -288,6 +321,8 @@ def lstsq(A, b, rcond=1e-6):
 def svd(A):
     """Singular Value Decomposition.
 
+    PyTorch/NumPy/HDF5 wrapper.
+
     :returns: The SVD ``(U, S, Vh)`` such that ``A = U @ diag(S) @ Vh``.
     """
     if isinstance(A, torch.Tensor):
@@ -301,8 +336,8 @@ def eigh(A, by_descending_magnitude=True):
     """Hermitian Eigendecomposition.
 
     :param by_descending_magnitude: If true, eigenpairs are given by descending
-      magnitude of eigenvalues (e.g. -4, 3, 0.1, -0.001, 0). If false,
-      eigenpairs are given by descending value (e.g. 3, 0.1, 0, -0.001, -4).
+      magnitude of eigenvalues (e.g. ``-4, 3, 0.1, -0.001, 0``). If false,
+      eigenpairs are given by descending value (``3, 0.1, 0, -0.001, -4``).
     :returns: The eigendecomposition ``(Lambda, Q)`` such that
       ``A = Q @ diag(Lambda) @ Q.H``.
     """
@@ -322,8 +357,9 @@ def htr(x, in_place=False):
     """Hermitian transposition wrapper.
 
     This convenience wrapper exists for several reasons:
-    * While torch supports `.H`, numpy does not.
-    * In multiprocessing settings, `.conj()` seems to sometimes not work,
+
+    * While torch supports ``.H``, numpy does not.
+    * In multiprocessing settings, ``.conj()`` seems to sometimes not work,
       which is likely related to in_place/view/copy behaviour.
     * Transposition of vectors via `.T` throws a warning since it is a no-op.
 
@@ -332,7 +368,7 @@ def htr(x, in_place=False):
 
     :param x: Numpy or Torch object, expected to be a vector or matrix
       (undefined behaviour otherwise).
-    :param in_place: If True, the imaginary entries are flipped in-place.
+    :param in_place: If true, the imaginary entries are flipped in-place.
       Otherwise, a new copy of the input is always returned. No in-between
       View behaviour is possible (thus this function may be suboptimal
       in some circumstances, but avoids multiprocessing issues).
@@ -382,7 +418,7 @@ def subdiag_hadamard_pattern(v, diag_idxs, use_fft=False):
     the main diagonal of :math:`A`. If e.g. :math:`\varphi` shifts the entries
     in :math:`v` downwards by ``k`` positions, we get the ``k``-th subdiagonal.
 
-    This function performs the corresponding shift.
+    This function performs the corresponding (non-circular) shift.
 
     .. seealso::
 
@@ -444,6 +480,7 @@ def serrated_hadamard_pattern(
 ):
     """Shifted copies of vectors for block-triangular Hutchinson estimation.
 
+
     :param v: Torch tensor expected to contain zero-mean, uncorrelated entries.
       If vector, shift is applied directly. If tensor, shift is applied to
       last dimension.
@@ -454,6 +491,11 @@ def serrated_hadamard_pattern(
     :param use_fft: See :func:`subdiag_hadamard_pattern`.
     :returns: A vector of same shape, type and device as ``v``, composed of
       shifted copies of ``v`` following a block-triangular (serrated) pattern.
+
+    The shifted expectation mechanism introduced in
+    :func:`subdiag_hadamard_pattern` can be modified to yield expectations of
+    triangular segments around any diagonal. This function performs the
+    shifts corresponding to triangles of a given block size.
 
     For example, given a 10-dimensional vector, the corresponding serrated
     pattern with ``blocksize=3, with_main_diagonal=True, lower=True`` yields
@@ -484,16 +526,17 @@ def serrated_hadamard_pattern(
     * ``0``
 
     And if ``lower=False``, it will look like this instead:
+
     * ``v1 + v2 + v3``
-    * ``     v2 + v3``
-    * ``          v3``
+    *      ``v2 + v3``
+    *           ``v3``
     * ``v4 + v5 + v6``
-    * ``     v5 + v6``
-    * ``          v6``
+    *      ``v5 + v6``
+    *           ``v6``
     * ``v7 + v8 + v9``
-    * ``     v8 + v9``
-    * ``v9``
-    * ``v10``
+    *      ``v8 + v9``
+    *           ``v9``
+    *          ``v10``
     """
     len_v = v.shape[-1]
     if blocksize < 1 or blocksize > len_v:
@@ -562,12 +605,15 @@ def serrated_hadamard_pattern(
 def truncate_decomp(k, U=None, S=None, Vh=None, copy=False):
     """Truncation of diagonal decomposition.
 
-    :returns: ``U[:, :k], S[:k], Vh[:k, :]`` (if given), i.e. the ``k``
+    :param copy: If true, returns a hard copy of the truncation, otherwise
+      returns a view of the given objects.
+    :returns: For any given ``U, S, Vh``, returns (respectively)
+      ``U[:, :k], S[:k], Vh[:k, :]``, i.e. the ``k``
       parameter represent the number of dimensions that we wish to keep.
 
     If ``U, S, Vh`` is the SVD or eigendecomposition of a matrix, and the
     ``S`` values are in non-ascending magnitude, this truncation returns
-    the top-k components. Note that
+    the top-k components.
     """
     if k <= 0:
         raise ValueError("Truncation")
