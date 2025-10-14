@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Utilities for (matrix-free) linear operators."""
+"""Basic utilities for (matrix-free) linear operators."""
 
 
 import warnings
@@ -155,15 +155,18 @@ class BaseLinOp:
         )
 
     def t(self):
-        """(Hermitian) transposition."""
+        """Return (Hermitian) transposition of this lop.
+
+        Equivalent to ``TransposedLinOp(self)``, see :class:`TransposedLinOp`.
+        """
         return TransposedLinOp(self)
 
     def matmul(self, x):
-        """ """
+        """Implement with the desired functionality. See class docstring."""
         raise NotImplementedError("Matmul not implemented!")
 
     def rmatmul(self, x):
-        """ """
+        """Implement with the desired functionality. See class docstring."""
         raise NotImplementedError("Rmatmul not implemented!")
 
 
@@ -186,7 +189,7 @@ class ByBlockLinOp(BaseLinOp):
     .. note::
       The ``by_row`` flag has implications in terms of memory and runtime.
       If true, for a ``lop`` of shape ``(h, w)`` and block size 1, the
-      ``lop @ x`` matrix-vector multiplication will call :meth:`.get_vector``
+      ``lop @ x`` matrix-vector multiplication will call :meth:`.get_vector`
       ``h`` times, and perform ``h`` dot products of dimension ``w``. If false,
       it will perform ``w`` scalar products of dimension ``h``. In the case of
       ``x @ lop``, the number of scalar and dot products are swapped.
@@ -344,15 +347,19 @@ class ByBlockLinOp(BaseLinOp):
 class TransposedLinOp:
     """Hermitian transposition of a linear operator.
 
-    :param lop: Any object supporting a shape ``(h, w)`` attribute as well as
-      the right- and left- matmul operator ``@``.
-
     Given a linear operator :math:`A`, real or complex, this class wraps its
     functionality, such that ``TransposedLinOp(lop)`` behaves line the
     (Hermitian) transposition :math:`A^H`. This is done by swapping dimensions
     and matmul methods leveraging the following identity:
 
     :math:`A^H v = ((A^H v)^H)^H = (v^H A)^H`.
+
+    Usage example::
+
+      lopT = TransposedLinOp(lop)
+
+    :param lop: Any object supporting a shape ``(h, w)`` attribute as well as
+      the right- and left- matmul operator ``@``.
     """
 
     def __init__(self, lop):
@@ -396,7 +403,7 @@ class TransposedLinOp:
         return result
 
     def t(self):
-        """Undo transposition"""
+        """Undo transposition: returns original ``lop``."""
         return self.lop
 
     def __repr__(self):
@@ -408,18 +415,19 @@ class TransposedLinOp:
 # # AGGREGATE LINEAR OPERATORS
 # ##############################################################################
 class CompositeLinOp:
-    """Composite linear operator.
+    """Matrix-free composite linear operator.
 
     This class composes an ordered collection of operators ``[A, B, C, ...]``
-    into ``A @ B @ C ...``.
+    into ``A @ B @ C ...`` in a matrix-free fashion.
 
-    .. note::
+    .. warning::
       Using this class could be more inefficient than directly computing the
       composed operator, e.g. if ``A.shape = (1, 1000)`` and
       ``B.shape = (1000, 1)``, then computing the scalar ``C = A @ B`` and then
       applying it is more efficient than keeping a ``CompositeLinearoperator``
       with ``A, B`` (in terms of both memory and computation). This class does
       not check for such cases, users are encouraged to take this into account.
+      Note that composite linops can also be nested.
 
 
     :param named_operators: Ordered collection in the form
@@ -467,10 +475,10 @@ class CompositeLinOp:
 
 
 class SumLinOp(BaseLinOp):
-    """Sum of linear operators.
+    """Matrix-free sum of linear operators.
 
     Given a collection of same-shape linear operators ``A, B, C, D ...``, this
-    class behaves like the sum ``A + B + C - D ...``.
+    class implements the sum ``A + B + C - D ...`` in a matrix-free fashion.
 
     :param named_signed_operators: Collection in the form
       ``{(n_1, s_i, o_1), ...}`` where each ``n_i`` is a string with the name
@@ -478,7 +486,8 @@ class SumLinOp(BaseLinOp):
       is to be added, otherwise subtracted.
       Each ``o_i`` operator must implement ``__matmul__``
       and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
-      object will then become the operator ``o_1 + o_2 - ...``
+      object will then become the operator ``o_1 + o_2 - ...``. All operators
+      must also have same shape.
     """
 
     def __init__(self, named_signed_operators):
@@ -535,7 +544,7 @@ class SumLinOp(BaseLinOp):
 # # DIAGONAL/BANDED LINEAR OPERATORS
 # ##############################################################################
 class DiagonalLinOp(BaseLinOp):
-    r"""Diagonal linear operator.
+    r"""Diagonal matrix-free linear operator.
 
     Given a vector ``v`` of ``d`` dimensions, this class implements a diagonal
     linear operator of shape ``(d, d)`` via left- and right-matrix
@@ -594,7 +603,7 @@ class DiagonalLinOp(BaseLinOp):
 
 
 class BandedLinOp(BaseLinOp):
-    r"""Banded linear operator (composed of diagonals).
+    r"""Banded matrix-free linear operator.
 
     Given a collection of :math:`k` vectors, this class implements a banded
     linear operator, where each given vector is a (sub)-diagonal. It is
@@ -617,7 +626,6 @@ class BandedLinOp(BaseLinOp):
       diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
       B = BandedLinOp(diags, symmetric=False)
       w = B @ v
-
 
     :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
       ``diag`` is a torch vector containing a diagonal, and ``idx``
@@ -747,7 +755,11 @@ class BandedLinOp(BaseLinOp):
         return s
 
     def to_matrix(self):
-        """Efficiently convert this linear operator into a matrix."""
+        """Convert this linear operator into a matrix.
+
+        Datatype and device are borrowed from the first diagonal that was
+        passed to the constructor.
+        """
         # check that all diagonals are of same dtype and device
         dtypes, devices = zip(
             *((d.diag.dtype, d.diag.device) for d in self.diags.values())
@@ -775,17 +787,20 @@ class BandedLinOp(BaseLinOp):
 class TorchLinOpWrapper:
     """Linear operator that always accepts and produces PyTorch tensors.
 
-    Since this library operates mainly with PyTorch tensors, but some useful
+    Since ``skerch`` is built on top of PyTorch, but some other useful
     LinOps interface with e.g. NumPy arrays instead, this mixin class acts as a
     wraper on the ``__matmul__`` and ``__rmatmul__`` operators,
     so that the operator expects and returns torch tensors, even when the
-    wrapped operator interfaces with NumPy/HDF5. Usage example::
+    wrapped operator interfaces with NumPy/HDF5.
+
+    This facilitates interoperability between ``skerch`` and other python
+    linops. Usage example::
 
       # extend NumPy linear operator via multiple inheritance
-      class TorchWrappedLinOp(TorchLinOpWrapper, LinOp):
+      class TorchWrappedNumpyLinOp(TorchLinOpWrapper, NumpyLinOp):
           pass
-      lop = TorchWrappedLinOp(...)  # instantiate normally
-      w = lop @ v  # now v can be a PyTorch tensor
+      lop = TorchWrappedNumpyLinOp(...)  # instantiate normally
+      w = lop @ v  # now v can be a PyTorch tensor on any device
     """
 
     @staticmethod

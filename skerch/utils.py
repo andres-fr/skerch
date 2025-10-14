@@ -217,7 +217,7 @@ def rademacher_flip(x, seed=None, inplace=True, rng_device="cpu"):
     of any type, and it gets multiplied with Rademacher noise.
 
     :param inplace: Whether the input tensor gets multiplied in-place.
-    :returns: The pair ``(x * rademacher_mask, rademacher_mask).
+    :returns: The pair ``(x * rademacher_mask, rademacher_mask)``.
 
     .. seealso::
       :func:`rademacher_noise` for notes on reproducibility and more info.

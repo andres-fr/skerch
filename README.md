@@ -166,7 +166,7 @@ TODO:
 * Add wrapper for sub-indexing
 * Pivoted cholesky and randomized row-norm estimation
   - https://drive.google.com/file/d/1r7UFgencPza2BGoDxzMtQqtoQFYrLm6Q/view?pli=1
-
+* composite linop: left and right associativity given via parentheses at construction?
 
 
 
