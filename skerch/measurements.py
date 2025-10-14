@@ -240,7 +240,7 @@ class PhaseNoiseLinOp(RademacherNoiseLinOp):
 # # SSRFT
 # ##############################################################################
 class SSRFT:
-    """Scrambled Subsampled Randomized Fourier Transform (SSRFT).
+    r"""Scrambled Subsampled Randomized Fourier Transform (SSRFT).
 
     This static class implements the forward and adjoint SSRFT, as described
     in `[TYUC2019, 3.2] <https://arxiv.org/abs/1902.08651>`_:
@@ -421,11 +421,12 @@ class SsrftNoiseLinOp(ByBlockLinOp):
 
     .. note::
 
-      Unlike classes extending :class:`ByBlockLinOp`, in this case it is not
-      efficient to apply this operator by row/column. Instead, this
-      implementation applies the SSRFT directly to the input, by vector,
-      but it also provides ``get_vector`` functionality via one-hot vecmul to
-      facilitate parallel measurements via :func:`perform_measurements`.
+      Unlike classes extending :class:`skerch.linops.ByBlockLinOp`, in this
+      case it is not efficient to apply this operator by row/column. Instead,
+      this implementation applies the SSRFT directly to the input, by vector,
+      but it also implements ``get_vector`` via one-hot vecmul to
+      facilitate parallel measurements and fit the standard interface for
+      ``skerch`` measurement linops.
     """
 
     REGISTER = defaultdict(list)
