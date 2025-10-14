@@ -15,7 +15,7 @@ import pytest
 import torch
 
 from skerch.synthmat import RandomLordMatrix
-from skerch.utils import rademacher_flip, complex_dtype_to_real
+from skerch.utils import BadShapeError, rademacher_flip, complex_dtype_to_real
 
 from . import rng_seeds, torch_devices
 
@@ -111,6 +111,7 @@ def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
     """Various formal tests for synthetic matrices.
 
     * in-place mix_matrix_and_diag
+    * mix_matrix mat and diag must fit
     * _decay_helper svals mut be real, and also >=0 if PSD
     * shape must be matrix-compatible
     * ``diag_ratio`` must be >= 0
@@ -129,6 +130,9 @@ def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
     )
     assert (mat2 == mat).all(), "mix matrix was NOT inplace? (mat)"
     assert (diag2 == diag).all(), "mix matrix was NOT inplace? (diag)"
+    # shapes for mix_matrix_and_diag:
+    with pytest.raises(BadShapeError):
+        _ = RandomLordMatrix.mix_matrix_and_diag(mat[1:], diag, inplace=False)
     #
     for device in torch_devices:
         # _decay_helper svals mut be real, and also >=0 if PSD

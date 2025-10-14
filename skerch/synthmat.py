@@ -4,30 +4,14 @@
 
 """Utilities for synthetic (random) matrices.
 
-This module implements a few families of synthetic matrices, inspired by
-`[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_, but also expanded:
-
-* Low rank + noise: dampened Gaussian noise matrix in the form ``G @ G.H``,
-  plus a (low-rank) subset of the identity matrix.
-* Exponential: Singular values have a low-rank unit section followed by
-  exponential decay.
-* Polynomial: Singular values have a low-rank unit section followed by
-  polynomial decay.
-* Low-rank + diagonal: Optionally, a random diagonal can be added.
-
-In `[TYUC2019] <https://arxiv.org/abs/1902.08651>`_, the exponential and
-polynomial matrices are symmetric. here, we extend them as follows:
-
-* Random orthogonal matrices for the left and right singular spaces
-* Optionally, the matrix is square and symmetric so left and right vectors are
-  adjoint
-* Optionally, the decaying spectrum is multiplied by Rademacher noise, to test
-  also with non-PSD matrices in the Symmetric case.
+This module allows us to sample random (synthetic) matrices, following a
+variety of structures, such as approximately low-rank plus diagonal.
 """
 
 
 import torch
 
+from .utils import BadShapeError
 from .utils import gaussian_noise, rademacher_flip, complex_dtype_to_real
 
 
@@ -35,17 +19,40 @@ from .utils import gaussian_noise, rademacher_flip, complex_dtype_to_real
 # # APPROXIMATELY LOW-RANK MATRICES
 # ##############################################################################
 class RandomLordMatrix:
-    """Static class to produce different random lowrank + diagonal matrices."""
+    """Static class to sample random lowrank + diagonal matrices.
+
+    Inspired by the following publications:
+
+    * `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_
+    * `[FDHS2025] <https://www.arxiv.org/abs/2509.23587>`_
+
+    This class allows to sample random matrices with the following structures:
+
+    * Low rank + noise: dampened Gaussian noise matrix in the form ``G @ G.H``,
+      plus a (low-rank) subset of the identity matrix.
+    * Exponential: Singular values have a low-rank unit section followed by
+      exponential decay
+    * Polynomial: Singular values have a low-rank unit section followed by
+      polynomial decay
+
+    Optionally, a random diagonal can be added to all the above. Matrices can
+    also be Hermitian and non-PSD.
+    """
 
     @staticmethod
     def mix_matrix_and_diag(mat, diag, diag_ratio=1.0, inplace=True):
-        """
-        :param diag_ratio: The ratio ``diag.norm() / v_norm``, where ``v_norm``
-          is a mean-vector norm of the matrix across the smaller dimension,
-          i.e. if the matrix is tall, the mean is computed among rows, and
-          otherwise among columns. Since the diagonal has as many entries as
-          these vectors, a ratio of 1.0 means that the diagonal is as large
-          as the average corresponding vector from the matrix.
+        """Adding a (normalized) diagonal to a matrix.
+
+        :param mat: Nonzero matrix of shape ``(h, w)``.
+        :param diag: Vector of shape ``min(h, w)``.
+        :param diag_ratio: Nonnegative scalar indicating the relative strength
+          of the additive diagonal component. A ratio of 0 means no diagonal
+          is added. A ratio of 1 means the diagonal is normalized to have the
+          average row norm (resp. column, whichever dimension is smaller).
+        :param inplace: If true, ``diag`` will be scaled to the given ratio
+          in-place, and ``mat`` will be added the scaled diagonal also
+          in-place. Otherwise, copies will be returned.
+        :returns: The triple ``(mat + ratio * diag, ratio * diag, ratio)``.
         """
         if not inplace:
             mat = mat.clone()
@@ -59,6 +66,8 @@ class RandomLordMatrix:
         else:
             h, w = mat.shape
             diag_dim = len(diag)
+            if diag_dim != min(h, w):
+                raise BadShapeError("Diagonal doesn't fit with matrix!")
             v_norm = mat.norm() / (max(h, w) ** 0.5)
             if v_norm == 0:
                 raise ValueError("Low-rank matrix cannot be zero!")
@@ -82,7 +91,7 @@ class RandomLordMatrix:
         dtype=torch.float64,
         device="cpu",
     ):
-        """Low rank + symmetric noise + real noisy diagonal.
+        """Low rank and symmetric noise plus a real-valued noisy diagonal.
 
         If diag_ratio is 0, produces a lowrank+noise matrix, as follows: First,
         A Gaussian IID noise matrix ``G`` is sampled for the provided (square)
@@ -95,12 +104,13 @@ class RandomLordMatrix:
         If ``diag_ratio != 0``, a real-valued Gaussian IID diagonal is added
         via :meth:`mix_matrix_and_diag`.
 
-        :param int rank: How many diagonal entries should be reinforced.
+        :param int rank: How many diagonal entries should be incremented by 1.
         :param float snr: Signal-to-noise ratio for the symmetric noise. In
           `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
           values are used: 1e-4 for low noise, 1e-2 for mid noise, and 1e-1 for
           high noise.
-        :returns: The pair ``(mat, diag)`` where ``mat = lowrank+noise+diag``.
+        :returns: The pair ``(mat + diag, diag)`` where ``mat`` is
+          (approximately) low-rank following the above recipe.
         """
         h, w = shape
         if h != w:
@@ -147,8 +157,8 @@ class RandomLordMatrix:
         """Given singular values, produces a random matrix.
 
         Helper method for the polynomial and exp-decay matrices. Given the
-        singular values, it samples the left- and right- singular spaces,
-        and returns the final matrix.
+        singular values, it samples orthogonal matrices for the left- and
+        right- singular spaces, and returns the final matrix.
         """
         # symmetric must be square
         h, w = shape
@@ -195,7 +205,14 @@ class RandomLordMatrix:
 
     @staticmethod
     def get_decay_svals(dims, rank, decay_type, decay, dtype, device):
-        """ """
+        """Singular values with a particular decay pattern.
+
+        :returns: A vector of size ``dims`` and given ``dtype, device``. The
+          vector contains ``rank`` unit entries, which then decay towards
+          zero following the given ``decay_type`` and ``decay`` intensity.
+        :decay_type: Can be ``exp`` (exponentially fast decay), and ``poly``
+          (polynomially fast). Check :meth:`exp` and :meth:`poly` for details.
+        """
         svals = torch.zeros(dims, dtype=dtype, device=device)
         svals[:rank] = 1
         if decay_type == "poly":
@@ -225,7 +242,9 @@ class RandomLordMatrix:
         are random orthogonal matrices, ``S`` has entries with polynomially
         decaying magnitude, analogous to the ones described in
         `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_, and ``D``
-        has random Gaussian IID entries with intensity given by ``diag_ratio``.
+        has random Gaussian IID entries with intensity given by ``diag_ratio``:
+        If ``diag_ratio != 0``, a real-valued Gaussian IID diagonal is added
+        via :meth:`mix_matrix_and_diag`.
 
         :param int rank: Entries in ``S[:rank]`` will have a magnitude of 1.
         :param float decay: Parameter determining how quickly magnitudes in
@@ -233,10 +252,13 @@ class RandomLordMatrix:
           for decay :math:`d`. In
           `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
           values are used: 0.5 for slow decay, 1 for medium, 2 for fast.
-        :param diag_ratio: Intensity of ``D``. See :meth:`mix_matrix_and_diag`.
-        :param bool symmetric: If true, ``V == U``.
+        :param diag_ratio: Intensity of ``D``. See :meth:`mix_matrix_and_diag`
+          for details.
+        :param bool symmetric: If true, ``U == V``.
         :param psd: If false, and matrix is symmetric, the singular values will
-          be multiplied with Rademacher noise to create a non-PSD matrix.
+          be randomly sign-flipped to create a non-PSD matrix.
+        :returns: The pair ``(mat + diag, diag)`` where ``mat`` is
+          (approximately) low-rank following the above recipe.
         """
         if rank <= 0:
             raise ValueError("Rank must be positive!")
@@ -285,10 +307,11 @@ class RandomLordMatrix:
     ):
         r"""Random matrix with exponential singular value decay plus diagonal.
 
-        Like :meth:`poly`, but the SV decay of the low-rank component follows
-        :math:`10^{-d}, 10^{-2d}, \dots` for decay :math:`d`. In
-          `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_ the following
-          values are used: 0.01 for slow decay, 0.1 for medium, 0.5 for fast.
+        Like :meth:`poly`, but the singular value decay of the low-rank
+        component follows :math:`10^{-d}, 10^{-2d}, \dots` for decay
+        :math:`d`. In `[TYUC2019, 7.3.1] <https://arxiv.org/abs/1902.08651>`_
+        the following values are used: 0.01 for slow decay, 0.1 for medium,
+        0.5 for fast.
         """
         if rank <= 0:
             raise ValueError("Rank must be positive!")
