@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-""" """
+"""Functionality to recover linop approximations from their sketches."""
 
 
 import torch
@@ -19,35 +19,39 @@ def singlepass(
     rcond=1e-6,
     as_svd=True,
 ):
-    r"""Recovering the SVD of a matrix ``A`` from left and right sketches.
+    r"""Single-pass recovery of linop from left and right sketches.
 
-    :param sketch_right: Sketches ``A @ measmat_right`` (typically a tall
-      matrix).
-    :param sketch_left: Sketches ``(measmat_left @ A)`` (typically a fat
-      matrix).
-    :param mop_right: Right measurement linop.
-    :returns: The triple ``U, S, V`` with ``U @ diag(S) @ V.T`` approximating
-      ``A``, and ``U, V`` having orthonormal columns.
+    Single-pass recovery from
+    `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_:
+    Assuming :math:`A \approx A  Q  Q^H`, and given ``Y, W.H, Omega``, where
+    :math:`Y = A \Omega` and :math:`W^H = \Psi^H A` are our random sketches,
+    we can recover ``A`` without any further measurements, thus being a
+    single-pass method.
 
-    Assuming ``A \approx A @ Q @ Q.T``, and given ``Y, W.T, Omega``, where
-    ``Y = A @ Omega`` and ``W.T = Psi.T @ A`` are our random measurements,
-    we can recover ``A`` without any further measurements.
-
-    First, obtain ``Q`` via QR decomposition of ``W``. Then, it holds
+    First, we obtain ``Q`` via QR decomposition of ``W``. Then, it holds
 
     .. math::
 
        \begin{align}
-       Y  (Q^T \Omega)^{-1} Q^T = (A \Omega) (Q^T \Omega)^{-1} Q^T\\
-                        &\approx (A Q Q^T \Omega) (Q^T \Omega)^{-1} Q^T \\
-                              &= (A Q)  Q^T \approx A \\
+       Y  (Q^H \Omega)^{-1} Q^H &= (A \Omega) (Q^H \Omega)^{-1} Q^H\\
+                   &\approx (A Q Q^H \Omega) (Q^H \Omega)^{-1} Q^H \\
+                   &= (A Q)  Q^H \approx A \\
        \end{align}
 
     Thus, we just need to solve a well-conditioned least-squares problem to
     approximate ``A``. To obtain the full SVD, we further need to compute the
-    SVD of ``Y @ pinv(Q.T @ Omega)`` and recombine.
+    SVD of ``Y @ pinv(Q.H @ Omega)`` and recombine.
 
-    Reference: `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_)
+    :param sketch_right: Sketches ``A @ mop_right`` (typically a tall
+      matrix).
+    :param sketch_left: Sketches ``(mop_left @ A)`` (typically a fat
+      matrix).
+    :param mop_right: Linop used to obtain ``sketch_right``.
+    :param rcond: Singular value threshold using during the least square
+      solving process. See :func:`skerch.utils.lstsq`.
+    :returns: If ``as_svd``, the triple ``U, S, Vh`` with
+      :math:`A \approx U diag(S) V^H` being a *thin SVD*. Otherwise,
+      the pair ``Y, Bh`` with :math:`A \approx Y B^H`.
     """
     # note we use .T instead of .conj().T: using conj+T several times is
     # equivalent to just using T, but more expensive (conj may return copy)
@@ -67,7 +71,32 @@ def singlepass(
 
 
 def nystrom(sketch_right, sketch_left, mop_right, rcond=1e-6, as_svd=True):
-    """ """
+    r"""Generalized Nyström recovery of linop from left and right sketches.
+
+    Single-pass recovery from
+    `[Naka2020] <https://arxiv.org/abs/2009.11392>`_.
+    Here, we assume the low-rank approximation
+    :math:`A \approx A \Omega C \Psi^H A`, with *core matrix* in the form
+    :math:`C = (\Psi^H A \Omega)^\dagger`.
+
+    Given sketches :math:`Y = A \Omega`, :math:`W^H = \Psi^H A`, this method
+    obtains the approximation without requiring any further measurements and
+    by solving a single, compact least-squares system in the form
+    :math:`A \approx Y (W^H \Omega)^\dagger W^H`.
+
+    To obtain the SVD approximation, ``Y, W`` are further orthogonalized.
+
+    :param sketch_right: Sketches ``A @ mop_right`` (typically a tall
+      matrix).
+    :param sketch_left: Sketches ``(mop_left @ A)`` (typically a fat
+      matrix).
+    :param mop_right: Linop used to obtain ``sketch_right``.
+    :param rcond: Singular value threshold using during the least square
+      solving process. See :func:`skerch.utils.lstsq`.
+    :returns: If ``as_svd``, the triple ``U, S, Vh`` with
+      :math:`A \approx U diag(S) V^H` being a *thin SVD*. Otherwise,
+      the pair ``Y, Bh`` with :math:`A \approx Y B^H`.
+    """
     P1, S1 = qr(sketch_right, in_place_q=False, return_R=True)
     if not as_svd:
         Q, R = qr(sketch_left @ mop_right, in_place_q=False, return_R=True)
@@ -94,7 +123,46 @@ def oversampled(
     rcond=1e-6,
     as_svd=True,
 ):
-    """ """
+    r"""Oversampled recovery of linop from left, right and inner sketches.
+
+    Single-pass, oversampled recovery from
+    `[BWZ2016] <https://arxiv.org/abs/1504.06729>`_:
+
+    Assuming :math:`A \approx P (P^H A @ Q) @ Q^H = P C Q^H`, this method
+    aims to obtain a *core matrix* :math:`C` via an independent, oversampled
+    sketch. The above approximation is satisfied by the following core matrix:
+    :math:`C = (\Psi^H P)^\dagger \Psi^H A \Omega (Q^H \Omega)^\dagger`,
+    and :math:`P, Q` can be been obtained via left and right outer
+    sketches and subsequent orthogonalization.
+
+    The key observation here is that :math:`C` can be *oversampled*, i.e.
+    the number of measurements taken by :math:`\Psi, \Omega` can be larger
+    than the number of columns in :math:`P, Q`. This helps conditioning
+    the pseudoinverses and has been shown in
+    `[TYUC2018, 4.1] <https://arxiv.org/abs/1609.00048>`_ to yield better
+    recoveries when the singular values of :math:`A` decay slowly and the
+    number of outer measurements doesn't sufficiently cover for that.
+
+    The trade-off here is that this method requires the extra (independent)
+    inner measurements, plus the extra least-squares steps involved
+    in solving the two pseudoinverses.
+    To return output as SVD, the core matrix is further diagonalized.
+
+
+    :param sketch_right: Sketches ``A @ mop_right`` (typically a tall
+      matrix).
+    :param sketch_left: Sketches ``(mop_left @ A)`` (typically a fat
+      matrix).
+    :param sketch_inner: Sketches ``(lilop^H @ A @ rilop)`` (typically a
+      small, square matrix).
+    :param lilop: Left inner linop used to obtain ``sketch_inner``.
+    :param rilop: Right inner linop used to obtain ``sketch_inner``.
+    :param rcond: Singular value threshold using during the least square
+      solving process. See :func:`skerch.utils.lstsq`.
+    :returns: If ``as_svd``, the triple ``U, S, Vh`` with
+      :math:`A \approx U diag(S) V^H` being a *thin SVD*. Otherwise,
+      the pair ``Y, Bh`` with :math:`A \approx Y B^H`.
+    """
     # note we use .T instead of .conj().T: using conj+T several times is
     # equivalent to just using T, but more expensive (conj may return copy)
     P = qr(sketch_right, in_place_q=False, return_R=False)
@@ -119,7 +187,13 @@ def singlepass_h(
     as_eigh=True,
     by_mag=True,
 ):
-    r""" """
+    r"""Single-pass recovery of Hermitian linop from right sketch.
+
+    Hermitian version of :func:`singlepass`. Since :math:`A = A^H`, we
+    only need sketches from one side, because in the Hermitian case ``Q``
+    can also be obtained by orthogonalizing ``sketch_right``, and the
+    method remains unchanged.
+    """
     # If the placements of the .conj() don't make sense, note that we
     # leverage symmetries, adding conj in some places and removed from others,
     # to an equivalent result, but less overal scalar conjugations.
@@ -142,7 +216,13 @@ def nystrom_h(
     as_eigh=True,
     by_mag=True,
 ):
-    """ """
+    r"""Generalized Nyström recovery of Hermitian linop from right sketch.
+
+    Hermitian version of :func:`nystrom`. Since :math:`A = A^H`, we
+    only need sketches from one side:
+    :math:`A \approx A \Omega C \Omega^H A`, with Hermitian *core matrix*
+    in the form :math:`C = (\Omega^H A \Omega)^\dagger`.
+    """
     P, S = qr(sketch_right, in_place_q=False, return_R=True)
     if not as_eigh:
         # (coreInvSt @ P.H) equals inv(rsketch.H @ rmop) @ rsketch.H
@@ -169,7 +249,18 @@ def oversampled_h(
     as_eigh=True,
     by_mag=True,
 ):
-    """ """
+    r"""Oversampled recovery of linop from right and inner sketches.
+
+    Hermitian version of :func:`oversampled`. Since :math:`A = A^H`, we
+    only need outer sketches from one side. But part of the strength
+    in the oversampled method is that the inner measurement matrices
+    are uncorrelated.
+    To allow for this possibility, this function still admits separate
+    parameters for ``lilop`` and ``rilop``.
+
+    (see `[FSMH2025] <https://openreview.net/forum?id=yGGoOVpBVP>`_
+    for more discussion).
+    """
     P = qr(sketch_right, in_place_q=False, return_R=False)
     core = lstsq(lilop @ P, sketch_inner, rcond=rcond)
     # equivalent to lstsq((rilop.conj().T @ P), core.conj().T).conj().T
