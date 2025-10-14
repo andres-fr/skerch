@@ -2,17 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""In-core sketched algorithms.
-
-This module features the following functionality:
-
-* A modular and extendable dispatcher that provides the algorithms with
-  measurement linops and recovery methods.
-* Sketched SVD and EIGH
-* Sketched trace (Hutch++) and diagonal (Hutch++, XDiag) estimation
-* Sketched linop norm estimation (operator norm, Frobenius)
-* Sketched triangular matvec estimation
-"""
+"""In-core sketched algorithms."""
 
 
 import warnings
@@ -45,39 +35,37 @@ from .utils import (
 # # DISPATCHER
 # ##############################################################################
 class SketchedAlgorithmDispatcher:
-    """
+    """Provides sketched algos with easurement linops and recovery algorithms.
 
-    This static class provides functionality to dispatch simple, high-level
-    sets of specifications into detailed components of the sketched methods,
-    such as noise measurement types and recovery algorithms.
+    Sketched algorithms are flexible in the kind of noise or recovery method
+    they use. In order to run, algorithms call this dispatcher with their
+    requested configuration (e.g. "gaussian" for noise and "nystrom" for
+    recovery).
 
-    The goal of such a dispatcher is to help simplifying the interface of the
-    sketched algorithms, so users have to provide less details and there are
-    less errors due to incorrect/inconsistent inputs.
+    This modular and extendible framework makes it easy to choose between
+    existing options, and also to add new options without having to modify
+    the sketched algorithms. For example, if users want to run :func:`ssvd`
+    with a new type of noise linop called ``MyNoise``, they just need to
+    extend :meth:`mop` into a new dispatcher class, and provide the
+    dispatcher to SSVD.
 
-    The downside is that flexibility is reduced: If users want to test a new
-    type of noise or recovery algorithm, this dispatcher will not work.
-
-    To overcome this issue, users can extend this class to incorporate the
-    new desired specs, and then provide the extended dispatcher class as
-    an argument to the sketched method, which will now recognize the new specs.
-
-    For example, if users want to run :func:`ssvd` with a new type of noise
-    linop called ``MyNoise``:
-    1. Extend this class as ``MyDispatcher`` and override the ``mop`` method,
-      adding an ``if noise_type=='my_noise'`` clause that returns the
-      desired instance.
-    2. When calling ``ssvd``, provide the ``noise_type='my_noise'`` and
-      ``dispatcher=MyDispatcher`` arguments.
-
-    Now ``ssvd`` should perform all measurements using ``MyNoise`` instances.
-
-    See also the documentation examples for more details.
+    Detailed examples for new extensions and recovery methods can be found in
+    the documentation.
     """
 
     @staticmethod
     def recovery(recovery_type, hermitian=False):
-        """Returns recovery funtion with given specs."""
+        """Returns recovery funtion with given specs.
+
+        :param recovery_type: String specifying which recovery type to be used
+          (e.g. "singlepass", "nystrom", "oversampled_500").
+        :returns: A tuple ``(fn, inner_dims)``, where ``fn`` is a recovery
+          function with the same interface as the ones in
+          :mod:`skerch.recovery`. If ``inner_dims`` is None, ``fn`` should
+          interface like :func:`skerch.recovery.singlepass`. If ``inner_dims``
+          is a positive integer, ``fn`` should behave like
+          :func:`skerch.recovery.oversampled`.
+        """
         supported = "singlepass, nystrom, oversampled_123"
         inner_dims = None
         if recovery_type == "singlepass":
@@ -98,12 +86,20 @@ class SketchedAlgorithmDispatcher:
     def mop(mop_type, hw, seed, dtype, blocksize=1, register=False):
         """Returns measurement linop with given specs.
 
-        The returned linop must support the following operations:
+        The returned linop must follow the same interface as
+        :class:`skerch.linops.ByBlockLinOp`, i.e. must support:
         * Left and right matmul to matrices via ``@``
         * A ``get_blocks(dtype, device)`` method that returns pairs in the form
           ``(block, idxs)``, where ``block`` is a subset of vectors, assumed to
           be columns of the returned linop, and corresponding to the given
           ``idxs``.
+
+        :param mop_type: A string defining the measurement linop type (e.g.
+          "rademacher", "gaussian", "ssrft", "phase").
+        :param hw: Tuple ``(height, width)`` with the desired linop shape.
+        :param seed: Random seed for the measurement linop.
+        :param blocksize: See :class:`skerch.linops.ByBlockLinOp`.
+        :param register: See :class:`skerch.measurements.RademacherNoiseLinOp`.
         """
         supported = "rademacher, gaussian, ssrft, phase"
         if mop_type == "rademacher":
