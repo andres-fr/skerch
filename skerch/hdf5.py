@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""
-"""
+"""Persistent and out-of-core tensor functionality via HDF5."""
 
 import os
 import h5py
@@ -18,49 +17,24 @@ class DistributedHDF5Tensor:
     In general, multiple processes are not allowed to concurrently open and
     write to HDF5 files. In order to allow for distributed, but coherent
     writing, this class allows to create many individual HDF5 files, and then
-    'virtually' merge them into a single coherent dataset.
+    "virtually" merge them into a single coherent dataset.
+    This allows us to distribute a (potentially large) tensor across processes
+    and machines, and write to it concurrently.
 
+    Once we are done writing, we may want to access the result.
     Unfortunately, most OS don't allow a single process to open many files at
-    once, and each sub-file here counts as one. As a result, loading such
-    distributed HDF5 datasets will reach a breaking point, after which contents
-    are not really being opened, and reported as "empty" (e.g. full of zeros).
-    For those cases, this class also provides a ``merge_all`` method,
-    to efficiently merge the distributed dataset into a monolithic one.
+    once. As a result, any files above the limit would be silently ignored.
+    This class also solves this by providing a :meth:`merge` method, to gather
+    the distributed chunks back into a single, monolithic file.
+
+    See docs for more examples, also on how to create and merge HDF5 datasets
+    directly from command line.
 
     In the virtual mode, all files are created in the same directory following
     a consistent naming convention, and this is expected to remain unchanged.
     Since this class is naturally intended for multiple concurrent
     processes/devices, it is designed in the form of a static class.
 
-    Usage example (see :mod:`.hdf5` for more examples)::
-
-      # create the empty separate HDF5 files on disk, and the "virtual" merger
-      out_path = "/tmp/my_dataset_{}.h5"
-      each_shape, num_files = (1000,), 5
-      h5_path, h5_subpaths = DistributedHDF5.create(
-        out_path, num_files, each_shape, torch_dtype_as_str(op_dtype)
-      )
-
-      # in a (possibly distributed & parallelized) loop, load and write parts
-      for i in range(num_files):
-          vals, flag, h5 = DistributedHDF5.load(h5_subpaths[i])
-          vals[:] += 1
-          flag[0] = 'done'
-          h5.close()  # remember to close file handles when done!
-
-      # merged data can be used as a (1000, 50) matrix by a separate machine
-      all_data, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
-      print(scipy.diag(all_data))
-      print(all_flags[::2])
-      all_h5.close()
-
-      # convert virtual database into single monolithic one
-      DistributedHDF5.merge_all(
-          h5_path,
-          delete_subfiles_while_merging=True,
-      )
-      all_data, all_flags, all_h5 = DistributedHDF5.load_virtual(h5_path)
-      ...
     """
 
     MAIN_PATH = "ALL"

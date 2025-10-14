@@ -82,7 +82,7 @@ for block, idxs in mop.get_blocks(DTYPE, DEVICE):
 
 # %%
 #
-# Finally, we test our HDF5 database, verifying that all flags have been
+# We can now test our HDF5 database, verifying that all flags have been
 # set to OK and the contents match our linear operator.
 # The exact moment in which we load the data from disk to memory is
 # when calling ``data[:]``. The ``data`` reference is just a pointer to the
@@ -92,6 +92,25 @@ for block, idxs in mop.get_blocks(DTYPE, DEVICE):
 data, flags, h5 = DistributedHDF5Tensor.load(h5_pth)
 is_ok = bool((flags.asstr()[:] == "OK").all())
 same_data = bool((data[:] == mop.to_matrix(DTYPE, "cpu")).all())
+h5.close()
 
 print("All flags set to OK:", is_ok)
 print("HDF5 data matches linear operator:", same_data)
+
+
+# %%
+#
+# Once we are done with the (potentially concurrent) writing, we may want
+# to merge all individual chunks into a single, monolithic HDF5 file.
+# This may be useful to e.g. prevent OS issues from trying to open too many
+# files at once. The following line of code merges our HDF5 database into
+# one file under the same name. It also deletes the chunk files in the process,
+# so memory never blows up:
+
+
+print("Number of files prior to merging:", len(os.listdir(tmpdir.name)))
+DistributedHDF5Tensor.merge(
+    h5_pth, check_success_flag="OK", delete_subfiles_while_merging=True
+)
+print("Number of files after merging:", len(os.listdir(tmpdir.name)))
+tmpdir.cleanup()
