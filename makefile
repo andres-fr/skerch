@@ -44,12 +44,24 @@ docs-prepare:
 		--ext-doctest --no-sep \
 		--extensions=sphinx_rtd_theme,sphinx.ext.graphviz,sphinx.ext.autosectionlabel,sphinx_gallery.gen_gallery,sphinx_immaterial.task_lists \
 		$(DOCSDIR)
-
+	# add sphinx gallery conf to conf.py
 	@echo 'sphinx_gallery_conf = {"examples_dirs": "../materials/examples", \
 		"gallery_dirs": "examples", \
 		"default_thumb_file": "docs/materials/assets/skerch_logo.svg", \
 		"remove_config_comments": True, "filename_pattern": "example", \
 		"matplotlib_animations": True}' >> $(DOCSDIR)/conf.py
+	# add latex conf to conf.py
+	@echo 'latex_elements = {"preamble":
+		r"""\usepackage{hyperref}
+		  \hypersetup{
+		    pdfborder={0 0 0},  % Disable the borders around links
+		    colorlinks=true,    % Enable colored links
+		    linkcolor=violet,     % link color
+		    citecolor=teal,     % citation color
+		    urlcolor=violet       % URL color
+		}
+		"""}' >> $(DOCSDIR)/conf.py
+
 	# incorporate apidocs and custom materials
 	@sphinx-apidoc -M -o $(DOCSDIR) skerch -T \
 		-t docs/materials/apidoc_templates
@@ -83,9 +95,8 @@ docs-pdf:
 	# Manually invoke pdflatex with nonstopmode to skip errors, and
 	# run several times to ensure references are processed
 	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
-	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
-	@cd $(DOCSDIR)/_build/latex && makeindex skerch.idx
-	@cd $(DOCSDIR)/_build/latex && pdflatex -interaction=nonstopmode skerch.tex
+	# @makeindex skerch.idx  # currently index not working
+	@pdflatex -interaction=nonstopmode skerch.tex
 
 .PHONY: docs
 docs: docs-prepare docs-html docs-pdf
