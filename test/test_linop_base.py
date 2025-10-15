@@ -173,15 +173,17 @@ def test_baselinop_formal():
     with pytest.raises(ValueError):
         _ = TransposedLinOp(lopT)
     # testing (batched) matmul
-    h, w, n, b = 100, 100, 5000, 11
-    slow_factor = 5
-    atol = 1e-5
-    mat = gaussian_noise((h, w), dtype=torch.float32, device="cpu", seed=12345)
-    v1, v2 = torch.ones(w), torch.ones(h)
-    a1, a2 = torch.ones(w, n), torch.ones(n, h)
-    lop1 = MatLinOp(mat, batch=None)
-    lop2 = MatLinOp(mat, batch=b)
-    lop3 = MatLinOp(mat, batch=1)
+    # h, w = 100, 100
+    # n, b = 5000, 11
+    # slow_factor = 5
+    # mat = gaussian_noise(
+    #     (h, w), dtype=torch.float32, device="cpu", seed=12345
+    # )
+    # v1, v2 = torch.ones(w), torch.ones(h)
+    # a1, a2 = torch.ones(w, n), torch.ones(n, h)
+    # lop1 = MatLinOp(mat, batch=None)
+    # lop2 = MatLinOp(mat, batch=b)
+    # lop3 = MatLinOp(mat, batch=1)
     # #     * Runtime: matvec > batched > matmat by a substantial amount
     # # matmat is fastest, matvec slowest, batched inbetween
     # t0 = time()
@@ -191,8 +193,12 @@ def test_baselinop_formal():
     # t2 = time()
     # lop3 @ a1  # matvec
     # t3 = time()
-    # assert (slow_factor * (t1 - t0)) < (t2 - t1), "Matmat slower than batched?"
-    # assert (slow_factor * (t2 - t1)) < (t3 - t2), "Batched slower than matvec?"
+    # assert (slow_factor * (t1 - t0)) < (
+    #     t2 - t1
+    # ), "Matmat slower than batched?"
+    # assert (slow_factor * (t2 - t1)) < (
+    #     t3 - t2
+    # ), "Batched slower than matvec?"
     # t0 = time()
     # a2 @ lop1  # matmat
     # t1 = time()
@@ -276,7 +282,7 @@ def test_byblock_correctness_extra(rng_seeds, torch_devices, dtypes_tols):
     h, w = 5, 7
     for seed in rng_seeds:
         for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+            for dtype, _ in dtypes_tols.items():
                 mat = gaussian_noise(
                     (h, w), dtype=dtype, device=device, seed=seed
                 )
@@ -290,7 +296,6 @@ def test_byblock_correctness_extra(rng_seeds, torch_devices, dtypes_tols):
                         # consistent and right coordinates
                         for idx in range(h if by_row else w):
                             b, v = lop.get_idx_coords(idx)
-                            b_idxs = lop.get_vector_idxs(b)
                             block = lop.get_block(b, dtype, device)
                             if by_row:
                                 assert (mat[idx] == block[v]).all()
@@ -314,7 +319,7 @@ def test_linop_correctness(
     * Double transposed is same as original lop
     """
     for seed in rng_seeds:
-        for dtype, tol in dtypes_tols.items():
+        for dtype, _ in dtypes_tols.items():
             for h, w in linop_correctness_shapes:
                 for device in torch_devices:
                     mat = gaussian_noise(

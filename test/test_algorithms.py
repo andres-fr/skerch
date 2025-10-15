@@ -268,7 +268,7 @@ class BloatedGaussianNoiseLinOp(GaussianNoiseLinOp):
         result = super().get_block(block_idx, input_dtype, input_device)
         try:
             result = result + result.sign() * self.shift
-        except:
+        except Exception:
             result.real += result.real.sign() * self.shift
             result.imag += result.imag.sign() * self.shift
         return result
@@ -325,10 +325,9 @@ def test_algo_dispatcher_formal(dispatcher_noise_types):
     dims, dtype, device = 5, torch.complex64, "cpu"
     for mop_type in dispatcher_noise_types:
         mop = MyDispatcher.mop(mop_type, (dims, dims), 0, dtype, dims, False)
-        I = torch.eye(dims, dtype=dtype, device=device)
-        mat1 = mop @ I
-        mat2 = I @ mop
-        mat3 = list(mop.get_blocks(dtype, device))[0][0]
+        idty = torch.eye(dims, dtype=dtype, device=device)
+        mat1 = mop @ idty
+        mat2 = idty @ mop
         assert (mat1 == mat2).all(), "Measurement linop: inconsistent @?"
         assert (
             mat1 == mat2
@@ -396,7 +395,7 @@ def test_ssvd_correctness(
                         dtype=dtype,
                         device=device,
                     )
-                    I = torch.eye(outermeas, dtype=dtype, device=device)
+                    idty = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
                     #
                     for noise_type, complex_only in lowrank_noise_types:
@@ -427,7 +426,7 @@ def test_ssvd_correctness(
                             )
                             # test that output is correct and SVD-like
                             try:
-                                svd_test_helper(mat, I, U, S, Vh, tol)
+                                svd_test_helper(mat, idty, U, S, Vh, tol)
                             except AssertionError as ae:
                                 raise AssertionError(errmsg) from ae
 
@@ -463,7 +462,7 @@ def test_seigh_formal():
         seigh(lop[1:], lop.device, lop.dtype, outer_dims=5)
 
 
-def test_seigh_correctness(
+def test_seigh_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,
@@ -497,7 +496,7 @@ def test_seigh_correctness(
                         dtype=dtype,
                         device=device,
                     )
-                    I = torch.eye(outermeas, dtype=dtype, device=device)
+                    idty = torch.eye(outermeas, dtype=dtype, device=device)
                     lop = BasicMatrixLinOp(mat)
                     #
                     for noise_type, complex_only in lowrank_noise_types:
@@ -525,7 +524,9 @@ def test_seigh_correctness(
                                 )
                             # test that output is correct and SVD-like
                             try:
-                                eigh_test_helper(mat, I, ews, evs, tol, by_mag)
+                                eigh_test_helper(
+                                    mat, idty, ews, evs, tol, by_mag
+                                )
                             except AssertionError as ae:
                                 matconf = (hw, rank, outermeas, innermeas)
                                 errmsg = (
@@ -635,7 +636,7 @@ def test_hutchpp_xdiag_formal():
         _ = xdiag(H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian")
 
 
-def test_diagpp_xdiag_correctness(
+def test_diagpp_xdiag_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,
@@ -675,7 +676,7 @@ def test_diagpp_xdiag_correctness(
                     )
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
-                    I = torch.eye(defl, dtype=dtype, device=device)
+                    idty = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
@@ -701,7 +702,7 @@ def test_diagpp_xdiag_correctness(
                         if Q1 is not None:
                             QhQ1 = Q1.H @ Q1
                             assert torch.allclose(
-                                QhQ1, I, atol=tol
+                                QhQ1, idty, atol=tol
                             ), "Diag++ Q not orthogonal?"
                         # correct recoveries
                         if diagpp_full_tol is not None:
@@ -735,7 +736,7 @@ def test_diagpp_xdiag_correctness(
                             if Q2 is not None:
                                 QhQ2 = Q2.H @ Q2
                                 assert torch.allclose(
-                                    QhQ2, I, atol=tol
+                                    QhQ2, idty, atol=tol
                                 ), "XDiag Q not orthogonal?"
                             # correct recoveries
                             if xdiag_full_tol is not None:
@@ -886,16 +887,16 @@ def test_triang_correctness(
     """
     for seed in rng_seeds:
         for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+            for dtype, _ in dtypes_tols.items():
                 for dims, width, gh_meas, errtol in triang_configs:
                     mat = gaussian_noise(
                         (dims, dims), 0, 1, seed, dtype, device
                     )
                     # lower/upper matrices, with/without diag
                     mat1 = mat.tril(-1)
-                    mat1d = mat.tril(0)
+                    # mat1d = mat.tril(0)
                     mat2 = mat.triu(1)
-                    mat2d = mat.triu(0)
+                    # mat2d = mat.triu(0)
                     for bsize in [1, max(3, gh_meas // 2), gh_meas]:
                         # lower/upper linops, with/without diag
                         lop1 = TriangularLinOp(
@@ -1037,7 +1038,7 @@ def test_norm_correctness(
     """
     for seed in rng_seeds:
         for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+            for dtype, _ in dtypes_tols.items():
                 for shape, specdecay, num_meas, operr, froberr in norm_configs:
                     mat, _ = RandomLordMatrix.exp(
                         shape,
@@ -1107,7 +1108,8 @@ def test_tracepp_xtrace_correctness(
                     defl,
                     gh_extra,
                     (tracepp_full_tol, tracepp_top_tol),
-                    (xtrace_full_tol, xtrace_top_tol),
+                    # (xtrace_full_tol, xtrace_top_tol),
+                    (_, _),
                 ) in trace_recovery_shapes:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
@@ -1124,7 +1126,7 @@ def test_tracepp_xtrace_correctness(
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
                     trace = D.sum()
-                    I = torch.eye(defl, dtype=dtype, device=device)
+                    idty = torch.eye(defl, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
@@ -1150,7 +1152,7 @@ def test_tracepp_xtrace_correctness(
                         if Q1 is not None:
                             QhQ1 = Q1.H @ Q1
                             assert torch.allclose(
-                                QhQ1, I, atol=tol
+                                QhQ1, idty, atol=tol
                             ), "Diag++ Q not orthogonal?"
                         # test recoveries are correct
                         if tracepp_full_tol is not None:

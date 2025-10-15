@@ -112,9 +112,7 @@ def test_main_cli(all_dtypes, capsys):
         ]
     )
     h5_names = os.listdir(tmpdir.name)
-    assert (
-        len([n for n in h5_names if "ALL" in n]) == 3
-    ), "Wrong ALL CLI files?"
+    assert len([n for n in h5_names if "ALL" in n]) == 3, "Wrong ALL CLI files?"
     assert (
         len([n for n in h5_names if "leftouter" in n]) == 4
     ), "Wrong leftouter CLI files?"

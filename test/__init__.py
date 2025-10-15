@@ -157,9 +157,7 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     * The recovered eigvals are by descending magnitude/value
     * The devices and dtypes all match
     """
-    allclose = (
-        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
-    )
+    allclose = torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
     diff = torch.diff if isinstance(idty, torch.Tensor) else np.diff
     V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
     # correctness of result

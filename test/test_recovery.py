@@ -81,9 +81,7 @@ def uv_test_helper(mat, U, Vh, atol):
 
 def qc_test_helper(mat, idty, core_rec, q_rec, atol):
     """ """
-    allclose = (
-        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
-    )
+    allclose = torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
     C, Q, Qh = core_rec, q_rec, q_rec.conj().T
     # correctness of result
     assert allclose(mat, Q @ C @ Qh, atol=atol), "Incorrect recovery!"
@@ -185,9 +183,7 @@ def test_recovery_general(  # noqa:C901
                             errmsg = f"Singlepass-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass - SVD
-                        Urec, Srec, Vhrec = singlepass(
-                            Y, Z, right, as_svd=True
-                        )
+                        Urec, Srec, Vhrec = singlepass(Y, Z, right, as_svd=True)
                         try:
                             svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
                             # correctness of recovered svals
