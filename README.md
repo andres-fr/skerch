@@ -63,7 +63,7 @@ Anything more than this is not really required. In most cases, libraries do requ
 As a bonus, `skerch` is built on top of PyTorch, and with very few dependencies otherwise, so it supports a broad variety of platforms and datatypes (including e.g. complex datatypes on GPU).
 `skerch` also supports in-core and out-of-core parallelizations (e.g. via [HDF5](https://www.h5py.org/) tensor databases), providing good scalability in memory and runtime. The documentation [examples](https://skerch.readthedocs.io/en/latest/examples/index.html) illustrate all of the above points.
 
-In summary, `skerch` brings sketched methods to you with minimal overhead, and retaining good performance, resulting in overall faster development times. Give it a try!
+In summary, `skerch` brings sketched methods to you with minimal overhead, and retaining good performance, resulting in overall faster development and runtimes. Give it a try!
 
 
 # Installation and basic usage

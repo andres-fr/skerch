@@ -4,28 +4,31 @@ r"""Sketched Low-Rank Decompositions
 ====================================
 
 In this example we create noisy, numerically low-rank matrices and compare
-their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts in
-terms of  interface, accuracy and speed (see
-`Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_
+their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts
+(`Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_
 and
-`Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_).
+`Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_)
+in terms of their scope, accuracy and speed.
 
-A key observation here is that ``skerch`` **only requires a bare-minimum
-interface**: compatible linear operators must simply feature a
-``.shape = (height, width)`` attribute and implement the ``@`` matmul
-operator from the left and right handside. Trying to run such a
-simple object using the ``torch`` implementations does not work, because
-they have more interface requirements.
 
-We then observe that, for low-rank matrices, the ``skerch`` implementation
-shows good runtime and accuracy: while being nominally worse than either of
-the alternatives, it is still competitive.
+Regarding scope, the key observation here is that ``skerch``
+**only requires a bare-minimum interface**: compatible linear operators
+just have to provide a ``.shape = (height, width)`` attribute and implement
+the ``@`` matmul operator from the left and right handside. Trying to run
+such a simple object using the ``torch`` alternatives listed above
+does not work, because they have more interface requirements.
 
-This showcases a tradeoff: for this small cost in accuracy and runtime,
-``skerch`` allows us to work in much broader settings, also providing
-substantial flexibility and extendability (it is simple to
-incorporate custom noise sources and recovery methods, see
-:ref:`Extending With Custom Functionality`).
+Regarding runtime and accuracy, we observe that skerch is competitive.
+In this example with low-rank matrices, both sketched algorithms
+are substantially better than the full-blown SVD both in terms of runtime and
+accuracy.
+While the sketched PyTorch SVD is marginally better than ``skerch``,
+it is affected by the scope limitations previously mentioned.
+
+This showcases the main tradeoff: for a small cost in accuracy and runtime,
+``skerch`` allows us to fully leverage the flexibility and power of sketched
+methods (in :ref:`Extending With Custom Functionality` we also see how to
+easily add new noise sources and recovery methods into ``skerch``).
 
 Finally, we showcase the a-posteriori functionality, which also works on the
 bare-minimum interface and can be used to assess rank and quality of the
@@ -96,13 +99,15 @@ lop = MatLinOp(mat)
 
 try:
     _ = torch.linalg.svd(lop)
+    raise RuntimeError("This should never happen!")
 except TypeError as te:
-    print("torch.linalg.svd error on linop:", te)
+    print("Expected torch.linalg.svd error on linop:", te)
 
 try:
     _ = torch.svd_lowrank(lop)
+    raise RuntimeError("This should never happen!")
 except AttributeError as te:
-    print("torch.svd_lowrank error on linop:", te)
+    print("Expected torch.svd_lowrank error on linop:", te)
 
 
 # %%
@@ -116,8 +121,7 @@ except AttributeError as te:
 # Since the ``torch`` alternatives don't run on the bare-bones ``lop``
 # interface, we run them using the explicit ``mat``.
 # Note that, as already established, this is not a fair comparison in terms
-# of scope (plus they may also be optimized for tensors, e.g. via JIT
-# compilation).
+# of scope, since ``skerch`` makes less assumptions about its input:
 
 t0 = time()
 U1, S1, Vh1 = torch.linalg.svd(mat)
@@ -136,8 +140,7 @@ U3, S3, Vh3 = ssvd(
     SKETCH_MEAS,
     seed=SEED,
     noise_type="rademacher",
-    recovery_type="nystrom",
-    lstsq_rcond=1e-10,
+    recovery_type="hmt",
 )
 t3 = time() - t0
 times = (t1, t2, t3)
@@ -161,8 +164,8 @@ fig.tight_layout()
 
 # %%
 #
-# Despite this not being a fair comparison, we see that ``skerch`` yields
-# competitive results in terms of high speed and low error.
+# Despite this not being a fair comparison, we see that ``skerch`` still
+# yields competitive results in terms of high speed and low error.
 
 
 # %%
@@ -248,7 +251,9 @@ apost_error_bounds(TEST_MEAS, 0.5)
 
 scree_lo, scree_hi = scree_bounds(S3, err3sq**0.5)
 svals = torch.linalg.svdvals(mat)
-scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (svals**2).sum()
+scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
+    svals**2
+).sum()
 
 fig, ax = plt.subplots(figsize=(8, 3))
 ax.plot(scree_lo.cpu(), label="lower", ls="--", linewidth=2)

@@ -144,7 +144,9 @@ class SketchedAlgorithmDispatcher:
                 conj=False,
             )
         else:
-            raise ValueError(f"Unknown type! {mop_type} Supported: {supported}")
+            raise ValueError(
+                f"Unknown type! {mop_type} Supported: {supported}"
+            )
         #
         return mop
 
@@ -179,8 +181,8 @@ def ssvd(
     lop_dtype,
     outer_dims,
     seed=0b1110101001010101011,
-    noise_type="ssrft",
-    recovery_type="singlepass",
+    noise_type="rademacher",
+    recovery_type="hmt",
     lstsq_rcond=1e-6,
     meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
@@ -343,8 +345,8 @@ def seigh(
     lop_dtype,
     outer_dims,
     seed=0b1110101001010101011,
-    noise_type="ssrft",
-    recovery_type="singlepass",
+    noise_type="rademacher",
+    recovery_type="hmt",
     lstsq_rcond=1e-6,
     meas_blocksize=None,
     by_mag=True,
