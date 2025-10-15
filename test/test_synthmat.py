@@ -15,7 +15,7 @@ import pytest
 import torch
 
 from skerch.synthmat import RandomLordMatrix
-from skerch.utils import BadShapeError, rademacher_flip, complex_dtype_to_real
+from skerch.utils import BadShapeError, complex_dtype_to_real, rademacher_flip
 
 from . import rng_seeds, torch_devices
 

@@ -6,7 +6,9 @@ r"""Sketched Low-Rank Decompositions
 In this example we create noisy, numerically low-rank matrices and compare
 their ``skerch`` low-rank SVD with the built-in ``torch`` counterparts in
 terms of  interface, accuracy and speed (see
-`Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_ and `Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_).
+`Full PyTorch SVD <https://docs.pytorch.org/docs/stable/generated/torch.linalg.svd.html>`_
+and
+`Sketched PyTorch SVD <https://github.com/pytorch/pytorch/blob/v2.8.0/torch/_lowrank.py>`_).
 
 A key observation here is that ``skerch`` **only requires a bare-minimum
 interface**: compatible linear operators must simply feature a
@@ -31,15 +33,14 @@ recovery, even when the original matrix is still unknown or intractable.
 """
 
 from time import time
+
 import matplotlib.pyplot as plt
 import torch
 
-from skerch.synthmat import RandomLordMatrix
 from skerch.a_posteriori import apost_error, apost_error_bounds, scree_bounds
-from skerch.utils import truncate_decomp
-from skerch.algorithms import seigh, ssvd
+from skerch.algorithms import ssvd
 from skerch.linops import CompositeLinOp, DiagonalLinOp
-
+from skerch.synthmat import RandomLordMatrix
 
 # %%
 #
@@ -247,9 +248,7 @@ apost_error_bounds(TEST_MEAS, 0.5)
 
 scree_lo, scree_hi = scree_bounds(S3, err3sq**0.5)
 svals = torch.linalg.svdvals(mat)
-scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
-    svals**2
-).sum()
+scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (svals**2).sum()
 
 fig, ax = plt.subplots(figsize=(8, 3))
 ax.plot(scree_lo.cpu(), label="lower", ls="--", linewidth=2)

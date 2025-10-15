@@ -11,8 +11,12 @@ variety of structures, such as approximately low-rank plus diagonal.
 
 import torch
 
-from .utils import BadShapeError
-from .utils import gaussian_noise, rademacher_flip, complex_dtype_to_real
+from .utils import (
+    BadShapeError,
+    complex_dtype_to_real,
+    gaussian_noise,
+    rademacher_flip,
+)
 
 
 # ##############################################################################

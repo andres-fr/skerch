@@ -33,14 +33,12 @@ actual quantities.
   fine nonetheless for linear operators with large ambient dimension.
 """
 
-from time import time
-import matplotlib as mpl
 import matplotlib.pyplot as plt
 import torch
-from skerch.utils import gaussian_noise
-from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import hutchpp, TriangularLinOp
 
+from skerch.algorithms import TriangularLinOp, hutchpp
+from skerch.synthmat import RandomLordMatrix
+from skerch.utils import gaussian_noise
 
 # %%
 #

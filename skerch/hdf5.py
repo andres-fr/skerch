@@ -5,6 +5,7 @@
 """Persistent and out-of-core tensor functionality via HDF5."""
 
 import os
+
 import h5py
 
 
@@ -98,7 +99,6 @@ class DistributedHDF5Tensor:
         # extract total idxs and figure how are they partitioned into subfiles
         max_idx = shape[0]
         div, mod = divmod(max_idx, partition_size)
-        num_partitions = div + (mod != 0)
         idxs_fmt = cls.get_idxs_format(max_idx)
         all_path = basepath_fmt.format(cls.MAIN_PATH)
         begs_ends = list(cls.iter_partition_idxs(max_idx, partition_size))
@@ -174,7 +174,7 @@ class DistributedHDF5Tensor:
         return data, flag, h5f
 
     @classmethod
-    def merge(
+    def merge(  # noqa: C901
         cls,
         all_path,
         out_path=None,
@@ -216,7 +216,6 @@ class DistributedHDF5Tensor:
             vs_info[(beg, end)] = path
             partition_size = max(partition_size, end - beg)
         all_h5.close()
-        num_partitions = len(vs_info)
         # check that all expected indices exist, and flags are as expected
         for beg, end in cls.iter_partition_idxs(max_idx, partition_size):
             if (not (beg, end) in vs_info) or (

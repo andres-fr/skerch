@@ -5,20 +5,39 @@
 """Pytest for :mod:`skerch.utils`."""
 
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
-from skerch.utils import torch_dtype_as_str, complex_dtype_to_real
-from skerch.utils import uniform_noise, gaussian_noise, rademacher_noise
-from skerch.utils import randperm, rademacher_flip
-from skerch.utils import COMPLEX_DTYPES, phase_noise, phase_shift
-from skerch.utils import qr, pinv, lstsq, svd, eigh, htr
-from skerch.utils import subdiag_hadamard_pattern, serrated_hadamard_pattern
-from skerch.utils import truncate_decomp
+from skerch.utils import (
+    COMPLEX_DTYPES,
+    complex_dtype_to_real,
+    eigh,
+    gaussian_noise,
+    htr,
+    lstsq,
+    phase_noise,
+    phase_shift,
+    pinv,
+    qr,
+    rademacher_flip,
+    rademacher_noise,
+    randperm,
+    serrated_hadamard_pattern,
+    subdiag_hadamard_pattern,
+    svd,
+    torch_dtype_as_str,
+    truncate_decomp,
+    uniform_noise,
+)
 
-from . import rng_seeds, torch_devices
-from . import autocorrelation_test_helper, svd_test_helper, eigh_test_helper
+from . import (
+    autocorrelation_test_helper,
+    eigh_test_helper,
+    rng_seeds,
+    svd_test_helper,
+    torch_devices,
+)
 
 
 # ##############################################################################
@@ -190,9 +209,7 @@ def test_dtype_utils():
     ), "Bad real(dtype) cast!"
     #
     dtype = torch.complex32
-    assert "complex32" == torch_dtype_as_str(
-        dtype
-    ), "Bad str(type) conversion!"
+    assert "complex32" == torch_dtype_as_str(dtype), "Bad str(type) conversion!"
     assert torch.float16 == complex_dtype_to_real(
         dtype
     ), "Bad real(dtype) cast!"
@@ -347,9 +364,7 @@ def test_noise_sources(
                             ), "Different seed, same noise? (uniform)"
                             assert torch.allclose(
                                 noise1.conj(),
-                                phase_noise(
-                                    dims, sd, dtype, device, conj=True
-                                ),
+                                phase_noise(dims, sd, dtype, device, conj=True),
                                 atol=tol,
                             ), "phase_noise not conjugating correctly?"
                             # phase shift
@@ -536,16 +551,12 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols_badcond):
                 assert (
                     tnsr_inv.dtype == tnsr.dtype
                 ), "Incorrect torch pinv dtype?"
-                assert (
-                    arr_inv.dtype == arr.dtype
-                ), "Incorrect numpy pinv dtype?"
+                assert arr_inv.dtype == arr.dtype, "Incorrect numpy pinv dtype?"
                 #
                 assert (
                     tinv2.device == tnsr.device
                 ), "Incorrect torch lstsq device?"
-                assert (
-                    tinv2.dtype == tnsr.dtype
-                ), "Incorrect torch lstsq dtype?"
+                assert tinv2.dtype == tnsr.dtype, "Incorrect torch lstsq dtype?"
                 assert ainv2.dtype == arr.dtype, "Incorrect numpy lstsq dtype?"
 
 

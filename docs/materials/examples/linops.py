@@ -18,20 +18,25 @@ operators at scale.
 """
 
 from time import time
+
 import matplotlib.pyplot as plt
 import torch
-from skerch.utils import gaussian_noise
-from skerch.linops import linop_to_matrix, TransposedLinOp, TorchLinOpWrapper
-from skerch.linops import ByBlockLinOp, CompositeLinOp, SumLinOp
-from skerch.linops import DiagonalLinOp, BandedLinOp
+
+from skerch.algorithms import snorm
+from skerch.linops import (
+    CompositeLinOp,
+    DiagonalLinOp,
+    TorchLinOpWrapper,
+    TransposedLinOp,
+    linop_to_matrix,
+)
 from skerch.measurements import (
-    RademacherNoiseLinOp,
     GaussianNoiseLinOp,
     PhaseNoiseLinOp,
+    RademacherNoiseLinOp,
     SsrftNoiseLinOp,
 )
-from skerch.algorithms import snorm
-
+from skerch.utils import gaussian_noise
 
 # %%
 #
@@ -235,7 +240,7 @@ ax1.set_title("Rademacher")
 ax2.set_title("Gaussian")
 ax3.set_title("Phase")
 ax4.set_title("SSRFT")
-fig.suptitle(f"Different types of noise matrices")
+fig.suptitle("Different types of noise matrices")
 fig.tight_layout()
 
 
@@ -254,7 +259,7 @@ mop_shape = (mat.shape[1], 100)
 mop_slow = RademacherNoiseLinOp(mop_shape, SEED, blocksize=1, register=False)
 mop_fast = RademacherNoiseLinOp(mop_shape, SEED, blocksize=100, register=False)
 times = [[], []]
-for i in range(20):
+for _ in range(20):
     t0 = time()
     mat @ mop_slow
     times[0].append(time() - t0)
@@ -266,7 +271,7 @@ for i in range(20):
 fig, ax = plt.subplots(figsize=(8, 3))
 ax.boxplot(times, label=["blocksize=1", "blocksize=100"])
 ax.set_yscale("log")
-fig.suptitle(f"Speedup resulting from blockwise measurements")
+fig.suptitle("Speedup resulting from blockwise measurements")
 fig.tight_layout()
 
 

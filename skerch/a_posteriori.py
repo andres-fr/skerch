@@ -9,9 +9,11 @@ sketched approximation, once it has been obtained.
 """
 
 import math
+
 import torch
-from .utils import gaussian_noise, COMPLEX_DTYPES, complex_dtype_to_real
+
 from .algorithms import SketchedAlgorithmDispatcher
+from .utils import complex_dtype_to_real
 
 
 ################################################################################
@@ -131,8 +133,6 @@ def apost_error(
         meas_blocksize = num_meas
     if adj_meas is None:
         adj_meas = h > w  # this seems to be more accurate
-    is_complex = dtype in COMPLEX_DTYPES
-    beta = 2 if is_complex else 1
     #
     rdtype = complex_dtype_to_real(dtype)
     frob1_all = torch.empty(num_meas, dtype=rdtype, device=device)
@@ -150,8 +150,6 @@ def apost_error(
     for block, idxs in mop.get_blocks(dtype, device):
         # we need that block @ block.H approximates I
         # assuming block is by-column!
-        block *= 1000
-        bnorm = block.norm(dim=1)
         block = block.T * ((len(idxs) ** 0.5) / block.norm(dim=1))
         # block has been transposed
         meas1 = block @ lop1 if adj_meas else lop1 @ block.T
@@ -206,9 +204,7 @@ def scree_bounds(S, err_frob):
       scree_lo, scree_hi = scree_bounds(S, err**0.5)
     """
     if (abs(S).diff() > 0).any():
-        raise ValueError(
-            "Provided S must be given in non-ascending magnitude!"
-        )
+        raise ValueError("Provided S must be given in non-ascending magnitude!")
     approx_norm = S.norm()
     # Nonincreasing curve with the (estimated) residual energies, going from
     # approx_norm down to 0

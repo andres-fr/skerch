@@ -37,11 +37,10 @@ import matplotlib.pyplot as plt
 import torch
 from curvlinops import HessianLinearOperator
 
-from skerch.utils import gaussian_noise, rademacher_noise
-from skerch.linops import CompositeLinOp, DiagonalLinOp, TorchLinOpWrapper
-from skerch.algorithms import ssvd, seigh
 from skerch.a_posteriori import apost_error
-
+from skerch.algorithms import seigh
+from skerch.linops import CompositeLinOp, DiagonalLinOp, TorchLinOpWrapper
+from skerch.utils import gaussian_noise, rademacher_noise
 
 # %%
 #
@@ -156,9 +155,7 @@ sH = CompositeLinOp((("Q", evs), ("Lbd", DiagonalLinOp(ews)), ("Qt", evs.T)))
 
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(ews.cpu())
-ax2.imshow(
-    ((evs[-200:] * ews) @ evs[-200:].T).abs().log().cpu(), aspect="auto"
-)
+ax2.imshow(((evs[-200:] * ews) @ evs[-200:].T).abs().log().cpu(), aspect="auto")
 fig.suptitle("Recovered Hessian eigenvalues and fragment of $log |H|$")
 
 rel_err = (err_sq / frob_sq) ** 0.5

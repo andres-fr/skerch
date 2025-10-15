@@ -27,13 +27,12 @@ also privdes access to some of the HDF5 functionality via CLI, see
 
 import os
 import tempfile
-import matplotlib.pyplot as plt
+
 import torch
 
-from skerch.utils import torch_dtype_as_str
-from skerch.measurements import GaussianNoiseLinOp
 from skerch.hdf5 import DistributedHDF5Tensor
-
+from skerch.measurements import GaussianNoiseLinOp
+from skerch.utils import torch_dtype_as_str
 
 # %%
 #

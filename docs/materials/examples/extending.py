@@ -15,14 +15,12 @@ and modified with low coding overhead.
 """
 
 from collections import defaultdict
-from time import time
-import matplotlib.pyplot as plt
+
 import torch
 
-from skerch.synthmat import RandomLordMatrix
-from skerch.measurements import GaussianNoiseLinOp
 from skerch.algorithms import SketchedAlgorithmDispatcher, ssvd
-
+from skerch.measurements import GaussianNoiseLinOp
+from skerch.synthmat import RandomLordMatrix
 
 # %%
 #
@@ -145,7 +143,8 @@ print(
 # particular setting of linear operators and algorithms? With ``skerch``,
 # this can be easily tested:
 #
-# 1. Define our new measurement linop by extending :class:`skerch.linops.ByBlockLinOp`
+# 1. Define our new measurement linop by extending
+#    :class:`skerch.linops.ByBlockLinOp`
 # 2. Extend the dispatcher to provide the measurement linop as needed
 # 3. Feed the requested string and dispatcher to the existing SVD algorithm
 

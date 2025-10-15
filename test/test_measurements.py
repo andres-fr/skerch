@@ -11,31 +11,30 @@
 
 import time
 import warnings
-import pytest
-import torch
 from functools import partial
 
-from skerch.linops import linop_to_matrix, TransposedLinOp, CompositeLinOp
+import pytest
+import torch
 
+from skerch.linops import CompositeLinOp, TransposedLinOp, linop_to_matrix
 from skerch.measurements import (
-    RademacherNoiseLinOp,
+    SSRFT,
     GaussianNoiseLinOp,
     PhaseNoiseLinOp,
-    SSRFT,
+    RademacherNoiseLinOp,
     SsrftNoiseLinOp,
 )
-
 from skerch.utils import (
-    gaussian_noise,
-    BadShapeError,
-    BadSeedError,
     COMPLEX_DTYPES,
+    BadSeedError,
+    BadShapeError,
+    gaussian_noise,
 )
 
 from . import (
+    autocorrelation_test_helper,
     rng_seeds,
     torch_devices,
-    autocorrelation_test_helper,
 )
 
 

@@ -181,13 +181,12 @@ CHANGELOG:
   - New measurement noise linops: Rademacher, Gaussian, Phase, SSRFT
 * Data API:
   - Batched support for arbitrary tensors in distributed HDF5 arrays
-  - Modular and extendible HDF5 layouts (oversampled, nystrom...)
+  - Modular and extendible HDF5 layouts
 * Sketching API:
   - Modular measurement API supporting multiprocessing and HDF5
-  - Modular recovery methods (singlepass, Nystrom, oversampled)
+  - Modular recovery methods (hmt, singlepass, Nystrom, oversampled)
 * Algorithm API:
-  - Algorithms: XDiag/DiagPP, XTrace/TracePP, SSVD, Triangular, Norms
-  - Efficient support for Hermitian versions
-  - Dispatcher for modularized use of noise sources and recovery types
-  - Matrix-free a-posteriori error verification
+  - Algorithms: Hutch++ XDiag, SSVD, Triangular, SNorm (also Hermitian)
+  - Modular and extendible design for noise sources and recovery types
+  - Matrix-free a-posteriori error verification and rank estimation
 ```

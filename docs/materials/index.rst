@@ -71,6 +71,11 @@ See the API docs and examples for illustrations of the above points.
     Analysis in Distributed and Streaming Models”*. ACM Symposium on Theory
     of Computing.
 
+  * `[TYUC2018] <https://arxiv.org/abs/1609.00048>`_: Joel A. Tropp, Alp
+    Yurtsever, Madeleine Udell, Volkan Cevher. 2018. *“Practical Sketching
+    Algorithms for Low-Rank Matrix Approximation”*. SIAM
+    Journal on Matrix Analysis and Applications 38 (4).
+
   * `[TYUC2019] <https://arxiv.org/abs/1902.08651>`_: Joel A. Tropp, Alp
     Yurtsever, Madeleine Udell, Volkan Cevher. 2019. *“Streaming Low-rank
     Matrix Approximation with an Application to Scientific Simulation”*. SIAM

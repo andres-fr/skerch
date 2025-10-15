@@ -5,10 +5,9 @@
 """Basic utilities for (matrix-free) linear operators."""
 
 
-import warnings
 import torch
 
-from .utils import BadShapeError, htr, COMPLEX_DTYPES
+from .utils import BadShapeError, htr
 
 
 # ##############################################################################
@@ -89,7 +88,7 @@ class BaseLinOp:
         try:
             h, w = shape
         except Exception as e:
-            raise ValueError(f"Malformed shape? {shape}")
+            raise ValueError(f"Malformed shape? {shape}") from e
         if h <= 0 or w <= 0:
             raise BadShapeError(f"Empty linop with shape {shape}?")
         self.shape = shape
@@ -533,7 +532,6 @@ class SumLinOp(BaseLinOp):
 
     def __repr__(self):
         """Returns a string in the form op1 + op2 + op3 ..."""
-        signs_str = ["+ " if s else "- " for s in self.signs]
         result = ("-" if not self.signs[0] else "") + self.names[0]
         for s, n in zip(self.signs[1:], self.names[1:]):
             result += (" + " if s else " - ") + n
@@ -699,7 +697,7 @@ class BandedLinOp(BaseLinOp):
             *((d.dtype, d.device) for d in indexed_diags.values())
         )
         if len(set(diag_dtypes)) != 1 or len(set(diag_devices)) != 1:
-            raise ValueError(f"Inconsistent diagonal dtypes/devices!")
+            raise ValueError("Inconsistent diagonal dtypes/devices!")
         # done checking, initialize object
         self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
         self.symmetric = symmetric
@@ -841,6 +839,6 @@ class TorchLinOpWrapper:
 
     def __repr__(self):
         """Returns a string in the form TorchLinOpWrapper<LinOp ...>."""
-        wrapper = "TorchLinOpWrapper"  #  self.__class__.__name__
+        wrapper = "TorchLinOpWrapper"  # self.__class__.__name__
         result = f"{wrapper}<{super().__repr__()}>"
         return result

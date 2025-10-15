@@ -20,7 +20,6 @@ import torch
 
 from skerch.synthmat import RandomLordMatrix
 
-
 # %%
 #
 # ##############################################################################
@@ -93,7 +92,7 @@ for i, diag_ratio in enumerate(DIAG_RATIOS):
 for i, exp_decay in enumerate(SV_DECAYS):
     axs[-1, i].set_xlabel(f"exp decay={exp_decay}")
 
-fig.suptitle(f"Sampled LoRD matrices, with singular values plotted on top")
+fig.suptitle("Sampled LoRD matrices, with singular values plotted on top")
 fig.tight_layout()
 
 

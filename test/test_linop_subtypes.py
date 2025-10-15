@@ -9,10 +9,10 @@ import pytest
 import torch
 
 from skerch.linops import (
-    linop_to_matrix,
-    TransposedLinOp,
-    DiagonalLinOp,
     BandedLinOp,
+    DiagonalLinOp,
+    TransposedLinOp,
+    linop_to_matrix,
 )
 from skerch.utils import BadShapeError, gaussian_noise
 
@@ -143,9 +143,7 @@ def test_diagonal_correctness(
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
                     ), "Incorrect transposition! (fwd)"
-                    lopmatT = linop_to_matrix(
-                        lopT, dtype, device, adjoint=True
-                    )
+                    lopmatT = linop_to_matrix(lopT, dtype, device, adjoint=True)
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
                     ), "Incorrect transposition! (adj)"
@@ -256,9 +254,7 @@ def test_banded_correctness(
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
                     ), "Incorrect transposition! (fwd)"
-                    lopmatT = linop_to_matrix(
-                        lopT, dtype, device, adjoint=True
-                    )
+                    lopmatT = linop_to_matrix(lopT, dtype, device, adjoint=True)
                     assert torch.allclose(
                         mat.H, lopmatT, atol=tol
                     ), "Incorrect transposition! (adj)"

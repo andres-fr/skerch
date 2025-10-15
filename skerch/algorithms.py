@@ -6,27 +6,32 @@
 
 
 import warnings
-from functools import partial
+
 import torch
-from .recovery import singlepass, nystrom, oversampled
-from .recovery import singlepass_h, nystrom_h, oversampled_h
-from .measurements import (
-    RademacherNoiseLinOp,
-    GaussianNoiseLinOp,
-    PhaseNoiseLinOp,
-    SsrftNoiseLinOp,
-)
+
 from .linops import (
     BaseLinOp,
-    CompositeLinOp,
     TransposedLinOp,
     check_linop_input,
 )
+from .measurements import (
+    GaussianNoiseLinOp,
+    PhaseNoiseLinOp,
+    RademacherNoiseLinOp,
+    SsrftNoiseLinOp,
+)
+from .recovery import (
+    nystrom,
+    nystrom_h,
+    oversampled,
+    oversampled_h,
+    singlepass,
+    singlepass_h,
+)
 from .utils import (
-    BadShapeError,
     COMPLEX_DTYPES,
+    BadShapeError,
     qr,
-    lstsq,
     serrated_hadamard_pattern,
 )
 
@@ -35,21 +40,22 @@ from .utils import (
 # # DISPATCHER
 # ##############################################################################
 class SketchedAlgorithmDispatcher:
-    """Provides sketched algos with easurement linops and recovery algorithms.
+    """Provides sketched algos with measurement linops and recovery algorithms.
 
-    Sketched algorithms are flexible in the kind of noise or recovery method
-    they use. In order to run, algorithms call this dispatcher with their
-    requested configuration (e.g. "gaussian" for noise and "nystrom" for
-    recovery).
+    Sketched methods are generally flexible in the kind of noise or recovery
+    method they use. In order to accommodate for this flexibility,
+    ``skerch`` algorithms call this dispatcher with their
+    requested configuration (e.g. ``"gaussian"`` for noise and ``"nystrom"``
+    for recovery).
 
-    This modular and extendible framework makes it easy to choose between
+    This modular and extendible framework makes it easy to change between
     existing options, and also to add new options without having to modify
     the sketched algorithms. For example, if users want to run :func:`ssvd`
     with a new type of noise linop called ``MyNoise``, they just need to
     extend :meth:`mop` into a new dispatcher class, and provide the
     dispatcher to SSVD.
 
-    Detailed examples for new extensions and recovery methods can be found in
+    Detailed examples on how to do this can be found in
     the documentation.
     """
 
@@ -60,10 +66,9 @@ class SketchedAlgorithmDispatcher:
         :param recovery_type: String specifying which recovery type to be used
           (e.g. ``"singlepass"``, ``"nystrom"``, ``"oversampled_500"``).
         :returns: A tuple ``(fn, inner_dims)``, where ``fn`` is a recovery
-          function with the same interface as the ones in
-          :mod:`skerch.recovery`. If ``inner_dims`` is None, ``fn`` should
-          interface like :func:`skerch.recovery.singlepass`. If ``inner_dims``
-          is a positive integer, ``fn`` should behave like
+          function. If ``inner_dims`` is None, ``fn`` should
+          have an interface like :func:`skerch.recovery.singlepass`. If
+          ``inner_dims`` is a positive integer, ``fn`` should behave like
           :func:`skerch.recovery.oversampled`.
         """
         supported = "singlepass, nystrom, oversampled_123"
@@ -104,9 +109,9 @@ class SketchedAlgorithmDispatcher:
           See :class:`skerch.linops.ByBlockLinOp` for more details.
         :param register: Whether to register this linop in a global tracker
           that will raise an exception if other linops with overlapping
-          seeds have been already created (useful to debug new methods
-          if they have issues due to correlated noise). See
-          :class:`skerch.measurements.RademacherNoiseLinOp`.
+          seeds have been already created. This is useful to debug new methods
+          if they have e.g. issues due to the use of correlated noise. See
+          :class:`skerch.measurements.RademacherNoiseLinOp` for an example.
         """
         supported = "rademacher, gaussian, ssrft, phase"
         if mop_type == "rademacher":
@@ -135,15 +140,17 @@ class SketchedAlgorithmDispatcher:
                 conj=False,
             )
         else:
-            raise ValueError(
-                f"Unknown type! {mop_type} Supported: {supported}"
-            )
+            raise ValueError(f"Unknown type! {mop_type} Supported: {supported}")
         #
         return mop
 
     @staticmethod
     def unitnorm_lop_entries(lop_type):
-        """True if all ``lop_type`` entries are supposed to have unit norm."""
+        """True if all ``lop_type`` entries are supposed to have unit norm.
+
+        E.g. Rademacher or Phase noise entries return ``True``, and Gaussian
+        returns ``False``.
+        """
         if lop_type in {"rademacher", "phase"}:
             result = True
         elif lop_type in {"gaussian", "ssrft"}:
@@ -152,6 +159,7 @@ class SketchedAlgorithmDispatcher:
             warnings.warn(
                 f"Unknown linop type {lop_type}. Assumed to be non-unitnorm. ",
                 RuntimeWarning,
+                stacklevel=2,
             )
             result = False
         #
@@ -182,7 +190,7 @@ def ssvd(
     :math:`A \approx P P^H A Q Q^H` and to obtain an SVD we just need to
     decompose the small "core" matrix :math:`C = P^H A Q`.
 
-    The crucial realization here is that we can efficiently obtain
+    The crucial point here is that we can efficiently obtain
     :math:`P, Q` from random measurements, or sketches. This function
     follows that plan, namely:
 
@@ -191,6 +199,19 @@ def ssvd(
     * Solve the core matrix using the desired ``recovery`` algorithm
 
     The result is a sketched SVD of :math:`A`.
+
+    .. note::
+
+      The method described in `[HMT2009] <https://arxiv.org/abs/0909.4061>`_
+      requires us to first
+      obtain :math:`P, Q`, and then do a *second round of measurements*
+      :math:`A Q` to obtain the core matrix.
+      Further developments have shown that it is possible to obtain
+      :math:`A Q` without having to run a second pass of measurements,
+      which can lead to significant speedup if we leverage parallelization
+      (see e.g. `[TYUC2018] <https://arxiv.org/abs/1609.00048>`_).
+      These *single-pass* recovery methods have also
+      been implemented in :mod:`skerch.recovery`.
 
     :param lop: The linear operator :math:`A` to be decomposed
     :param lop_device: The device where :math:`A` runs
@@ -203,10 +224,10 @@ def ssvd(
     :param recovery_type: Which recovery method to use. Must be supported
       by the given ``dispatcher`` (see
       :meth:`SketchedAlgorithmDispatcher.recovery` and
-      :meth:`skerch.recovery`).
+      :mod:`skerch.recovery`).
     :param lstsq_rcond: Least-squares condition threshold used in the
       recovery, see :meth:`SketchedAlgorithmDispatcher.recovery`
-      and :meth:`skerch.recovery`.
+      and :mod:`skerch.recovery`.
 
     :param meas_blocksize: How many sketched measurements should be done
       at once. Ideally, as many as it fits in memory.
@@ -325,10 +346,12 @@ def seigh(
 
     * It assumes that the provided ``lop`` is Hermitian
     * Less measurements are performed due to Hermitian symmetry
-    * Unlike the SVD, the returned value is :math:`\Lambda, Q`, where
+    * Unlike the SVD, the returned value is a pair :math:`(\Lambda, Q)`, where
       :math:`A \approx Q diag(\Lambda) Q^H`. Since :math:`A` is Hermitian,
       this is an eigendecomposition: :math:`\Lambda` may contain negative
       values, and both left and right matrices are identical.
+
+    Refer to the :func:`ssvd` docs for more details.
     """
     register = False  # set to True for seed debugging
     h, w = lop.shape
@@ -413,7 +436,7 @@ def seigh(
 # ##############################################################################
 # # TRACEPP AND DIAGPP/XDIAG
 # ##############################################################################
-def hutchpp(
+def hutchpp(  # noqa: C901
     lop,
     lop_device,
     lop_dtype,
@@ -433,17 +456,18 @@ def hutchpp(
 
     .. math::
 
-      A_{ii} = \mathbb{E}_{v \sim \mathcal{R}} \big[ \bar{v} \odot Av \big]_i
+      \mathbb{E}_{v \sim \mathcal{R}} \big[ \bar{v} \odot Av \big]_i
+             = \sum_j A_{ij} \mathbb{E}\big[ \bar{v}_i v_j \big] = A_{ii}
 
     The convergence of this estimator can be accelerated greatly if we
     also incorporate rank deflation :math:`A = (Q Q^H) A + (I - (Q Q^H)) A`,
     where :math:`Q` is an orthogonal matrix spanning the top space of
     :math:`A`. Similarly to :func:`ssvd`, it turns out that we can obtain
     :math:`Q` efficiently from ``defl_dims`` random measurements.
-
     Then, the diagonal of :math:`(Q Q^H) A` can be obtained exactly, and
     :math:`diag((I - (Q Q^H)) A)` is then estimated via Girard-Hutchinson
-    using ``extra_gh_meas`` measurements.
+    using ``extra_gh_meas`` measurements
+    (see `[BN2022] <https://arxiv.org/abs/2201.10684>`_).
 
     A very similar logic applies for the estimation of the **trace**, which
     is the sum of the diagonal entries. In fact, most computations can be
@@ -507,6 +531,7 @@ def hutchpp(
             "Non-unitnorm noise can be unstable for trace/diag estimation! "
             + "Check output and consider using Rademacher or PhaseNoise.",
             RuntimeWarning,
+            stacklevel=2,
         )
     if (defl_dims < 0) or (extra_gh_meas < 0):
         raise ValueError("Negative number of measurements?")
@@ -588,7 +613,7 @@ def hutchpp(
     return result
 
 
-def xdiag(
+def xdiag(  # noqa: C901
     lop,
     lop_device,
     lop_dtype,
@@ -599,7 +624,7 @@ def xdiag(
     dispatcher=SketchedAlgorithmDispatcher,
     cache_mop=True,
 ):
-    r"""Diagonal sketched approximation via XDiag.
+    r"""Diagonal sketched approximation leveraging exchangeability.
 
     This function implements the XDiag routine described in
     `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_, leveraging the
@@ -608,25 +633,29 @@ def xdiag(
     Following :func:`hutchpp`, we have the rank-deflation
     :math:`A = (Q Q^H) A + (I - (Q Q^H)) A`, where :math:`Q` has been obtained
     from orthogonalizing ``k`` random measurements.
-    Then, the core idea is to average all ``k`` estimations that result from
-    leaving one measurement out in order to obtain a modified
-    sub-projector :math:`\tilde{Q}_i`. It turns out that averaging all such
-    sub-projectors yields a matrix in the form :math:`\Psi = Q Z Q^H`,
-    such that :math:`A = \Psi A + (I - \Psi) A`. Crucially, this averaging
-    of ``k`` leave-one-out estimators results in drastically reduced variance.
+    The core idea here is that, for ``k`` measurements, we can obtain ``k``
+    leave-one-out estimations, and if we average them, we obtain the same
+    expected recovery, but we benefit from drastically reduced variance.
 
-    Effectively, the algorithm is a modification of :func:`hutchpp` with
+    A crucial advantage is that, if we know :math:`Q`, the corresponding
+    leave-one-out matrix :math:`\tilde{Q}_i` can be found efficiently.
+    Then, averaging all such sub-matrices yields
+    :math:`\Psi = Q \frac{S S^H}{k} Q^H`,
+    such that :math:`A = \Psi A + (I - \Psi) A`.
+    Thus, we see that the algorithm is a modification of :func:`hutchpp` with
     the following main differences:
 
-    * The :math:`Q Q^H` projector is efficiently replaced with :math:`\Psi`
-    * The number of Girard-Hutchinson measurements is tied to ``k``, since
-      the exact same :math:`\Psi` must be used
     * The Girard-Hutchinson measurements are recycled from the deflation
       step
+    * The :math:`Q Q^H` projector is efficiently replaced with :math:`\Psi`
+    * The number of Girard-Hutchinson measurements is tied to ``k``, since
+      the leave-one-out procedure depends on :math:`\Omega`.
 
-    One important drawback is that the Girard-Hutchinson component still
-    requires a substantial number of measurements to be useful, which here
-    forces us to use a large number of deflation dimensions.
+    .. note::
+
+      Despite the exchangeability "magic", the Girard-Hutchinson component
+      still requires a substantial number of measurements to be helpful,
+      which here forces us to use a large number of deflation dimensions.
 
     :param lop: The :math:`A` operator whose diagonal we wish to estimate.
     :param lop_device: The device where :math:`A` runs
@@ -671,6 +700,7 @@ def xdiag(
             "Non-unitnorm noise can be unstable for diagonal estimation! "
             + "Check output and consider using Rademacher or PhaseNoise.",
             RuntimeWarning,
+            stacklevel=2,
         )
     # instantiate outer measurement linop and perform outer measurements
     mop = dispatcher.mop(
@@ -745,9 +775,15 @@ def snorm(
 
     It is possible to estimate the norm of a linear operator from a few
     random measurements. In
-    `[TYUC2018, 6.2] <https://arxiv.org/abs/1609.00048>`_, it is shown
+    `[TYUC2019, 6.2] <https://arxiv.org/abs/1902.08651>`_, it is shown
     that the Frobenius norm is proportional to the norm of the measurements
-    themselves (akin to a Gram trace estimation).
+    themselves (akin to a Gram trace estimation). For :math:`q` random
+    measurements :math:`\Omega` and ``beta = 2 if complex_dtype else 1``
+    we have:
+
+    .. math::
+
+      \lVert A \rVert_F^2 = \frac{1}{\beta q} \mathbb{E} \big[ A \Omega \big]
 
     From the same measurements, we can also estimate the operator norm
     (largest singular value) as follows. Consider the linear operator
@@ -760,16 +796,17 @@ def snorm(
       \approx \lVert Q Q^H A \rVert_2 = \lVert Q^H A \rVert_2
 
     And, as discussed in :func:`ssvd`, :math:`Q` can be efficiently estimated
-    from a few random measurements.
+    from a few random measurements :math:`A \Omega`.
 
     :param lop: The :math:`A` operator whose norms we wish to estimate.
     :param lop_device: The device where :math:`A` runs
     :param lop_dtype: The datatype :math:`A` interacts with
     :param num_meas: How many measurements will be used to estimate
-      the norms
+      the norms (:math:`q` in the above description)
     :param seed: Overall random seed for the algorithm
-    :param noise_type: Which noise to use. Must be supported by the given
-      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param noise_type: Which noise to use for :math:`\Omega`. Must be
+      supported by the given ``dispatcher``
+      (see :meth:`SketchedAlgorithmDispatcher.mop`)
     :param meas_blocksize: How many sketched measurements should be done
       at once. Ideally, as many as it fits in memory.
       See :class:`skerch.linops.ByBlockLinOp` for more details.
@@ -814,7 +851,6 @@ def snorm(
         if h2 > w2
         else (sketch2 @ sketch2.conj().T)
     )
-    supported_norm_types = {"fro", "op"}
     result = {}
     for norm_type in norm_types:
         if norm_type == "op":
@@ -822,10 +858,7 @@ def snorm(
         elif norm_type == "fro":
             result[norm_type] = gram.diag().real.sum() ** 0.5
         else:
-            raise ValueError(
-                f"Unsupported norm type! {norm_type}. "
-                "Supported: {supported_norm_types}"
-            )
+            raise ValueError(f"Unsupported norm type! {norm_type}.")
     #
     return result, (Q, R, sketch2)
 
@@ -834,7 +867,7 @@ def snorm(
 # # TRIANGULAR LINEAR OPERATOR
 # ##############################################################################
 class TriangularLinOp(BaseLinOp):
-    r"""Given a square linop, compute products with one of its triangles.
+    r"""Given a square linop, compute products with its lower/upper triangle.
 
     The triangle of a linear operator can be approximated from the full
     operator via a "staircase pattern" of exact measurements. For example,
@@ -861,33 +894,35 @@ class TriangularLinOp(BaseLinOp):
     :math:`A` from the block-triangles near the diagonal.
 
     Finally, we add the exact step-wise measurements and the
-    serrated Girard-Hutchinson estimation, resulting in a triangular
-    estimation.
+    serrated Girard-Hutchinson estimation (see e.g. :func:`hutchpp`),
+    resulting in a triangular estimation.
 
     Usage example::
 
       lop = MyLinOp("...")
-      lop_tril = TriangularLinOp(lop, stair_width=10, num_gh_meas=1000)
-      w = lop_tril @ v
+      tril = TriangularLinOp(lop, lower=True, stair_width=10, num_gh_meas=1000)
+      w = tril @ v
 
-    :param lop: A square linear operator of order ``dims``, such that
-      ``self @ v`` will equal ``triangle(lop) @ v``. It must implement a
+    :param lop: A square linear operator. It must implement a
       ``lop.shape = (dims, dims)`` attribute as well as the left- and right-
       matmul operator ``@``, interacting with torch tensors.
     :param stair_width: Width of each step in the staircase pattern. If
-      it is 1, a total of ``dims`` exact measurements will be performed.
+      it is 1, a total of ``dims`` exact measurements will be performed and
+      the triangular products will be exact.
       If it equals ``dims``, no exact measurements will be performed (since
       the staircase pattern would cover the full triangle). The step size
       regulates this trade-off: Ideally, we want as many exact measurements
       as possible, but not too many. If no value is provided, ``dims // 2``
       is chosen by default, such that only 1 exact measurement is performed.
     :param num_hutch_measurements: Number of measurements for the
-      serrated estimation. This estimator generally requires
+      serrated estimation that complements the staircase estimation.
+      This estimator generally requires
       many measurements to be informative, and it can even be counter-
       productive if not enough measurements are given. If ``lop`` is not
       diagonally dominant, consider setting this to 0 for a sufficiently
-      good approximation via ``staircase_measurements``. Otherwise,
-      make sure to provide a sufficiently high number of measurements.
+      good approximation via deterministic ``staircase_measurements``.
+      Otherwise, make sure to provide a sufficiently high number of
+      measurements.
     :param lower: If true, lower triangular matmuls will be computed.
       Otherwise, upper triangular.
     :param with_main_diagonal: If true, the main diagonal will be included
@@ -964,6 +999,7 @@ class TriangularLinOp(BaseLinOp):
                 "num_gh_meas <=0: only staircase measurements will be done! "
                 + "Set this to a large integer for more accurate estimation",
                 RuntimeWarning,
+                stacklevel=2,
             )
         else:
             if not self.is_noise_unitnorm:
@@ -972,6 +1008,7 @@ class TriangularLinOp(BaseLinOp):
                     "matvecs! Check output and consider using Rademacher "
                     "or PhaseNoise.",
                     RuntimeWarning,
+                    stacklevel=2,
                 )
         #
         super().__init__(lop.shape)  # this sets self.shape also
@@ -1012,7 +1049,7 @@ class TriangularLinOp(BaseLinOp):
         """
         dtype, device = x.dtype, x.device
         result = torch.zeros_like(x)
-        for block, idxs in mop.get_blocks(dtype, device):
+        for block, _ in mop.get_blocks(dtype, device):
             pattern = serrated_hadamard_pattern(
                 block.T,
                 stair_width,

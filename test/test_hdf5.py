@@ -5,15 +5,17 @@
 """Pytest for :mod:`skerch.hdf5`."""
 
 
+import itertools
 import os
 import tempfile
-import itertools
+
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
-from skerch.utils import torch_dtype_as_str, gaussian_noise
 from skerch.hdf5 import DistributedHDF5Tensor, create_hdf5_layout_lop
+from skerch.utils import gaussian_noise, torch_dtype_as_str
+
 from . import rng_seeds, torch_devices
 
 
@@ -310,9 +312,7 @@ def test_hdf5_create_layout_lop():
             data, flags, h5 = DistributedHDF5Tensor.load(ro_pth)
             assert data.dtype == strtype, "Wrong HDF5 ro dtype?"
             assert data.shape == (outermeas, shape[0]), "Wrong HDF5 ro shape?"
-            num = len(
-                [x for x in os.listdir(tmpdir.name) if "rightouter" in x]
-            )
+            num = len([x for x in os.listdir(tmpdir.name) if "rightouter" in x])
             assert num == (
                 num_outer_blocks + 1
             ), "Wrong number of ro HDF5 subfiles created?"

@@ -5,22 +5,35 @@
 """Pytest for :mod:`algorithms`."""
 
 
-import pytest
-import torch
-import numpy as np
 from collections import defaultdict
 
+import numpy as np
+import pytest
+import torch
 
-from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
-from skerch.linops import linop_to_matrix, TransposedLinOp
-from skerch.synthmat import RandomLordMatrix
-from skerch.algorithms import SketchedAlgorithmDispatcher, TriangularLinOp
-from skerch.algorithms import ssvd, seigh, hutchpp, xdiag
-from skerch.algorithms import snorm
+from skerch.algorithms import (
+    SketchedAlgorithmDispatcher,
+    TriangularLinOp,
+    hutchpp,
+    seigh,
+    snorm,
+    ssvd,
+    xdiag,
+)
+from skerch.linops import TransposedLinOp, linop_to_matrix
 from skerch.measurements import GaussianNoiseLinOp
-from . import rng_seeds, torch_devices
-from . import BasicMatrixLinOp, svd_test_helper, eigh_test_helper
-from . import relerr, relsumerr
+from skerch.synthmat import RandomLordMatrix
+from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
+
+from . import (
+    BasicMatrixLinOp,
+    eigh_test_helper,
+    relerr,
+    relsumerr,
+    rng_seeds,
+    svd_test_helper,
+    torch_devices,
+)
 
 
 # ##############################################################################
@@ -619,9 +632,7 @@ def test_hutchpp_xdiag_formal():
         _ = xdiag(H, H.device, H.dtype, x_dims=0, seed=0)
     # warning for non-unitnorm noise
     with pytest.warns(RuntimeWarning):
-        _ = xdiag(
-            H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian"
-        )
+        _ = xdiag(H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian")
 
 
 def test_diagpp_xdiag_correctness(

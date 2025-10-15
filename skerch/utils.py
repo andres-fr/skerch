@@ -5,9 +5,9 @@
 """General utilities for the ``skerch`` library."""
 
 
-import torch
 import numpy as np
 import scipy
+import torch
 
 # ##############################################################################
 # # DTYPES

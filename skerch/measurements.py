@@ -5,20 +5,18 @@
 """Functionality to perform sketched measurements."""
 
 from collections import defaultdict
-import warnings
+
 import torch
 import torch_dct as dct
-from .linops import BaseLinOp, ByBlockLinOp
+
+from .linops import ByBlockLinOp
 from .utils import (
     COMPLEX_DTYPES,
-    BadShapeError,
     BadSeedError,
-    rademacher_noise,
-    phase_noise,
-    rademacher_flip,
-    phase_shift,
+    BadShapeError,
     gaussian_noise,
     phase_noise,
+    rademacher_noise,
     randperm,
 )
 
@@ -53,9 +51,7 @@ class RademacherNoiseLinOp(ByBlockLinOp):
         """Checks if two different-seeded linops have overlapping seeds."""
         for reg_type, reg in cls.REGISTER.items():
             sorted_reg = sorted(reg, key=lambda x: x[0])
-            for (beg1, end1), (beg2, end2) in zip(
-                sorted_reg[:-1], sorted_reg[1:]
-            ):
+            for (_, end1), (beg2, _) in zip(sorted_reg[:-1], sorted_reg[1:]):
                 if end1 >= beg2:
                     clsname = cls.__name__
                     msg = (
@@ -436,9 +432,7 @@ class SsrftNoiseLinOp(ByBlockLinOp):
         """Checks if two different-seeded linops have overlapping seeds."""
         for reg_type, reg in cls.REGISTER.items():
             sorted_reg = sorted(reg, key=lambda x: x[0])
-            for (beg1, end1), (beg2, end2) in zip(
-                sorted_reg[:-1], sorted_reg[1:]
-            ):
+            for (_, end1), (beg2, _) in zip(sorted_reg[:-1], sorted_reg[1:]):
                 if end1 >= beg2:
                     clsname = cls.__name__
                     msg = (

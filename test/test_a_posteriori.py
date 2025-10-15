@@ -4,18 +4,17 @@
 
 """Pytest for a-posteriori functionality."""
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
+from skerch.a_posteriori import apost_error, apost_error_bounds, scree_bounds
+from skerch.algorithms import ssvd
 from skerch.linops import CompositeLinOp
 from skerch.synthmat import RandomLordMatrix
 from skerch.utils import COMPLEX_DTYPES, gaussian_noise, truncate_decomp
-from skerch.algorithms import ssvd
-from skerch.a_posteriori import apost_error_bounds, apost_error, scree_bounds
 
-from . import rng_seeds, torch_devices
-from . import BasicMatrixLinOp, relerr
+from . import BasicMatrixLinOp, relerr, rng_seeds, torch_devices
 
 
 # ##############################################################################
@@ -75,7 +74,7 @@ def apost_config(request):
     """
     result = [
         #   shape   pert meas reps errtol
-        ((800, 800), 0.1, 300, 10, 0.05),
+        ((800, 800), 0.1, 300, 10, 0.02),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]

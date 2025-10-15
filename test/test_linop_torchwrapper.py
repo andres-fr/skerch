@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 import torch
 
-from skerch.linops import linop_to_matrix, TorchLinOpWrapper
+from skerch.linops import TorchLinOpWrapper, linop_to_matrix
 from skerch.utils import gaussian_noise
 
 from . import rng_seeds, torch_devices

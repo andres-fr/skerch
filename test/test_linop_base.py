@@ -6,14 +6,15 @@
 
 
 from time import time
+
 import pytest
 import torch
 
 from skerch.linops import (
-    linop_to_matrix,
     BaseLinOp,
     ByBlockLinOp,
     TransposedLinOp,
+    linop_to_matrix,
 )
 from skerch.utils import BadShapeError, gaussian_noise
 

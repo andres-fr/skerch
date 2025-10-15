@@ -5,8 +5,7 @@
 """Functionality to recover linop approximations from their sketches."""
 
 
-import torch
-from .utils import qr, svd, lstsq, eigh, htr
+from .utils import eigh, lstsq, qr, svd
 
 
 # ##############################################################################

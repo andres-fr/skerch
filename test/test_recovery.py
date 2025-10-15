@@ -5,17 +5,22 @@
 """Pytest for :mod:`recovery`."""
 
 
+import numpy as np
 import pytest
 import torch
-import numpy as np
 
-from skerch.utils import gaussian_noise, svd, eigh
+from skerch.recovery import (
+    nystrom,
+    nystrom_h,
+    oversampled,
+    oversampled_h,
+    singlepass,
+    singlepass_h,
+)
 from skerch.synthmat import RandomLordMatrix
-from skerch.recovery import singlepass, nystrom, oversampled
-from skerch.recovery import singlepass_h, nystrom_h, oversampled_h
-from . import rng_seeds, torch_devices
+from skerch.utils import eigh, gaussian_noise, svd
 
-from . import svd_test_helper, eigh_test_helper
+from . import eigh_test_helper, rng_seeds, svd_test_helper, torch_devices
 
 
 # ##############################################################################
@@ -179,9 +184,7 @@ def test_recovery_general(
                             errmsg = f"Singlepass-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass - SVD
-                        Urec, Srec, Vhrec = singlepass(
-                            Y, Z, right, as_svd=True
-                        )
+                        Urec, Srec, Vhrec = singlepass(Y, Z, right, as_svd=True)
                         try:
                             svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
                             # correctness of recovered svals

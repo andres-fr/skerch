@@ -13,10 +13,8 @@ See also:
 
 import os
 
-import torch
-
-from ..hdf5 import create_hdf5_layout_lop
 from .. import INNER_FMT, LO_FMT, RO_FMT
+from ..hdf5 import create_hdf5_layout_lop
 
 
 # ##############################################################################

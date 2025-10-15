@@ -5,17 +5,20 @@
 """Pytest for CLI utilities."""
 
 
-import pytest
 import os
 from tempfile import TemporaryDirectory
 
-from skerch.a_posteriori import apost_error_bounds
-from skerch.utils import REAL_DTYPES, COMPLEX_DTYPES, torch_dtype_as_str
-from skerch.__main__ import PluginLoader, COMMANDS
-from skerch.__main__ import matrix_shape
-from skerch.__main__ import get_argparser
-from skerch.__main__ import main_wrapper
+import pytest
 
+from skerch.__main__ import (
+    COMMANDS,
+    PluginLoader,
+    get_argparser,
+    main_wrapper,
+    matrix_shape,
+)
+from skerch.a_posteriori import apost_error_bounds
+from skerch.utils import COMPLEX_DTYPES, REAL_DTYPES, torch_dtype_as_str
 
 # ##############################################################################
 # # FIXTURES
@@ -109,9 +112,7 @@ def test_main_cli(all_dtypes, capsys):
         ]
     )
     h5_names = os.listdir(tmpdir.name)
-    assert (
-        len([n for n in h5_names if "ALL" in n]) == 3
-    ), "Wrong ALL CLI files?"
+    assert len([n for n in h5_names if "ALL" in n]) == 3, "Wrong ALL CLI files?"
     assert (
         len([n for n in h5_names if "leftouter" in n]) == 4
     ), "Wrong leftouter CLI files?"
