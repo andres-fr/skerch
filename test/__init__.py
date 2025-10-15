@@ -45,16 +45,16 @@ class BasicMatrixLinOp:
     """Intentionally simple linop, only supporting ``shape`` and @."""
 
     def __init__(self, matrix):
-        """ """
+        """Creates linop."""
         self.matrix = matrix
         self.shape = matrix.shape
 
     def __matmul__(self, x):
-        """ """
+        """Implements self @ x."""
         return self.matrix @ x
 
     def __rmatmul__(self, x):
-        """ """
+        """Implements x @ self."""
         return x @ self.matrix
 
 

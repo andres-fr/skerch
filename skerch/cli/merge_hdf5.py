@@ -4,7 +4,6 @@
 
 """CLI plugin to merge distributed HDF5 measurements into a single one.
 
-
 See :mod:`skerch.hdf5` and :meth:`skerch.hdf5.DistributedHDF5Tensor.merge`.
 """
 

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""Pytest for aggregate linops (composite, sum,...)
+"""Pytest for aggregate linops (composite, sum,...).
 
 * Formal tests:
   - Providing an empty collection triggers a ValueError

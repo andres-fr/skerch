@@ -38,7 +38,7 @@ def dtypes_tols():
 
 @pytest.fixture
 def linop_correctness_shapes(request):
-    """Shapes to test linop correctness"""
+    """Shapes to test linop correctness."""
     result = [
         (1, 1),
         (2, 1),
@@ -62,16 +62,16 @@ class MatLinOp(BaseLinOp):
     """Implementing matmul."""
 
     def __init__(self, mat, batch=None):
-        """ """
+        """Creates linop."""
         super().__init__(mat.shape, batch)
         self.mat = mat
 
     def matmul(self, x):
-        """ """
+        """Implements self @ x."""
         return self.mat @ x
 
     def rmatmul(self, x):
-        """ """
+        """Implements x @ self."""
         return x @ self.mat
 
 
@@ -79,12 +79,12 @@ class MatBBLinOp(ByBlockLinOp):
     """By-Vector linop."""
 
     def __init__(self, mat, by_row=False, batch=None, blocksize=1):
-        """ """
+        """Creates linop."""
         super().__init__(mat.shape, by_row, batch, blocksize)
         self.mat = mat
 
     def get_block(self, block_idx, input_dtype, input_device):
-        """ """
+        """See superclass."""
         idxs = self.get_vector_idxs(block_idx)
         if self.by_row:
             result = self.mat[idxs, :].to(input_device)
@@ -96,18 +96,18 @@ class MatBBLinOp(ByBlockLinOp):
 
 
 class MissingBase(BaseLinOp):
-    """Extending base but not implementing matmuls"""
+    """Extending base but not implementing matmuls."""
 
 
 class MissingBlock(ByBlockLinOp):
-    """Extending by-block but not implementing get_block"""
+    """Extending by-block but not implementing get_block."""
 
 
 # ##############################################################################
 # # TESTS
 # ##############################################################################
 def test_baselinop_formal():
-    """Test case for input shape consistency and value errors
+    """Test case for input shape consistency and value errors.
 
     For forward and adjoint matmul with ``BaseLinOp``, test:
     * matmuls must be implemented
@@ -270,7 +270,7 @@ def test_byblock_formal(torch_devices, dtypes_tols):
 
 
 def test_byblock_correctness_extra(rng_seeds, torch_devices, dtypes_tols):
-    """Extra correctness tests for by-block linop:
+    """Extra correctness tests for by-block linop.
 
     Creates various small-shaped random by-block linops and, for all
     block sizes and by row/column, tests that:

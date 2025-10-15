@@ -406,7 +406,7 @@ class TransposedLinOp:
         return self.lop
 
     def __repr__(self):
-        """Returns a string in the form (str(lop)).H"""
+        """Returns a string in the form (str(lop)).H."""
         return f"({str(self.lop)}).H"
 
 

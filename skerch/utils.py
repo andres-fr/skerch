@@ -480,7 +480,6 @@ def serrated_hadamard_pattern(
 ):
     """Shifted copies of vectors for block-triangular Girard-Hutchinson.
 
-
     :param v: Torch tensor expected to contain zero-mean, uncorrelated entries.
       If vector, shift is applied directly. If tensor, shift is applied to
       last dimension.

@@ -4,10 +4,8 @@
 
 """CLI plugin to create a HDF5 layout used to hold sketched measurements.
 
-See also:
-
-* :class:`skerch.hdf5.DistributedHDF5Tensor`
-* :func:`skerch.hdf5.create_hdf5_layout_lop`
+See also :class:`skerch.hdf5.DistributedHDF5Tensor` and
+:func:`skerch.hdf5.create_hdf5_layout_lop`.
 """
 
 

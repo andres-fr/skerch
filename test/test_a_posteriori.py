@@ -34,7 +34,7 @@ def dtypes_tols():
 
 @pytest.fixture
 def apost_noise_types():
-    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    """Collection of tuples ``(noise_type, is_complex_only)``."""
     result = [
         ("rademacher", False),
         ("gaussian", False),
@@ -156,7 +156,7 @@ def test_apost_error_formal():
 def test_apost_error_correctness(
     rng_seeds, torch_devices, dtypes_tols, apost_config, apost_noise_types
 ):
-    """Correctness test case for ``apost_error``-
+    """Correctness test case for ``apost_error``.
 
     For all configurations, creates a matrix and its slight perturbation, and
     checks that``apost_error`` performs good estimation of Frobenius norms and
@@ -240,7 +240,7 @@ def test_scree_formal():
 def test_scree_correctness(
     rng_seeds, torch_devices, dtypes_tols, scree_config, apost_noise_types
 ):
-    """Correctness test case for ``scree_bounds``-
+    """Correctness test case for ``scree_bounds``.
 
     For all configurations, creates a matrix with a rapidly decaying spectrum,
     and performs a sketched SVD. Then, checks provided ``scree_bounds``:

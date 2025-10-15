@@ -22,7 +22,6 @@ from .utils import complex_dtype_to_real
 def apost_error_bounds(num_measurements, rel_err, is_complex=False):
     """Probabilistic bounds for a-posteriori sketch error estimation.
 
-
     The Frobenius error between any two linear operators can be estimated
     from sketches using :func:`apost_error`. But this estimation is random
     and subject to error.

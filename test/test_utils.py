@@ -57,7 +57,7 @@ def dtypes_tols():
 
 @pytest.fixture
 def dtypes_tols_badcond():
-    """Error tolerances for each dtype (f32 looser due to pinv/lstsq)"""
+    """Error tolerances for each dtype (f32 looser due to pinv/lstsq)."""
     result = {
         torch.float32: 1e-2,  # not very small due to pinv/lstsq
         torch.complex64: 1e-2,  # not very small due to pinv/lstsq
@@ -69,7 +69,7 @@ def dtypes_tols_badcond():
 
 @pytest.fixture
 def rand_dims_samples(request):
-    """Shapes to test linop_to_matrix"""
+    """Shapes to test linop_to_matrix."""
     if request.config.getoption("--quick"):
         num_samples = 3
     else:
@@ -191,7 +191,7 @@ def hadamard_testcases():
 # # DTYPES
 # ##############################################################################
 def test_dtype_utils():
-    """Test case for dtype manipulation utils"""
+    """Test case for dtype manipulation utils."""
     dtype = torch.float16
     assert "float16" == torch_dtype_as_str(dtype), "Bad str(dtype) conversion!"
     assert torch.float16 == complex_dtype_to_real(
@@ -561,7 +561,7 @@ def test_pinv_lstsq(rng_seeds, torch_devices, dtypes_tols_badcond):
 
 
 def test_svd(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for singular val decomp wrapper (formal and correctness)
+    """Test case for singular val decomp wrapper (formal and correctness).
 
     * Singular bases are orthogonal
     * Singular values are given as real vectors of nonascending nonneg values
@@ -591,7 +591,7 @@ def test_svd(rng_seeds, torch_devices, dtypes_tols):
 
 
 def test_eigh(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for Hermitian eigdecomp wrapper (formal and correctness)
+    """Test case for Hermitian eigdecomp wrapper (formal and correctness).
 
     * Eigenbasis is orthogonal
     * Eigenvalues are given as real vectors by descending magnitude/value
@@ -621,7 +621,7 @@ def test_eigh(rng_seeds, torch_devices, dtypes_tols):
 
 
 def test_htr(rng_seeds, torch_devices, dtypes_tols):
-    """Test case for Hermitian eigdecomp wrapper (formal and correctness)
+    """Test case for Hermitian eigdecomp wrapper (formal and correctness).
 
     * Works for torch and numpy
     * Works for vectors and matrices with no warning

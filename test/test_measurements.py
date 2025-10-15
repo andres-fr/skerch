@@ -54,12 +54,6 @@ def dtypes_tols():
 
 
 @pytest.fixture
-def parallel_modes():
-    result = (None, "mp")
-    return result
-
-
-@pytest.fixture
 def complex_dtypes_tols():
     """Error tolerances for each complex dtype."""
     result = {
@@ -111,19 +105,19 @@ class BasicMatrixLinOp:
     """
 
     def __init__(self, matrix, delay=0):
-        """ """
+        """Creates linop."""
         self.matrix = matrix
         self.shape = matrix.shape
         self.delay = delay
 
     def __matmul__(self, x):
-        """ """
+        """Implements self @ x."""
         if self.delay > 0:
             time.sleep(self.delay)
         return self.matrix @ x
 
     def __rmatmul__(self, x):
-        """ """
+        """Implements x @ self."""
         if self.delay > 0:
             time.sleep(self.delay)
         return x @ self.matrix

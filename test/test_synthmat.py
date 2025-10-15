@@ -4,7 +4,6 @@
 
 """Pytest for synthetic matrix utilities.
 
-
 * Formal tests (ValueError for bad inputs, etc)
 * Consistency (for seed reproducibility)
 * Correctness (NaN, device, dtype, shape, diag_ratio, symmetry, PSD, svals)
@@ -37,7 +36,7 @@ def dtypes_tols():
 
 @pytest.fixture
 def diag_ratios(request):
-    """ """
+    """Diagonal strength ratios."""
     result = [0.0, 1.0, 0.1, 10.0]
     if request.config.getoption("--quick"):
         result = result[:2]
@@ -46,28 +45,28 @@ def diag_ratios(request):
 
 @pytest.fixture
 def noise_snrs():
-    """ """
+    """SV decay for noise matrices."""
     result = [1e-4, 1e-2, 1e-1]
     return result
 
 
 @pytest.fixture
 def poly_decays():
-    """ """
+    """SV decay for poly matrices."""
     result = [2, 1, 0.5]
     return result
 
 
 @pytest.fixture
 def exp_decays():
-    """ """
+    """SV decay for exp matrices."""
     result = [0.5, 0.1, 0.01]
     return result
 
 
 @pytest.fixture
 def small_shapes_ranks():
-    """ """
+    """Shapes and ranks to generate matrices."""
     result = [
         # square
         ((10, 10), 1),
@@ -85,7 +84,7 @@ def small_shapes_ranks():
 
 @pytest.fixture
 def bad_shapes():
-    """ """
+    """Collection of invalid shapes."""
     result = [
         "x",
         0,
@@ -99,7 +98,7 @@ def bad_shapes():
 
 @pytest.fixture
 def bad_decay_types():
-    """ """
+    """Collection of invalid decay types."""
     result = ["x", 0, None, "asdf", "noise"]
     return result
 
@@ -204,7 +203,11 @@ def test_lord_formal(torch_devices, dtypes_tols, bad_shapes, bad_decay_types):
 # # SEED CONSISTENCY
 # ##############################################################################
 def _helper_seed_consistency(m1, m2, m3, d1, d2, d3, atol):
-    """ """
+    """Helper function to test seed consistency.
+
+    * Same seed must lead to same matrix
+    * Different seed must lead to different matrix
+    """
     assert torch.allclose(m1, m2, atol=atol), "Same seed, different matrix?"
     assert not torch.allclose(m1, m3, atol=atol), "Different seed, same mat?"
     assert torch.allclose(d1, d2, atol=atol), "Same seed, different diag?"
@@ -212,7 +215,7 @@ def _helper_seed_consistency(m1, m2, m3, d1, d2, d3, atol):
 
 
 def test_seed_consistency(rng_seeds, torch_devices, dtypes_tols):
-    """
+    """Test case for seed consistency in synthetic matrices.
 
     Tests:
     * Running the same function twice with same seed yields same results

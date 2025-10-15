@@ -27,14 +27,14 @@ from skerch.utils import COMPLEX_DTYPES, REAL_DTYPES, torch_dtype_as_str
 
 @pytest.fixture
 def expected_plugins():
-    """ """
+    """Collection of expected plugin names."""
     result = {"create_hdf5_layout_lop", "merge_hdf5", "post_bounds"}
     return result
 
 
 @pytest.fixture
 def all_dtypes():
-    """ """
+    """Collection of all supported real and complex dtypes."""
     result = list(REAL_DTYPES) + list(COMPLEX_DTYPES)
     return result
 

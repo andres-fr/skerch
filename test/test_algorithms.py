@@ -53,7 +53,7 @@ def dtypes_tols():
 
 @pytest.fixture
 def dispatcher_noise_types():
-    """ """
+    """Noise types."""
     result = ["rademacher", "gaussian", "phase", "ssrft", "bloated_1.0"]
     return result
 
@@ -110,7 +110,7 @@ def diag_recovery_shapes(request):
 
 @pytest.fixture
 def trace_recovery_shapes(request):
-    """Fixture to test Trace++ (and XTrace)
+    """Fixture to test Trace++ (and XTrace).
 
     Tuples in the form ``(dims, rank, defl, gh_extra, tracepp_tol, xtrace_tol)``
     where the tolerances are in the form ``(full, top_only)``.
@@ -128,7 +128,7 @@ def trace_recovery_shapes(request):
 
 @pytest.fixture
 def lowrank_noise_types():
-    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    """Collection of tuples ``(noise_type, is_complex_only)``."""
     result = [
         ("rademacher", False),
         ("gaussian", False),
@@ -140,7 +140,7 @@ def lowrank_noise_types():
 
 @pytest.fixture
 def diagtrace_noise_types():
-    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    """Collection of tuples ``(noise_type, is_complex_only)``."""
     result = [
         ("rademacher", False),
         ("bloated_1.0", False),
@@ -191,7 +191,7 @@ def triang_configs(request):
 
 @pytest.fixture
 def norm_noise_types():
-    """Collection of tuples ``(noise_type, is_complex_only)``"""
+    """Collection of tuples ``(noise_type, is_complex_only)``."""
     result = [
         ("rademacher", False),
         ("gaussian", False),
@@ -204,12 +204,12 @@ def norm_noise_types():
 
 @pytest.fixture
 def norm_configs(request):
-    """Configurations for the operator norm
+    """Configurations for the operator norm.
 
-    Tuples in the form ``(shape, specdecay, num_meas, op_relerr, frob_relerr)``.
-    specdecay: 0.01 slow, 0.1 medium, 0.5 fast
+    Tuples in the form
+    ``(shape, specdecay, num_meas, op_relerr, frob_relerr)``.
+    Where specdecay: 0.01 slow, 0.1 medium, 0.5 fast.
     """
-
     result = [
         # near-perfect recovery if meas=rank
         ((20, 10), 0.01, 10, 1e-5, 1e-5),
@@ -279,7 +279,7 @@ class MyDispatcher(SketchedAlgorithmDispatcher):
 
     @staticmethod
     def mop(noise_type, hw, seed, dtype, blocksize=1, register=False):
-        """ """
+        """Overriding mop."""
         if "bloated" in noise_type:
             shift = float(noise_type.split("_")[-1])
             mop = BloatedGaussianNoiseLinOp(
@@ -369,7 +369,7 @@ def test_ssvd_correctness(
     ssvd_recovery_shapes,
     lowrank_noise_types,
 ):
-    """Correctness test case for SSVD:
+    """Correctness test case for SSVD.
 
     Runs SSVD on all devices/dtypes/noisemats/recoveries, on a few low-rank
     linops, and tests that:
@@ -469,7 +469,7 @@ def test_seigh_correctness(  # noqa:C901
     seigh_recovery_shapes,
     lowrank_noise_types,
 ):
-    """Correctness test case for SEIGH:
+    """Correctness test case for SEIGH.
 
     Runs SEIGH on all devices/dtypes/noisemats/recoveries, on a few low-rank
     linops, and tests that:
@@ -1031,7 +1031,6 @@ def test_norm_correctness(
     rng_seeds, torch_devices, dtypes_tols, norm_configs, norm_noise_types
 ):
     """Test case for correctness of sketched norms.
-
 
     For all seeds, devices, dtypes, noise types and shape/spectrum cases,
     computes ``snorm`` and checks all results are within given tolerances.

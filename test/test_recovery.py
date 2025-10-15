@@ -80,7 +80,15 @@ def uv_test_helper(mat, U, Vh, atol):
 
 
 def qc_test_helper(mat, idty, core_rec, q_rec, atol):
-    """ """
+    """QC test helper.
+
+    Given the decomposition ``mat = Q @ C @ Qh``, tests that:
+
+    * Equality actually holds
+    * Q is orthogonal
+    * C is hermitian
+    * devices and dtypes match
+    """
     allclose = torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
     C, Q, Qh = core_rec, q_rec, q_rec.conj().T
     # correctness of result

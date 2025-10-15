@@ -51,7 +51,7 @@ class NumpyScalarLinOp:
         return self.__matmul__(x)
 
     def __repr__(self):
-        """Test string"""
+        """Test string."""
         return f"NumpyScalarLinOp({self.scalar})"
 
 
