@@ -4,7 +4,27 @@
 
 ### Feat
 
-- major release, full refactoring, renaming and addition of new functionality, not backwards compatible
+- major release, full refactoring, renaming and addition of new functionality, not backwards compatible.
+
+Main features:
+* Better test coverage -> less bugs
+* Clearer and more comprehensive docs
+* support for complex datatypes
+* Support for (approximately) low-rank plus diagonal synthetic matrices
+* Linop API:
+  - New core functionality: Transposed, Signed Sum, Banded, ByBlock
+  - Support for parallelization of matrix-matrix products
+  - New measurement noise linops: Rademacher, Gaussian, Phase, SSRFT
+* Data API:
+  - Batched support for arbitrary tensors in distributed HDF5 arrays
+  - Modular and extendible HDF5 layouts
+* Sketching API:
+  - Modular measurement API supporting multiprocessing and HDF5
+  - Modular recovery methods (hmt, singlepass, Nystrom, oversampled)
+* Algorithm API:
+  - Algorithms: Hutch++ XDiag, SSVD, Triangular, SNorm (also Hermitian)
+  - Modular and extendible design for noise sources and recovery types
+  - Matrix-free a-posteriori error verification and rank estimation
 
 ## 0.11.0 (2025-04-25)
 
