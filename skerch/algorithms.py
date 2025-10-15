@@ -186,10 +186,9 @@ def ssvd(
     :math:`P, Q` from random measurements, or sketches. This function
     follows that plan, namely:
 
-    * 1. Perform left and right sketches using the desired ``noise_type``
-    and orthogonalize them, yielding :math:`P, Q`
-
-    * 2. Solve the core matrix using the desired ``recovery`` algorithm
+    * Perform left and right sketches using the desired ``noise_type``
+      and orthogonalize them, yielding :math:`P, Q`
+    * Solve the core matrix using the desired ``recovery`` algorithm
 
     The result is a sketched SVD of :math:`A`.
 
@@ -600,7 +599,57 @@ def xdiag(
     dispatcher=SketchedAlgorithmDispatcher,
     cache_mop=True,
 ):
-    r"""Diagonal sketched approximation via XDiag."""
+    r"""Diagonal sketched approximation via XDiag.
+
+    This function implements the XDiag routine described in
+    `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_, leveraging the
+    *exchangeability* property:
+
+    Following :func:`hutchpp`, we have the rank-deflation
+    :math:`A = (Q Q^H) A + (I - (Q Q^H)) A`, where :math:`Q` has been obtained
+    from orthogonalizing ``k`` random measurements.
+    Then, the core idea is to average all ``k`` estimations that result from
+    leaving one measurement out in order to obtain a modified
+    sub-projector :math:`\tilde{Q}_i`. It turns out that averaging all such
+    sub-projectors yields a matrix in the form :math:`\Psi = Q Z Q^H`,
+    such that :math:`A = \Psi A + (I - \Psi) A`. Crucially, this averaging
+    of ``k`` leave-one-out estimators results in drastically reduced variance.
+
+    Effectively, the algorithm is a modification of :func:`hutchpp` with
+    the following main differences:
+
+    * The :math:`Q Q^H` projector is efficiently replaced with :math:`\Psi`
+    * The number of Girard-Hutchinson measurements is tied to ``k``, since
+      the exact same :math:`\Psi` must be used
+    * The Girard-Hutchinson measurements are recycled from the deflation
+      step
+
+    One important drawback is that the Girard-Hutchinson component still
+    requires a substantial number of measurements to be useful, which here
+    forces us to use a large number of deflation dimensions.
+
+    :param lop: The :math:`A` operator whose diagonal we wish to estimate.
+    :param lop_device: The device where :math:`A` runs
+    :param lop_dtype: The datatype :math:`A` interacts with
+    :param x_dims: How many measurements will be used to obtain
+      the :math:`Q` deflation matrix, and the subsequent deflated
+      estimation (the ``k`` above).
+    :param seed: Overall random seed for the algorithm
+    :param noise_type: Which noise to use. Must be supported by the given
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param meas_blocksize: How many sketched measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
+    :param cache_mop: If true, the measurement linear operator (which is
+      used twice) is converted to an explicit matrix and kept around.
+      This saves computation, since it does not need to be sampled twice,
+      at the expense of the memory required to store its entries.
+    :returns: A tuple in the form ``d, (d_top, d_gh, Q, R)``, where
+      where ``(Q, R)`` is the QR decomposition of the sketch used to obtain
+      the deflation, ``d`` is the diagonal estimate, ``d_top``
+      is :math:`diag(Q \Psi Q^H A)` and ``t_gh`` is the G-H estimate of
+      :math:`tr((I -Q \Psi Q^H) A)`.
+    """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
