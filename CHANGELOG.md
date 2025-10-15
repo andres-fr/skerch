@@ -1,3 +1,9 @@
+## 0.12.0 (2025-10-15)
+
+### Feat
+
+- major release, full refactoring, renaming and addition of new functionality, not backwards compatible
+
 ## 0.11.0 (2025-04-25)
 
 ### Feat

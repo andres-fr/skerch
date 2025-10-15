@@ -27,6 +27,6 @@ match = '(?!example_).*\.py'
 name = "cz_conventional_commits"
 tag_format = "$version"
 version_scheme = "pep440"
-version = "0.11.0"
+version = "0.12.0"
 update_changelog_on_bump = true
 major_version_zero = true
