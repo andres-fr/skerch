@@ -75,10 +75,11 @@ def uv_test_helper(mat, U, Vh, atol):
     # correctness of result
     assert allclose(mat, U @ Vh, atol=atol), "Incorrect recovery!"
     # matching device and type
-    assert U.device == mat.device, "Incorrect U device!"
-    assert Vh.device == mat.device, "Incorrect V device!"
     assert U.dtype == mat.dtype, "Incorrect U dtype!"
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
+    if isinstance(mat, torch.Tensor):
+        assert U.device == mat.device, "Incorrect U device!"
+        assert Vh.device == mat.device, "Incorrect V device!"
 
 
 def qc_test_helper(mat, idty, core_rec, q_rec, atol):
@@ -100,10 +101,11 @@ def qc_test_helper(mat, idty, core_rec, q_rec, atol):
     # simmetry of recovered core
     assert allclose(C, C.conj().T, atol=atol), "Core not hermitian?"
     # matching device and type
-    assert Q.device == mat.device, "Incorrect Q device!"
-    assert C.device == mat.device, "Incorrect core device!"
     assert Q.dtype == mat.dtype, "Incorrect Q dtype!"
     assert C.dtype == mat.dtype, "Incorrect core dtype!"
+    if isinstance(mat, torch.Tensor):
+        assert Q.device == mat.device, "Incorrect Q device!"
+        assert C.device == mat.device, "Incorrect core device!"
 
 
 # ##############################################################################

@@ -138,12 +138,13 @@ def svd_test_helper(mat, idty, U, S, Vh, atol):
     assert (S >= 0).all(), "Negative svals!"
     assert (diff(S) <= 0).all(), "Ascending svals?"
     # matching device and type
-    assert U.device == mat.device, "Incorrect U device!"
-    assert S.device == mat.device, "Incorrect S device!"
-    assert Vh.device == mat.device, "Incorrect V device!"
     assert U.dtype == mat.dtype, "Incorrect U dtype!"
     assert S.dtype == mat.real.dtype, "Incorrect S dtype!"
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
+    if isinstance(mat, torch.Tensor):
+        assert U.device == mat.device, "Incorrect U device!"
+        assert S.device == mat.device, "Incorrect S device!"
+        assert Vh.device == mat.device, "Incorrect V device!"
 
 
 def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
@@ -172,7 +173,8 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
         diff(Lbd_sorted) <= 0
     ).all(), f"Eigvals in wrong order? (by_mag={by_mag})"
     # matching device and type
-    assert V.device == mat.device, "Incorrect eigvecs device!"
-    assert Lbd.device == mat.device, "Incorrect eigvals device!"
     assert V.dtype == mat.dtype, "Incorrect eigvecs dtype!"
     assert Lbd.dtype == mat.real.dtype, "Incorrect eigvals dtype!"
+    if isinstance(mat, torch.Tensor):
+        assert V.device == mat.device, "Incorrect eigvecs device!"
+        assert Lbd.device == mat.device, "Incorrect eigvals device!"
