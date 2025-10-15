@@ -404,6 +404,7 @@ def test_ssvd_correctness(
                             # skip this iteration
                             continue
                         for recovery_type in (
+                            "hmt",
                             "singlepass",
                             "nystrom",
                             f"oversampled_{innermeas}",
@@ -505,6 +506,7 @@ def test_seigh_correctness(  # noqa:C901
                             # skip this iteration
                             continue
                         for recovery_type in (
+                            "hmt",
                             "singlepass",
                             "nystrom",
                             f"oversampled_{innermeas}",
@@ -522,7 +524,7 @@ def test_seigh_correctness(  # noqa:C901
                                     meas_blocksize=dims,
                                     by_mag=by_mag,
                                 )
-                            # test that output is correct and SVD-like
+                            # test that output is correct and EIGH-like
                             try:
                                 eigh_test_helper(
                                     mat, idty, ews, evs, tol, by_mag

@@ -11,6 +11,46 @@ from .utils import eigh, lstsq, qr, svd
 # ##############################################################################
 # # RECOVERY FOR GENERAL MATRICES (UV/SVD)
 # ##############################################################################
+def hmt(
+    sketch_right,
+    sketch_left,
+    lop,
+    as_svd=True,
+):
+    r"""HMT sketched low-rank recovery.
+
+    The core idea behind this method is outlined in
+    `[HMT2009] <https://arxiv.org/abs/0909.4061>`_:
+    Given a linear operator :math:`A`, we assume that there are *thin*,
+    orthogonal matrices :math:`P, Q` such that
+    :math:`A \approx P P^H A Q Q^H`. Crucially, it is possible to
+    efficiently obtain :math:`P, Q` from random measurements, or sketches,
+    via QR orthogonalization.
+
+    Then, to produce an SVD, it remains to decompose the small, "core"
+    matrix :math:`C = P^H A Q = U \Sigma V^H`, yielding the final
+    SVD: :math:`A \approx (P U) \Sigma (V^H Q^H)`.
+
+    :param sketch_right: Sketches ``A @ mop_right`` (typically a tall
+      matrix).
+    :param sketch_left: Sketches ``(mop_left @ A)`` (typically a fat
+      matrix).
+    :param lop: Our target linear operator ``A``.
+    :returns: If ``as_svd``, a triple ``U, S, Vh`` with
+      :math:`A \approx U diag(S) V^H` being a *thin SVD*. Otherwise,
+      the pair ``Y, Bh`` with :math:`A \approx Y B^H`.
+    """
+    P = qr(sketch_right, in_place_q=False, return_R=False)
+    Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
+    core = P.conj().T @ (lop @ Qh.conj().T)  # second pass over lop!
+    if as_svd:
+        U, S, Vh = svd(core)
+        result = (P @ U), S, (Vh @ Qh)
+    else:
+        result = (P @ core), Qh
+    return result
+
+
 def singlepass(
     sketch_right,
     sketch_left,
@@ -179,6 +219,29 @@ def oversampled(
 # ##############################################################################
 # # RECOVERY FOR SYMMETRIC MATRICES (EIGH)
 # ##############################################################################
+def hmt_h(
+    sketch_right,
+    lop,
+    as_eigh=True,
+    by_mag=True,
+):
+    r"""HMT sketched low-rank recovery (Hermitian).
+
+    Hermitian version of :func:`hmt`. Since :math:`A = A^H`, we
+    only need sketches from one side, because in the Hermitian case ``Q``
+    can also be obtained by orthogonalizing ``sketch_right``, and the
+    method remains unchanged.
+    """
+    Q = qr(sketch_right, in_place_q=False, return_R=False)
+    core = Q.conj().T @ (lop @ Q)  # second pass over lop!
+    if not as_eigh:
+        result = core, Q
+    else:
+        ews, Z = eigh(core, by_descending_magnitude=by_mag)
+        result = ews, Q @ Z
+    return result
+
+
 def singlepass_h(
     sketch_right,
     mop_right,

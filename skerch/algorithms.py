@@ -21,6 +21,8 @@ from .measurements import (
     SsrftNoiseLinOp,
 )
 from .recovery import (
+    hmt,
+    hmt_h,
     nystrom,
     nystrom_h,
     oversampled,
@@ -71,9 +73,11 @@ class SketchedAlgorithmDispatcher:
           ``inner_dims`` is a positive integer, ``fn`` should behave like
           :func:`skerch.recovery.oversampled`.
         """
-        supported = "singlepass, nystrom, oversampled_123"
+        supported = "hmt, singlepass, nystrom, oversampled_123"
         inner_dims = None
-        if recovery_type == "singlepass":
+        if recovery_type == "hmt":
+            recovery_fn = hmt_h if hermitian else hmt
+        elif recovery_type == "singlepass":
             recovery_fn = singlepass_h if hermitian else singlepass
         elif recovery_type == "nystrom":
             recovery_fn = nystrom_h if hermitian else nystrom
@@ -183,16 +187,20 @@ def ssvd(
 ):
     r"""In-core Sketched SVD.
 
-    The core idea behind this method is outlined in
-    `[HMT2009] <https://arxiv.org/abs/0909.4061>`_:
-    Given a linear operator :math:`A`, we assume that there are *thin*,
-    orthogonal matrices :math:`P, Q` such that
-    :math:`A \approx P P^H A Q Q^H` and to obtain an SVD we just need to
-    decompose the small "core" matrix :math:`C = P^H A Q`.
+    The core idea behind sketched SVDs, introduced in
+    `[HMT2009] <https://arxiv.org/abs/0909.4061>`_ and outlined in
+    :func:`skerch.recovery.hmt`, relies on the existence of orthogonal
+    thin matrices :math:`P, Q`, such that the following approximation
+    holds:
 
-    The crucial point here is that we can efficiently obtain
-    :math:`P, Q` from random measurements, or sketches. This function
-    follows that plan, namely:
+    .. math::
+
+      A \approx P P^H A Q Q^H = P C Q^H
+
+    One crucial point here is that we can efficiently obtain
+    :math:`P, Q` from random measurements, or sketches. Then, it only remains
+    to decompose the *small* "core" matrix :math:`C`, which can be done with
+    traditional methods. This function follows that plan, namely:
 
     * Perform left and right sketches using the desired ``noise_type``
       and orthogonalize them, yielding :math:`P, Q`
@@ -202,8 +210,7 @@ def ssvd(
 
     .. note::
 
-      The method described in `[HMT2009] <https://arxiv.org/abs/0909.4061>`_
-      requires us to first
+      The method described above requires us to first
       obtain :math:`P, Q`, and then do a *second round of measurements*
       :math:`A Q` to obtain the core matrix.
       Further developments have shown that it is possible to obtain
@@ -211,7 +218,8 @@ def ssvd(
       which can lead to significant speedup if we leverage parallelization
       (see e.g. `[TYUC2018] <https://arxiv.org/abs/1609.00048>`_).
       These *single-pass* recovery methods have also
-      been implemented in :mod:`skerch.recovery`.
+      been implemented in :mod:`skerch.recovery`. Check the corresponding
+      docs and the ``recovery_type`` parameter for more info.
 
     :param lop: The linear operator :math:`A` to be decomposed
     :param lop_device: The device where :math:`A` runs
@@ -303,9 +311,12 @@ def ssvd(
         lo_sketch[idxs, :] = block.conj().T @ lop  # assuming block is by_col!
     # if not oversampled, solve sketch
     if inner_dims is None:
-        U, S, Vh = recovery_fn(
-            ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
-        )
+        if recovery_type == "hmt":
+            U, S, Vh = recovery_fn(ro_sketch, lo_sketch, lop, as_svd=True)
+        else:
+            U, S, Vh = recovery_fn(
+                ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
+            )
     # if oversampled, perform inner measurements and then solve
     else:
         inner_sketch = torch.empty(
@@ -386,13 +397,16 @@ def seigh(
         ro_sketch[:, idxs] = lop @ block  # assuming block is by_col!
     # if not oversampled, solve sketch
     if inner_dims is None:
-        ews, evs = recovery_fn(
-            ro_sketch,
-            ro_mop,
-            rcond=lstsq_rcond,
-            as_eigh=True,
-            by_mag=by_mag,
-        )
+        if recovery_type == "hmt":
+            ews, evs = recovery_fn(ro_sketch, lop, as_eigh=True, by_mag=by_mag)
+        else:
+            ews, evs = recovery_fn(
+                ro_sketch,
+                ro_mop,
+                rcond=lstsq_rcond,
+                as_eigh=True,
+                by_mag=by_mag,
+            )
     # if oversampled, perform inner measurements and then solve
     else:
         ri_seed = ro_seed + outer_dims + 1
