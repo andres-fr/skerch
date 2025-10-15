@@ -24,6 +24,10 @@ You can test the installation by e.g. running all the examples from the document
 
 .. code:: bash
 
+   # check if CUDA is available
+   python -c "import torch; print('With CUDA:', torch.cuda.is_available())"
+
+   # run all documentation examples
    for i in docs/materials/examples/*.py; do python $i; done
 
 
