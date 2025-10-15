@@ -47,7 +47,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--seeds",
         action="store",
-        default="0 1 -12345 12345 479915",  # 0b1110101001010101011
+        default="-12345 54321 17265 127419128",
         help="Space-separated string of integers to use as seeds.",
         type=str_of_unique_ints,
     )
@@ -60,4 +60,9 @@ def pytest_addoption(parser):
         "--skip_toomanyfiles",
         action="store_true",
         help="If given, test_too_many_files will do nothing (but still run).",
+    )
+    parser.addoption(
+        "--mp",
+        action="store_true",
+        help="If given, some measurements will run on CPU multiprocessing.",
     )

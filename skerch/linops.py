@@ -2,298 +2,444 @@
 # -*- coding: utf-8 -*-
 
 
-"""Utilities for linear operators.
-
-This PyTorch library is intended to work with (potentially matrix-free) linear
-operators that support left- and right- matrix multiplication (via e.g.
-``v @ lop`` and ``lop @ v``) as well as the ``.shape`` attribute.
-
-This module implements basic support for said functionality, as well as some
-default linear operators (composite, diagonal...).
-"""
+"""Basic utilities for (matrix-free) linear operators."""
 
 
 import torch
 
-from .utils import BadShapeError, NoFlatError, gaussian_noise
+from .utils import BadShapeError, htr
 
 
 # ##############################################################################
-# # BASE LINEAR OPERATOR
+# # CORE LINOP FUNCTIONALITY
 # ##############################################################################
+def linop_to_matrix(lop, dtype=torch.float32, device="cpu", adjoint=False):
+    """Convert a linop to a matrix via one-hot matrix-vector products.
+
+    :param adjoint: If true, one-hot products are done via ``v_i @ lop``.
+      Otherwise ``lop @ v_i``.
+    :returns: Matrix equivalent to the given ``lop``, on the given ``dtype``
+      and ``device``.
+    """
+    h, w = lop.shape
+    result = torch.zeros(lop.shape, dtype=dtype, device=device)
+    if adjoint:
+        oh = torch.zeros(h, dtype=dtype, device=device)
+        for i in range(h):
+            oh *= 0
+            oh[i] = 1
+            result[i, :] = oh @ lop
+    else:
+        oh = torch.zeros(w, dtype=dtype, device=device)
+        for i in range(w):
+            oh *= 0
+            oh[i] = 1
+            result[:, i] = lop @ oh
+    #
+    return result
+
+
+def check_linop_input(x, lop_shape, adjoint):
+    """Checks that input is a matrix or vector of the right shape.
+
+    :param x: The input to this linear operator. It should be either a
+      vector or a matrix of matching shape to ``lop_shape``.
+    :param bool adjoint: If true, ``x @ lop`` is assumed, otherwise
+      ``lop @ x``.
+    :raises: :class:`BadShapeError` if there is any shape mismatch.
+    """
+    if not len(x.shape) in {1, 2}:
+        raise BadShapeError("Only vector or matrix supported!")
+    if adjoint:
+        if x.shape[-1] != lop_shape[0]:
+            raise BadShapeError(
+                f"Mismatching shapes! {x.shape} <--> {lop_shape}"
+            )
+    if not adjoint:
+        if x.shape[0] != lop_shape[1]:
+            raise BadShapeError(
+                f"Mismatching shapes! {lop_shape} <--> {x.shape}"
+            )
+
+
 class BaseLinOp:
     """Base class for linear operators.
 
-    Provides the ``.shape`` attribute and basic matmul functionality with
+    Implements the ``.shape`` attribute and basic matmul functionality with
     vectors and matrices (also via the ``@`` operator). Intended to be
-    extended with further functionality.
+    extended with further functionality via :meth:`.matmul` and
+    :meth:`.rmatmul`. See documentation and codebase for examples.
+
+    .. note::
+      Inputs to ``matmul, rmatmul`` can be vectors or matrices, but
+      implementations are responsibe to handle matrix-matrix parallelization.
+
+    :param shape: ``(height, width)`` of linear operator.
+    :param batch: When calling ``self @ x`` against a matrix with several
+      vectors, the default ``batch=None`` will call :meth:`.matmul` with the
+      whole ``x`` matrix at once. If a different batch is provided, ``x``
+      will be split in chunks of ``batch`` vectors, which will be fed to
+      :meth:`.matmul` sequentially. This is useful to eg. prevent
+      out-of-memory errors due to processing too large chunks at once.
     """
 
-    def __init__(self, shape):
-        """:param shape: ``(height, width)`` of linear operator."""
-        if len(shape) != 2:
-            raise BadShapeError("Shape must be a (height, width) pair!")
+    def __init__(self, shape, batch=None):
+        """Initializer. See class docstring."""
+        try:
+            h, w = shape
+        except Exception as e:
+            raise ValueError(f"Malformed shape? {shape}") from e
+        if h <= 0 or w <= 0:
+            raise BadShapeError(f"Empty linop with shape {shape}?")
         self.shape = shape
+        self.batch = batch
 
     def __repr__(self):
         """Returns a string in the form <classname(shape)>."""
         clsname = self.__class__.__name__
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]})>"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){batch_s}>"
         return s
 
-    def check_input(self, x, adjoint):
-        """Checking that input has compatible shape.
+    def _matmul_helper(self, x, adjoint=False):
+        """Reshape and distribute input to the corresponding operation.
 
-        :param x: The input to this linear operator.
-        :param bool adjoint: If true, ``x @ self`` is assumed, otherwise
-          ``self @ x``.
+        :param x: Vector or matrix to be multiplied with.
+        :param adjoint: True if adjoint matmul is intended.
+        :returns: Result of the matrix multiplication.
         """
-        try:
-            assert len(x.shape) in {
-                1,
-                2,
-            }, "Only vector or matrix input supported"
-            #
-            if adjoint:
-                assert (
-                    x.shape[-1] == self.shape[0]
-                ), f"Mismatching shapes! {x.shape} <--> {self.shape}"
-            else:
-                assert (
-                    x.shape[0] == self.shape[1]
-                ), f"Mismatching shapes! {self.shape} <--> {x.shape}"
-        except AssertionError as ae:
-            raise BadShapeError from ae
-
-    def matmul(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        :param x: Expected a tensor of shape ``(w,)``.
-          Note that shapes ``(w, k)`` will be automatically passed as ``k``
-          vectors of length ``w``.
-        """
-        raise NotImplementedError
-
-    def rmatmul(self, x):
-        """Adjoint (left) matrix-vector multiplication ``x @ self``.
-
-        :param x: Expected a tensor of shape ``(h,)``.
-          Note that shapes ``(h, k)`` will be automatically passed as ``k``
-          vectors of length ``h``.
-        """
-        raise NotImplementedError
+        check_linop_input(x, self.shape, adjoint)
+        xvec = len(x.shape) == 1
+        num_vecs = 1 if xvec else x.shape[0 if adjoint else 1]
+        #
+        if xvec:
+            x = x.unsqueeze(0 if adjoint else 1)
+        #
+        if (self.batch is None) or xvec:
+            result = self.rmatmul(x) if adjoint else self.matmul(x)
+        else:
+            result = []
+            for beg in range(0, num_vecs, self.batch):
+                end = beg + self.batch
+                if adjoint:
+                    result.append(self.rmatmul(x[beg:end, :]))
+                else:
+                    result.append(self.matmul(x[:, beg:end]))
+            result = torch.vstack(result) if adjoint else torch.hstack(result)
+        #
+        if xvec and len(result.shape) == 2:
+            result.squeeze_()
+        return result
 
     # operator interfaces
     def __matmul__(self, x):
-        """Convenience wrapper to :meth:`.matmul`."""
-        self.check_input(x, adjoint=False)
-        try:
-            return self.matmul(x)
-        except NoFlatError:
-            result = torch.zeros((self.shape[0], x.shape[1]), dtype=x.dtype).to(
-                x.device
-            )
-            for i in range(x.shape[1]):
-                result[:, i] = self.matmul(x[:, i])
-            return result
+        """Convenience wrapper to perform matmul on vectors or matrices."""
+        result = self._matmul_helper(x, adjoint=False)
+        return result
 
     def __rmatmul__(self, x):
-        """Convenience wrapper to :meth:`.rmatmul`."""
-        self.check_input(x, adjoint=True)
-        try:
-            return self.rmatmul(x)
-        except NoFlatError:
-            result = torch.zeros((x.shape[0], self.shape[1]), dtype=x.dtype).to(
-                x.device
-            )
-            for i in range(x.shape[0]):
-                result[i, :] = self.rmatmul(x[i, :])
-            return result
+        """Convenience wrapper to perform rmatmul on vectors or matrices."""
+        result = self._matmul_helper(x, adjoint=True)
+        return result
 
     def __imatmul__(self, x):
         """Assignment matmul operator ``@=``.
 
-        .. note::
+        .. warning::
           This method is deactivated by default since linear operators may be
           matrix-free.
         """
-        raise NotImplementedError("Matmul assignment not supported!")
+        raise NotImplementedError(
+            "Unsupported matmul assignment: not matrix-free compatible!"
+        )
 
+    def t(self):
+        """Return (Hermitian) transposition of this lop.
 
-# ##############################################################################
-# # BASE LINEAR OPERATORS INVOLVING RANDOMNESS
-# ##############################################################################
-class BaseRandomLinOp(BaseLinOp):
-    """Linear operators with pseudo-random behaviour.
-
-    Like the base LinOp, but with a ``seed`` attribute that can be used to
-    control random behaviour.
-    """
-
-    def __init__(self, shape, seed=0b1110101001010101011):
-        """Instantiates a random linear operator.
-
-        :param shape: ``(height, width)`` of linear operator.
-        :param int seed: Seed for random behaviour.
+        Equivalent to ``TransposedLinOp(self)``, see :class:`TransposedLinOp`.
         """
-        super().__init__(shape)
-        self.seed = seed
-
-    def __repr__(self):
-        """Returns a string in the form <classname(shape), seed>."""
-        clsname = self.__class__.__name__
-        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}), seed={self.seed}>"
-        return s
-
-
-class NoiseLinOp(BaseRandomLinOp):
-    """Base class for noisy linear operators.
-
-    Consider a matrix of shape ``(h, w)`` composed of random-generated entries.
-    For very large dimensions, the ``h * w`` memory requirement is intractable.
-    Instead, this matrix-free operator generates each row (or column) one by
-    one during matrix multiplication, while respecting two properties:
-
-    * Both forward and adjoint operations are deterministic given a random seed
-    * Both forward and adjoint operations are consistent with each other
-
-    Users need to override :meth:`.sample` with their desired way of
-    producing rows/columns (as specified by the ``partition`` given at
-    initialization).
-    """
-
-    PARTITIONS = {"row", "column", "longer", "shorter"}
-
-    def __init__(self, shape, seed=0b1110101001010101011, partition="longer"):
-        """Instantiates a random linear operator.
-
-        :param shape: ``(height, width)`` of linear operator.
-        :param int seed: Seed for random behaviour.
-        :param partition: Which kind of vectors will be produced by
-          :meth:`.sample`. They can correspond to columns or rows of this
-          linear operator. Longer means that the larger dimension is
-          automatically used (e.g. columns in a thin linop, rows in a fat
-          linop). Longer is generally recommended as it involves less
-          iterations and can leverage more parallelization.
-        """
-        super().__init__(shape)
-        self.seed = seed
-        #
-        self.partition = partition
-        if partition not in self.PARTITIONS:
-            raise ValueError(f"partition must be one of {self.PARTITIONS}!")
-
-    def _get_partition(self):
-        """Dispatch behaviour for :meth:`.sample`.
-
-        :returns: A boolean depending on the chosen partitioning behaviour.
-          True value corresponds to column, and false to row.
-        """
-        # if row or column is hardcoded, use that partition
-        if self.partition in {"row", "column"}:
-            by_column = self.partition == "column"
-        #
-        elif self.shape[0] >= self.shape[1]:  # if linop is tall...
-            by_column = 1 if (self.partition == "longer") else 0
-        else:  # if linop is fat...
-            by_column = 0 if (self.partition == "longer") else 1
-        #
-        return by_column
+        return TransposedLinOp(self)
 
     def matmul(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        See parent class for more details.
-        """
-        h, w = self.shape
-        result = torch.zeros(h, device=x.device, dtype=x.dtype)
-        by_column = self._get_partition()
-        if by_column:
-            for idx in range(w):
-                result += x[idx] * self.sample(h, idx, x.device)
-        else:
-            for idx in range(h):
-                result[idx] += (x * self.sample(w, idx, x.device)).sum()
-        #
-        return result
+        """Implement with the desired functionality. See class docstring."""
+        raise NotImplementedError("Matmul not implemented!")
 
     def rmatmul(self, x):
-        """Adjoint (left) matrix-vector multiplication ``x @ self``.
+        """Implement with the desired functionality. See class docstring."""
+        raise NotImplementedError("Rmatmul not implemented!")
 
-        See parent class for more details.
+
+class ByBlockLinOp(BaseLinOp):
+    """Matrix-free operator computed by blocks of submatrices.
+
+    Consider a large matrix that does not fit in memory. Still, we can perform
+    matrix multiplications by sequentially loading smaller blocks in memory,
+    and then aggregating the result. This is the main motivation for this
+    by-block linear operator:
+
+    * At instantiation, users determine the ``by_row`` and ``blocksize``
+      parameters, which determine how many rows/columns will be internally
+      used at once.
+    * At runtime, this class calls sequentially the :meth:`get_block` method,
+      performs the partial matrix-multiplications and aggregates them.
+    * At development, extensions of this class only have to implement
+      :meth:`.get_block` accordingly to return blocks of the right shape.
+
+    .. note::
+      The ``by_row`` flag has implications in terms of memory and runtime.
+      If true, for a ``lop`` of shape ``(h, w)`` and block size 1, the
+      ``lop @ x`` matrix-vector multiplication will call :meth:`.get_vector`
+      ``h`` times, and perform ``h`` dot products of dimension ``w``. If false,
+      it will perform ``w`` scalar products of dimension ``h``. In the case of
+      ``x @ lop``, the number of scalar and dot products are swapped.
+
+      Therefore, developers need to override :meth:`.get_block` taking this
+      flag into account, and users should set it to the scenario that is most
+      efficient (e.g. by-column is generally more efficient when ``h > w``).
+      See :class:`skerch.measurements` for examples.
+
+    :param by_row: If true, blocks are groups of rows, otherwise columns.
+    :param blocksize: If integer, determines how many rows/columns each block
+      has, and a row will be a matrix.
+    :param batch: If the input to matmul is a matrix itself, this determines
+      how many vectors are computed at once. Note that this is different to
+      ``blocksize``, which refers to the blocks of *this* linop.
+    """
+
+    def __init__(self, shape, by_row=False, batch=None, blocksize=1):
+        """Initializer. See class docstring."""
+        if blocksize < 1:
+            raise ValueError("Block size must be positive!")
+        super().__init__(shape, batch)
+        self.by_row = by_row
+        self.blocksize = blocksize
+        self.num_vecs = shape[0] if by_row else shape[1]
+        self.num_blocks = self.get_idx_coords(self.num_vecs - 1)[0] + 1
+
+    def get_vector_idxs(self, block_idx):
+        """Retrieves a range with vector indices corresponding to a block.
+
+        :param block_idx: Integer between ``0`` and ``self.num_blocks - 1``.
+        :returns: ``range(beg, end)`` with the vector indices corresponding
+          to the ``block_idx`` block.
         """
-        h, w = self.shape
-        result = torch.zeros(w, device=x.device, dtype=x.dtype)
-        by_column = self._get_partition()
-        if by_column:
-            for idx in range(w):
-                result[idx] = (x * self.sample(h, idx, x.device)).sum()
-        else:
-            for idx in range(h):
-                result += x[idx] * self.sample(w, idx, x.device)
+        if not (0 <= block_idx < self.num_blocks):
+            raise ValueError(f"Block idx out of bounds! {block_idx}")
         #
-        return result
+        beg = block_idx * self.blocksize
+        end = min(self.num_vecs, beg + self.blocksize)
+        return range(beg, end)
 
-    def sample(self, dims, idx, device):
-        """Method used to sample random entries for this linear operator.
+    def get_idx_coords(self, idx):
+        """Retrieve vector index in block coordinates.
 
-        Override this method with the desired behaviour. E.g. the following
-        code results in a random matrix with i.i.d. Rademacher noise entries.
-        Note that noise is generated on CPU to ensure reproducibility::
+        Useful if we want to retrieve a given vector from this linop: since
+        this linop is defined in a by-block fashion, we first need to know
+        which block to retrieve, and then which vector index within the
+        retrieved block.
 
-          r = rademacher_noise(dims, seed=idx + self.seed, device="cpu")
-          return r.to(device)
+        :param idx: Integer between ``0`` and ``N - 1``, where ``N`` is
+          the number of rows, if ``by_row`` is true, or columns otherwise.
+        :returns: Pair of ints ``(b, v)``, such that ``vec_idx`` is the
+          ``v``-th element of the ``b``-th block, e.g. in a by-row linop,
+          ``lop[idx] = lop.get_block(idxs, dtype, device)[idx]``.
+        """
+        if not (0 <= idx < self.num_vecs):
+            raise ValueError(f"Vector idx out of bounds! {idx}")
+        block_idx, vec_idx = divmod(idx, self.blocksize)
+        return (block_idx, vec_idx)
 
-        :param dims: Length of the produced random vector.
-        :param idx: Index of the row/column to be sampled. Can be combined with
-          ``self.seed`` to induce random behaviour.
-        :param device: Device of the input vector that was used to call the
-          matrix multiplication. The output of this method should match this
-          device.
+    def get_block(self, block_idx, input_dtype, input_device):
+        """Method to gather a block (matrix) from this linear operator.
+
+        Override this method with the desired behaviour. For a shape of
+        ``(h, w)``, it should return matrices of shape ``(block, w)`` if
+        ``self.by_row`` is true, and ``(h, block)`` otherwise.
+
+        .. note::
+          If ``blocksize==1``, returning vectors may work in some cases, but
+          it is recommended to still return matrices (where one of the
+          dimensions equals 1).
+
+        :param block_idx: Index of the block to be returned. Use the auxiliary
+          method :meth:`get_vector_idxs` if you need to know which vector
+          indices are associated to this block index. The attributes
+          ``self.num_vecs, self.num_blocks`` may also be helpful.
+        :param input_dtype: The dtype of the input tensor that this linop
+          was called on. The output of this method should generally be in the
+          same device.
+        :param input_device: The device of the input tensor that this linop
+          was called on. The output of this method should generally be in the
+          same device.
         """
         raise NotImplementedError
 
+    def get_blocks(self, dtype, device="cpu"):
+        """Yields all blocks in ascending order with the corresponding idxs."""
+        for b_i in range(self.num_blocks):
+            block = self.get_block(b_i, dtype, device)
+            idxs = self.get_vector_idxs(b_i)
+            yield block, idxs
 
-class GaussianIidLinOp(NoiseLinOp):
-    """Random linear operator with i.i.d. Gaussian entries."""
+    def to_matrix(self, dtype, device="cpu"):
+        """Converts this linop to a matrix of given ``dtype``, ``device``."""
+        result = torch.empty(self.shape, dtype=dtype, device=device)
+        #
+        for block, idxs in self.get_blocks(dtype, device):
+            if self.by_row:
+                result[idxs, :] = block
+            else:
+                result[:, idxs] = block
+        #
+        return result
 
-    def sample(self, dims, idx, device):
-        """Samples a vector with standard Gaussian i.i.d. noise.
+    def _bb_matmul_helper(self, x, adjoint=False):
+        """Reshape and distribute input to the corresponding operation.
 
-        See base class definition for details.
+        :param x: Vector or matrix to be multiplied with.
+        :param adjoint: True if adjoint matmul is intended.
+        :returns: Result of the matrix multiplication.
         """
-        result = gaussian_noise(dims, seed=idx + self.seed, device="cpu")
-        return result.to(device)
+        h, w = self.shape
+        if adjoint:
+            n, xw = x.shape
+            result = torch.zeros((n, w), device=x.device, dtype=x.dtype)
+        else:
+            xh, n = x.shape
+            result = torch.zeros((h, n), device=x.device, dtype=x.dtype)
+        #
+        for b_i in range(self.num_blocks):
+            idxs = self.get_vector_idxs(b_i)
+            if adjoint and self.by_row:
+                result += x[:, idxs] @ self.get_block(b_i, x.dtype, x.device)
+            elif adjoint and not self.by_row:
+                result[:, idxs] = x @ self.get_block(b_i, x.dtype, x.device)
+            elif not adjoint and self.by_row:
+                result[idxs, :] = self.get_block(b_i, x.dtype, x.device) @ x
+            elif not adjoint and not self.by_row:
+                result += self.get_block(b_i, x.dtype, x.device) @ x[idxs, :]
+            else:
+                raise RuntimeError("This should never happen!")
+        #
+        return result
+
+    def matmul(self, x):
+        """Performs right matrix-multiplication."""
+        return self._bb_matmul_helper(x, adjoint=False)
+
+    def rmatmul(self, x):
+        """Performs left (adjoint) matrix-multiplication."""
+        return self._bb_matmul_helper(x, adjoint=True)
+
+    def __repr__(self):
+        """Returns a string in the form <classname(shape), attr=value, ...>."""
+        clsname = self.__class__.__name__
+        byrow_s = ", by row" if self.by_row else ", by col"
+        batch_s = "" if self.batch is None else f", batch={self.batch}"
+        block_s = f", blocksize={self.blocksize}"
+        #
+        feats = f"{byrow_s}{batch_s}{block_s}"
+        s = f"<{clsname}({self.shape[0]}x{self.shape[1]}){feats}>"
+        return s
+
+
+class TransposedLinOp:
+    """Hermitian transposition of a linear operator.
+
+    Given a linear operator :math:`A`, real or complex, this class wraps its
+    functionality, such that ``TransposedLinOp(lop)`` behaves line the
+    (Hermitian) transposition :math:`A^H`. This is done by swapping dimensions
+    and matmul methods leveraging the following identity:
+
+    :math:`A^H v = ((A^H v)^H)^H = (v^H A)^H`.
+
+    Usage example::
+
+      lopT = TransposedLinOp(lop)
+
+    :param lop: Any object supporting a shape ``(h, w)`` attribute as well as
+      the right- and left- matmul operator ``@``.
+    """
+
+    def __init__(self, lop):
+        """Initializer. See class docstring."""
+        if isinstance(lop, TransposedLinOp):
+            raise ValueError("LinOp is already transposed! use x.lop")
+        self.lop = lop
+        self.shape = self.lop.shape[::-1]
+
+    # operator interfaces
+    def __matmul__(self, x):
+        """Convenience wrapper to perform matmul on vectors or matrices."""
+        # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
+        # x_vec = len(x.shape) == 1
+        # result = (x.conj().T @ self.lop).T
+        # # result.conj() did not work with multiprocessing (bug?)
+        # try:
+        #     result.imag *= -1
+        # except RuntimeError:
+        #     pass
+
+        # (A.H @ x) = (A.H @ x).H.H = (x.H @ A).H
+        # in-place conjugation did not work with multiprocessing (bug?)
+        result = htr((htr(x, in_place=False) @ self.lop), in_place=False)
+        return result
+
+    def __rmatmul__(self, x):
+        """Convenience wrapper to perform rmatmul on vectors or matrices."""
+        # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
+        # x_vec = len(x.shape) == 1
+        # result = (self.lop @ x.conj().T).T
+        # # result.conj() did not work with multiprocessing (bug?)
+        # try:
+        #     result.imag *= -1
+        # except RuntimeError:
+        #     pass
+
+        # (x @ A.H) = (x @ A.H).H.H = (A @ x.H).H
+        # in-place conjugation did not work with multiprocessing (bug?)
+        result = htr(self.lop @ htr(x, in_place=False), in_place=False)
+        return result
+
+    def t(self):
+        """Undo transposition: returns original ``lop``."""
+        return self.lop
+
+    def __repr__(self):
+        """Returns a string in the form (str(lop)).H."""
+        return f"({str(self.lop)}).H"
 
 
 # ##############################################################################
-# # COMPOSITE LINEAR OPERATORS
+# # AGGREGATE LINEAR OPERATORS
 # ##############################################################################
 class CompositeLinOp:
-    """Composite linear operator.
+    """Matrix-free composite linear operator.
 
     This class composes an ordered collection of operators ``[A, B, C, ...]``
-    into ``A @ B @ C ...``.
+    into ``A @ B @ C ...`` in a matrix-free fashion.
 
-    .. note::
-
+    .. warning::
       Using this class could be more inefficient than directly computing the
       composed operator, e.g. if ``A.shape = (1, 1000)`` and
       ``B.shape = (1000, 1)``, then computing the scalar ``C = A @ B`` and then
       applying it is more efficient than keeping a ``CompositeLinearoperator``
       with ``A, B`` (in terms of both memory and computation). This class does
       not check for such cases, users are encouraged to take this into account.
+      Note that composite linops can also be nested.
+
+
+    :param named_operators: Ordered collection in the form
+      ``[(n_1, o_1), ...]`` where each ``n_i`` is a string with the name of
+      operator ``o_i``. Each ``o_i`` operator must implement ``__matmul__``
+      and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
+      object will then become the composite operator ``o_1 @ o_2 @ ...``
     """
 
     def __init__(self, named_operators):
-        """Instantiates a composite linear operator.
-
-        :param named_operators: Ordered collection in the form
-          ``[(n_1, o_1), ...]`` where each ``n_i`` is a string with the name of
-          operator ``o_i``. Each ``o_i`` operator must implement ``__matmul__``
-          and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
-          object will then become the composite operator ``o_1 @ o_2 @ ...``
-        """
+        """Initializer. See class docstring."""
+        if not named_operators:
+            raise ValueError(f"Empty linop collection? {named_operators}")
         self.names, self.operators = zip(*named_operators)
         shapes = [o.shape for o in self.operators]
         for (_h1, w1), (h2, _w2) in zip(shapes[:-1], shapes[1:]):
@@ -328,25 +474,29 @@ class CompositeLinOp:
 
 
 class SumLinOp(BaseLinOp):
-    """Sum of linear operators.
+    """Matrix-free sum of linear operators.
 
-    Given a collection of same-shape linear operators ``A, B, C, ...``, this
-    clsas behaves like the sum ``A + B + C ...``.
+    Given a collection of same-shape linear operators ``A, B, C, D ...``, this
+    class implements the sum ``A + B + C - D ...`` in a matrix-free fashion.
+
+    :param named_signed_operators: Collection in the form
+      ``{(n_1, s_i, o_1), ...}`` where each ``n_i`` is a string with the name
+      of operator ``o_i``, and ``s_i`` is a boolean: if true, this operator
+      is to be added, otherwise subtracted.
+      Each ``o_i`` operator must implement ``__matmul__``
+      and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
+      object will then become the operator ``o_1 + o_2 - ...``. All operators
+      must also have same shape.
     """
 
-    def __init__(self, named_operators):
-        """Instantiates a summation linear operator.
-
-        :param named_operators: Collection in the form ``{(n_1, o_1), ...}``
-          where each ``n_i`` is a string with the name of operator ``o_i``.
-          Each ``o_i`` operator must implement ``__matmul__``
-          and ``__rmatmul__`` as well as the ``shape = (h, w)`` attribute. This
-          object will then become the operator ``o_1 + o_2 + ...``
-        """
-        self.names, self.operators = zip(*named_operators)
+    def __init__(self, named_signed_operators):
+        """Instantiates a summation linear operator. See class docstring."""
+        if not named_signed_operators:
+            raise ValueError(
+                f"Empty linop collection? {named_signed_operators}"
+            )
+        self.names, self.signs, self.operators = zip(*named_signed_operators)
         shapes = [o.shape for o in self.operators]
-        if not shapes:
-            raise ValueError(f"Empty linop collection? {named_operators}")
         for shape in shapes:
             if shape != shapes[0]:
                 raise BadShapeError(f"All shapes must be equal! {shapes}")
@@ -357,10 +507,13 @@ class SumLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=False)
-        result = self.operators[0] @ x
-        for o in self.operators[1:]:
-            result += o @ x
+        check_linop_input(x, self.shape, adjoint=False)
+        result = self.operators[0] @ (x if self.signs[0] else -x)
+        for o, s in zip(self.operators[1:], self.signs[1:]):
+            if s:
+                result += o @ x
+            else:
+                result -= o @ x
         return result
 
     def __rmatmul__(self, x):
@@ -368,36 +521,43 @@ class SumLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=True)
+        check_linop_input(x, self.shape, adjoint=True)
         result = x @ self.operators[0]
-        for o in self.operators[1:]:
-            result += x @ o
+        for o, s in zip(self.operators[1:], self.signs[1:]):
+            if s:
+                result += x @ o
+            else:
+                result -= x @ o
         return result
 
     def __repr__(self):
         """Returns a string in the form op1 + op2 + op3 ..."""
-        result = " + ".join(self.names)
+        result = ("-" if not self.signs[0] else "") + self.names[0]
+        for s, n in zip(self.signs[1:], self.names[1:]):
+            result += (" + " if s else " - ") + n
         return result
 
 
 # ##############################################################################
-# # DIAGONAL LINEAR OPERATORS
+# # DIAGONAL/BANDED LINEAR OPERATORS
 # ##############################################################################
 class DiagonalLinOp(BaseLinOp):
-    r"""Diagonal linear operator.
+    r"""Diagonal matrix-free linear operator.
 
     Given a vector ``v`` of ``d`` dimensions, this class implements a diagonal
     linear operator of shape ``(d, d)`` via left- and right-matrix
     multiplication, as well as the ``shape`` attribute, only requiring linear
     (:math:`\mathcal{O}(d)`) memory and runtime.
+
+    :param diag: Vector to be casted as diagonal linop.
     """
 
     MAX_PRINT_ENTRIES = 20
 
     def __init__(self, diag):
-        """:param diag: Vector to be casted as diagonal linop."""
-        if len(diag.shape) != 1:
-            raise BadShapeError("Diag must be a vector!")
+        """Initializer. See class docstring."""
+        if len(diag.shape) != 1 or diag.numel() <= 0:
+            raise BadShapeError("Diag must be a nonempty vector!")
         self.diag = diag
         super().__init__((len(diag),) * 2)  # this sets self.shape also
 
@@ -406,7 +566,7 @@ class DiagonalLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=False)
+        check_linop_input(x, self.shape, adjoint=False)
         if len(x.shape) == 2:
             result = (x.T * self.diag).T
         else:
@@ -419,8 +579,13 @@ class DiagonalLinOp(BaseLinOp):
 
         See parent class for more details.
         """
-        self.check_input(x, adjoint=True)
+        check_linop_input(x, self.shape, adjoint=True)
         result = x * self.diag
+        return result
+
+    def to_matrix(self):
+        """Efficiently convert this linear operator into a matrix."""
+        result = torch.diag(self.diag)
         return result
 
     def __repr__(self):
@@ -436,7 +601,7 @@ class DiagonalLinOp(BaseLinOp):
 
 
 class BandedLinOp(BaseLinOp):
-    r"""Banded linear operator (composed of diagonals).
+    r"""Banded matrix-free linear operator.
 
     Given a collection of :math:`k` vectors, this class implements a banded
     linear operator, where each given vector is a (sub)-diagonal. It is
@@ -444,8 +609,11 @@ class BandedLinOp(BaseLinOp):
     and runtime is equivalent to storing and running the individual diagonals.
 
     .. note::
-      All given vectors must be of appropriate length with respect to their
-      position. For example, a square tridiagonal matrix of shape ``(n, n)``
+      The shape of this linear operator is implicitly given by the
+      diagonal lengths and indices. Any inconsistent input will result in
+      a ``BadShapeError``. In particular, symmetric banded matrices must
+      also be square.
+      For example, a square tridiagonal matrix of shape ``(n, n)``
       has a main diagonal at index 0 with length ``n``, and two subdiagonals at
       indices 1, -1 with length ``n - 1``. Still, this linop can also be
       non-square (unless it is symmetric), as long as all given diagonals fit
@@ -456,6 +624,13 @@ class BandedLinOp(BaseLinOp):
       diags = {0: some_diag, 1: some_superdiag, -1, some_subdiag}
       B = BandedLinOp(diags, symmetric=False)
       w = B @ v
+
+    :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
+      ``diag`` is a torch vector containing a diagonal, and ``idx``
+      indicates the location of the diagonal: 0 is the main diagonal, 1 the
+      superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
+    :param symmetric: If true, only diagonals with nonnegative indices are
+      admitted. Each positive index will be replicated as a negative one.
     """
 
     MAX_PRINT_ENTRIES = 20
@@ -484,21 +659,7 @@ class BandedLinOp(BaseLinOp):
         return diag_lengths
 
     def __init__(self, indexed_diags, symmetric=False):
-        """Instantiates a banded linear operator.
-
-        :param indexed_diags: Dictionary in the form ``{idx: diag, ...}`` where
-          ``diag`` is a torch vector containing a diagonal, and ``idx``
-          indicates the location of the diagonal: 0 is the main diagonal, 1 the
-          superdiagonal (``lop[i, i+1]``), -1 the subdiagonal, and so on.
-        :param symmetric: If true, only diagonals with nonnegative indices are
-          admitted. Each positive index will be replicated as a negative one.
-
-        .. note::
-          The shape of this linear operator is implicitly given by the
-          diagonal lengths and indices. Any inconsistent input will result in
-          a ``BadShapeError``. In particular, symmetric banded matrices must
-          also be square.
-        """
+        """Initializer. See class docstring."""
         # extract diagonal lengths and check they are vectors
         # also check that symmetric mode does not accept negative indices
         diag_lengths = self.__initial_checks(indexed_diags, symmetric)
@@ -527,14 +688,16 @@ class BandedLinOp(BaseLinOp):
             raise BadShapeError(
                 f"Inconsistent diagonal indices/lengths! {diag_lengths}, "
                 + f"triggered by indices {inconsistent_idxs} "
-                + f" for shape {(height, width)}"
+                + f" for shape {(height, width)} and symmetric={symmetric}."
             )
-        # if symmetric, linop must be square
-        if symmetric:
-            if height != width:
-                raise BadShapeError(
-                    f"Symmetric banded linop must be square! {diag_lengths}"
-                )
+        # diags must be of same dtype and device
+        # diag_dtypes = [d.dtype for d in indexed_diags.values()]
+        # diag_devices = [d.device for d in indexed_diags.values()]
+        diag_dtypes, diag_devices = zip(
+            *((d.dtype, d.device) for d in indexed_diags.values())
+        )
+        if len(set(diag_dtypes)) != 1 or len(set(diag_devices)) != 1:
+            raise ValueError("Inconsistent diagonal dtypes/devices!")
         # done checking, initialize object
         self.diags = {i: DiagonalLinOp(d) for i, d in indexed_diags.items()}
         self.symmetric = symmetric
@@ -542,7 +705,7 @@ class BandedLinOp(BaseLinOp):
 
     def __matmul_helper(self, x, adjoint=False):
         """Helper method to perform multiple diagonal matmuls."""
-        self.check_input(x, adjoint=adjoint)
+        check_linop_input(x, self.shape, adjoint=adjoint)
         #
         diags = {}
         for idx, diag in self.diags.items():
@@ -590,15 +753,15 @@ class BandedLinOp(BaseLinOp):
         return s
 
     def to_matrix(self):
-        """Convert this linear operator into a matrix."""
+        """Convert this linear operator into a matrix.
+
+        Datatype and device are borrowed from the first diagonal that was
+        passed to the constructor.
+        """
         # check that all diagonals are of same dtype and device
         dtypes, devices = zip(
             *((d.diag.dtype, d.diag.device) for d in self.diags.values())
         )
-        if len(set(dtypes)) > 1:
-            raise RuntimeError(f"Inconsistent diagonal dtypes! {dtypes}")
-        if len(set(devices)) > 1:
-            raise RuntimeError(f"Inconsistent diagonal devices! {devices}")
         # create and populate resulting matrix
         result = torch.zeros(self.shape, dtype=dtypes[0], device=devices[0])
         for idx, diag in self.diags.items():
@@ -617,113 +780,25 @@ class BandedLinOp(BaseLinOp):
 
 
 # ##############################################################################
-# # PROJECTION LINEAR OPERATORS
-# ##############################################################################
-class OrthProjLinOp(BaseLinOp):
-    r"""Linear operator for an orthogonal projector.
-
-    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-    columns, this class implements the orthogonal projector onto its span,
-    i.e. :math:`Q Q^T`.
-    """
-
-    def __init__(self, Q):
-        """Object initialization.
-
-        :param Q: Linear operator of shape ``(h, w)`` with ``h >= w``, expected
-          to be orthonormal (i.e. columns with unit Euclidean norm and all
-          orthogonal to each other). It must implement the left and right
-          matmul operations via the ``@`` operator.
-
-        .. warning::
-
-          This class assumes ``Q`` is orthonormal, but this is not checked.
-        """
-        self.Q = Q
-        #
-        h, w = Q.shape
-        if w > h:
-            raise BadShapeError("Projector matrix must be thin!")
-        super().__init__((h, h))  # this sets self.shape also
-
-    def __matmul__(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        See parent class for more details.
-        """
-        self.check_input(x, adjoint=False)
-        if len(x.shape) == 1:
-            result = self.Q @ (x @ self.Q)
-        elif len(x.shape) == 2:
-            result = self.Q @ (x.T @ self.Q).T
-        else:
-            raise RuntimeError(f"Unsupported input shape: {x.shape}")
-        return result
-
-    def __rmatmul__(self, x):
-        """Adjoint (left) matrix-vector multiplication ``x @ self``.
-
-        See parent class for more details.
-        """
-        self.check_input(x, adjoint=True)
-        if len(x.shape) == 1:
-            result = self.Q @ (x @ self.Q)
-            return result
-        elif len(x.shape) == 2:
-            result = self.Q @ (x @ self.Q).T
-            return result.T
-        else:
-            raise RuntimeError(f"Unsupported input shape: {x.shape}")
-
-    def __repr__(self):
-        """Returns a string in the form <OrthProjLinOp(Q_shape)>."""
-        clsname = self.__class__.__name__
-        s = f"<{clsname}({self.Q.shape})>"
-        return s
-
-
-class NegOrthProjLinOp(OrthProjLinOp):
-    """Linear operator for a negative orthogonal projector.
-
-    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-    columns, this class implements the orthogonal projector :math:`Q Q^T`.
-    Given a "thin" matrix (i.e. height >= width) :math:`Q` of orthonormal
-    columns, this class implements the orthogonal projector onto the space
-    orthogonal to its span, i.e. :math:`(I - Q Q^T)`.
-    """
-
-    def __matmul__(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        See parent class for more details.
-        """
-        return x - super().__matmul__(x)
-
-    def __rmatmul__(self, x):
-        """Forward (right) matrix-vector multiplication ``self @ x``.
-
-        See parent class for more details.
-        """
-        return x - super().__rmatmul__(x)
-
-
-# ##############################################################################
 # # TORCH INTEROPERABILITY
 # ##############################################################################
 class TorchLinOpWrapper:
     """Linear operator that always accepts and produces PyTorch tensors.
 
-    Since this library operates mainly with PyTorch tensors, but some useful
+    Since ``skerch`` is built on top of PyTorch, but some other useful
     LinOps interface with e.g. NumPy arrays instead, this mixin class acts as a
     wraper on the ``__matmul__`` and ``__rmatmul__`` operators,
     so that the operator expects and returns torch tensors, even when the
-    wrapped operator interfaces with NumPy/HDF5. Usage example::
+    wrapped operator interfaces with NumPy/HDF5.
+
+    This facilitates interoperability between ``skerch`` and other python
+    linops. Usage example::
 
       # extend NumPy linear operator via multiple inheritance
-      class TorchWrappedLinOp(TorchLinOpWrapper, LinOp):
+      class TorchWrappedNumpyLinOp(TorchLinOpWrapper, NumpyLinOp):
           pass
-      lop = TorchWrappedLinOp(...)  # instantiate normally
-      w = lop @ v  # now v can be a PyTorch tensor
+      lop = TorchWrappedNumpyLinOp(...)  # instantiate normally
+      w = lop @ v  # now v can be a PyTorch tensor on any device
     """
 
     @staticmethod
@@ -764,6 +839,6 @@ class TorchLinOpWrapper:
 
     def __repr__(self):
         """Returns a string in the form TorchLinOpWrapper<LinOp ...>."""
-        wrapper = self.__class__.__name__
+        wrapper = "TorchLinOpWrapper"  # self.__class__.__name__
         result = f"{wrapper}<{super().__repr__()}>"
         return result

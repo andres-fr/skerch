@@ -2,4 +2,4 @@
 # -*- coding: utf-8 -*-
 
 
-"""Command Line Interfacing utilitiesfor skerch."""
+"""Command Line Interfacing utilities for ``skerch``."""

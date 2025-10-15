@@ -20,11 +20,15 @@ Typically, developers will want to fork the repository and install the package i
   # local installation
   pip install -e ".[dev,test,lint,docs]"
 
-You can test the installation by e.g. running one of the examples from the documentation:
+You can test the installation by e.g. running all the examples from the documentation:
 
-.. code:: python
+.. code:: bash
 
-   python docs/materials/examples/example_deep_learning.py
+   # check if CUDA is available
+   python -c "import torch; print('With CUDA:', torch.cuda.is_available())"
+
+   # run all documentation examples
+   for i in docs/materials/examples/*.py; do python $i; done
 
 
 See below (and :ref:`Development` in particular) for further development recommendations.
@@ -39,7 +43,7 @@ Full tests and coverage can be run via following command in the repo root:
 
   make test
 
-They can take several hours though. A quicker (few minutes), yet still representative subset of the tests can be run via:
+But they can take a substantial amount of time. A quicker (few minutes), yet still representative subset of the tests can be run via:
 
 .. code:: bash
 

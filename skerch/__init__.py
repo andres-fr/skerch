@@ -2,19 +2,7 @@
 # -*- coding: utf-8 -*-
 
 
-"""``skerch``: Sketched matrix decompositions for PyTorch.
-
-This implementation is based on the following publications, referenced
-throughout the documentation:
-
-* `[TYUC2019] <https://arxiv.org/abs/1902.08651>`_: Joel A. Tropp, Alp
-  Yurtsever, Madeleine Udell, and Volkan Cevher. 2019. *“Streaming Low-rank
-  Matrix Approximation with an Application to Scientific Simulation”*. SIAM
-  Journal on Scientific Computing 41 (4): A2430–63.
-* `[BN2022] <https://arxiv.org/abs/2201.10684>`_: Robert A. Baston and Yuji
-  Nakatsukasa. 2022. *“Stochastic diagonal estimation: probabilistic bounds and
-  an improved algorithm”*.  CoRR abs/2201.10684.
-"""
+"""``skerch``: Sketched linear operations for PyTorch."""
 
 
 # ##############################################################################

@@ -1,50 +1,80 @@
 :code:`skerch`
 ==================================
 
-``skerch``: Sketched matrix decompositions for `PyTorch <https://pytorch.org/>`_.
+**Sketched linear operations for** `PyTorch <https://pytorch.org/>`_.
 
-Consider a matrix or linear operator :math:`A \in \mathbb{R}^{M \times N}`,
-typically of intractable size and/or very costly measurement :math:`w = Av`,
-but of low-rank structure. A typical example of this are
-`kernel matrices for Gaussian Processes <https://arxiv.org/abs/2107.00243>`_
-or the `Hessian matrices for Deep Learning <https://arxiv.org/abs/1706.04454>`_.
+Consider a matrix or linear operator :math:`A \in \mathbb{C}^{M \times N}`,
+typically of intractable size and/or very costly measurements :math:`v \to Av`.
 
-Furthermore, consider its `Singular Value Decomposition <https://en.wikipedia.org/wiki/Singular_value_decomposition>`_:
+In many cases, such large operators feature a much smaller but hidden
+sub-structure (such as low-rank or banded), which allows for an
+approximation :math:`\hat{A}` of scalable size.
+Typical examples of this are kernel matrices for large datasets, Hessian
+matrices for deep learning, large-scale datasets and the throughput
+of high-resolution simulations.
 
-.. math::
+But obtaining :math:`\hat{A}` through traditional compression methods is
+not feasible, since we would need to fully store or scan :math:`\hat{A}`
+first. Instead, we *directly obtain* :math:`\hat{A}` from just
+a few random :math:`y_i = A v_i` measurements, or *sketches*
+(i.e. :math:`v_i` follows some random distribution). Luckily, this is
+possible for a variety of :math:`\hat{A}` structures, and the
+:math:`A v_i` measurements are typically parallelizable, allowing us
+to work at large scales.
 
-  A := U \Sigma V^T
+From an operational point of view, sketched methods only require the
+ability to draw a few matrix-vector measurements in the form
+:math:`Av, vA`. In Python, and for finite dimensions, this means
+providing an ``A.shape`` attribute and implementing the
+*matrix-multiplication* ``@`` operation.
 
+One core advantage of ``skerch`` is that this is the *only* requirement
+that :math:`A` needs to fulfill (unlike other libraries which require
+``A`` to implement more attributes and/or operations). In code, we just
+need to ensure that ``A`` satisfies the following interface:
 
-If :math:`A` has rank :math:`k`, sketched methods allow us to approximate it while requiring only in the order of:
+.. code-block:: python
 
-* :math:`\mathcal{O}(\text{max}(M, N) \cdot k)` memory
-* :math:`\mathcal{O}(\text{max}(M, N) \cdot k^2)` arithmetic
-* :math:`\mathcal{O}(k)` *parallelizable* measurements
+   class MyLinOp:
+    def __init__(self, shape):
+        self.shape = shape
 
-This is in stark contrast with traiditional methods (e.g. QR-based, orthogonal iterations, Arnoldi...), which entail more memory requirements, arithmetic overhead, sequential measurements and/or numerical instability (see `[HMT2009] <https://arxiv.org/abs/0909.4061>`_ for extensive discussion). With the help of sketched methods, **explicit representation and SVD of otherwise intractable operators becomes now practical at unprecedented scales**.
+    def __matmul__(self, x):
+        return "... implement A @ x ..."
 
-This package implements functionality to perform such sketched decompositions
-for any arbitrary matrix or linear operator :math:`A`.
-**This includes non-square, non-PSD, and matrix-free operators**. Furthermore,
-operations are implemented using ``PyTorch``, which means that **CPU/CUDA can
-be used in a device-agnostic way and automatic differentiation is available**.
+    def __rmatmul__(self, x):
+        return "... implement x @ A ..."
 
-It also implements:
+Any operator implementing this interface will run on ``skerch`` routines
+such as diagonalizations, operator norms and triangular approximations.
+Other advantages of ``skerch``:
 
-* Efficient *a priori* methods to choose meaningful hyperparameters for the sketched algorithms
-* Efficient *a posteriori* methods to estimate the quality and rank of the sketched approximations
-* Matrix-free estimation of (sub-)diagonals for square linear operators
-* Matrix-free estimation of matrix-vector products for upper- and lower-triangular portions of square linear operators.
+* Built on top of PyTorch, naturally supports CPU and CUDA, as well as complex datatypes. Very few dependencies otherwise
+* Rich API for matrix-free linear operators, including matrix-free noise sources (Rademacher, Gaussian, SSRFT...)
+* Efficient parallelized and distributed computations
+* Support for out-of-core operations via HDF5
+* A-posteriori verification tools to test accuracy of sketched approximations modular and extendible design, for easy adaption to new settings and operations
+* Modular and extendible design
+
+See the API docs and examples for illustrations of the above points.
+
 
 .. seealso::
-
-  The contents of this repository are based on the following publications:
 
   * `[HMT2009] <https://arxiv.org/abs/0909.4061>`_: Nathan Halko, Per-Gunnar
     Martinsson, Joel A. Tropp. 2011. *“Finding Structure with Randomness:
     Probabilistic Algorithms for Constructing Approximate Matrix Decompositions”*.
     SIAM Review, 53 (2): 217-288.
+
+  * `[BWZ2016] <https://arxiv.org/abs/1504.06729>`_: Christos Boutsidis,
+    David P. Woodruff, and Peilin Zhong. 2016. *“Optimal Principal Component
+    Analysis in Distributed and Streaming Models”*. ACM Symposium on Theory
+    of Computing.
+
+  * `[TYUC2018] <https://arxiv.org/abs/1609.00048>`_: Joel A. Tropp, Alp
+    Yurtsever, Madeleine Udell, Volkan Cevher. 2018. *“Practical Sketching
+    Algorithms for Low-Rank Matrix Approximation”*. SIAM
+    Journal on Matrix Analysis and Applications 38 (4).
 
   * `[TYUC2019] <https://arxiv.org/abs/1902.08651>`_: Joel A. Tropp, Alp
     Yurtsever, Madeleine Udell, Volkan Cevher. 2019. *“Streaming Low-rank
@@ -64,6 +94,11 @@ It also implements:
     Frank Schneider, Maren Mahsereci, Philipp Hennig. 2025. *“Connecting Parameter
     Magnitudes and Hessian Eigenspaces at Scale using Sketched Methods”*.
     Transactions on Machine Learning Research.
+
+  * `[DEOFTK2025] <https://arxiv.org/abs/2501.19183>`_ Felix Dangel, Runa Eschenhagen,
+    Weronika Ormaniec, Andres Fernandez, Lukas Tatzel, Agustinus Kristiadi. 2025.
+    *“Position: Curvature Matrices Should Be Democratized via Linear Operators”*.
+    arXiv 2501.19183.
 
 .. toctree::
    :maxdepth: 2

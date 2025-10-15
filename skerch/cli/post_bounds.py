@@ -2,20 +2,19 @@
 # -*- coding: utf-8 -*-
 
 
-"""A-posteriori error bounds.
+"""CLI plugin to provide probabilistic bounds for aposteriori error estimation.
 
-CLI plugin to provide a-posteriori error bounds for given number of measurements
-and tolerance.
+Borrows functionaliy from :func:`skerch.a_posteriori.apost_error_bounds`.
 """
 
 
-from ..a_posteriori import a_posteriori_error_bounds
+from ..a_posteriori import apost_error_bounds
 
 
 # ##############################################################################
 # # ENTRY POINT
 # ##############################################################################
-def main(num_meas, rel_err):
-    """See :func:`.a_posteriori.a_posteriori_error_bounds`."""
-    result = a_posteriori_error_bounds(num_meas, rel_err)
+def main(num_meas, rel_err, cplx):
+    """Entry point for this CLI script. See module docstring."""
+    result = apost_error_bounds(num_meas, rel_err, cplx)
     print(result)

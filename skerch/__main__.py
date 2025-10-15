@@ -2,9 +2,29 @@
 # -*- coding: utf-8 -*-
 
 
-"""Command Line Interface interaction with ``skerch``.
+"""Command Line Interface (CLI) interaction via ``python -m skerch ...``.
 
-This script acts in connection with the :mod:`.cli` submodule.
+This script acts in connection with the :mod:`skerch.cli` submodule, in order
+to make ``skerch`` functionality (oterwise accessible via Python) available
+from CLI for convenience purposes.
+
+Usage examples::
+
+  # printing module help
+  python -m skerch -h
+
+  # printing a-posteriori error bounds
+  python -m skerch post_bounds --apost_n=30 --apost_err=0.5 --is_complex
+
+  # creating HDF5 layout
+  python -m skerch create_hdf5_layout_lop --lop_shape=100,200 \
+         --dtype=complex128 --partsize=10 --lo=30 --ro=30 --inner=60
+
+  # merging HDF5 layout
+  python -m skerch merge_hdf5 --delete_subfiles --ok_flag=initialized \
+       --in_path /tmp/tmp4fswvvk2/leftouter_ALL.h5
+
+See documentation examples for more explanations and usage instructions.
 """
 
 
@@ -15,7 +35,7 @@ import sys
 import tempfile
 from unittest.mock import patch
 
-from . import INNER_FMT, LO_FMT, RO_FMT, cli
+from . import cli
 
 
 # ##############################################################################
@@ -46,7 +66,7 @@ class PluginLoader:
 
     @classmethod
     def get(cls):
-        """Loads all plugins from :mod:`.cli`.
+        """Loads all plugins from :mod:`skerch.cli`.
 
         :returns: A dictionary in the form ``plugin_name: plugin_fn``, where
           each name corresponds to a file in the :mod:`.cli` submodule, and
@@ -85,12 +105,15 @@ def matrix_shape(shape):
 
     If given ``shape`` is a string with two positive, coma-separated integers
     like '100,200', returns a tuple in the form ``(100, 200)``. Otherwise
-    raises an ``AssertionError``.
+    raises a ``ValueError``.
     """
-    h, w = shape.split(",")
-    h, w = int(h), int(w)
-    assert h > 0, "Height must be positive!"
-    assert w > 0, "Width must be positive!"
+    try:
+        h, w = shape.split(",")
+        h, w = int(h), int(w)
+        assert h > 0, "Height must be positive!"
+        assert w > 0, "Width must be positive!"
+    except Exception as e:
+        raise ValueError(f"Malformed matrix shape! {shape}") from e
     return (h, w)
 
 
@@ -101,13 +124,7 @@ def get_argparser():
       with the ``command`` to be executed (must be one of the dict keys
       returned by :meth:`PluginLoader.get`), and then accepts optional
       arguments that may be applicable to that particular command. Call
-      with ``-h`` for details.
-
-    Usage examples::
-      python -m skerch post_bounds --apost_n=30 --apost_err=0.75
-      python -m skerch prio_hpars --shape=100,200 --budget=12345
-      python -m skerch create_hdf5_layout --dtype float64 \
-        --shape 123,234 --outer 30 --inner 60
+      with ``-h`` for details, and see module docstring for examples.
     """
     parser = argparse.ArgumentParser(description="skerch CLI")
     parser.add_argument(
@@ -117,24 +134,6 @@ def get_argparser():
         type=str,
         choices=set(COMMANDS),
         help=f"Determines which functionality to run: {set(COMMANDS)}",
-    )
-    # a priori parameter estimation
-    parser.add_argument(
-        "--shape",
-        type=matrix_shape,
-        default=(100, 200),
-        help="Matrix shape in the form 'height,width' as positive integers.",
-    )
-    parser.add_argument(
-        "--budget",
-        type=int,
-        default=10_000,
-        help="Total number of scalar measurements that we can store.",
-    )
-    parser.add_argument(
-        "--sym",
-        action="store_true",  # default is false
-        help="If given, matrix is assumed to be Hermitian.",
     )
     # a posteriori error bounds
     parser.add_argument(
@@ -149,7 +148,18 @@ def get_argparser():
         type=float,
         help="A-posteriori target error, from 0 (no error) to 1 (0x - 2x).",
     )
+    parser.add_argument(
+        "--is_complex",
+        action="store_true",
+        help="If given, bounds are given for complex data.",
+    )
     # create HDF5 layout
+    parser.add_argument(
+        "--lop_shape",
+        type=matrix_shape,
+        default=(100, 200),
+        help="Matrix shape in the form 'height,width' as positive integers.",
+    )
     parser.add_argument(
         "--hdf5dir",
         default=None,
@@ -157,16 +167,31 @@ def get_argparser():
         help="Directory to create the HDF5 layout.",
     )
     parser.add_argument(
-        "--outer", default=100, type=int, help="Number of outer measurements."
+        "--lo",
+        default=None,
+        type=int,
+        help="Number of left outer measurements.",
     )
     parser.add_argument(
-        "--inner", default=200, type=int, help="Number of inner measurements."
+        "--ro",
+        default=None,
+        type=int,
+        help="Number of right outer measurements.",
+    )
+    parser.add_argument(
+        "--inner", default=None, type=int, help="Number of inner measurements."
+    )
+    parser.add_argument(
+        "--partsize",
+        default=1,
+        type=int,
+        help="How many entries will each HDF5 sub-file have.",
     )
     parser.add_argument(
         "--dtype",
         default="float32",
         type=str,
-        help="Datatype of HDF5 layout to be created. Must be empty",
+        help="Datatype of HDF5 layout to be created.",
     )
     # merge virtual HDF5 into monolithic
     parser.add_argument(
@@ -179,7 +204,7 @@ def get_argparser():
         "--out_path",
         default=None,
         type=str,
-        help="Input path for the file to be processed.",
+        help="Output path for the file to be processed.",
     )
     parser.add_argument(
         "--ok_flag",
@@ -202,8 +227,9 @@ def main_wrapper(cli_args=None):
     """Wrapped :func:`main` function.
 
     This wrapper gives the option to programmatically mock CLI arguments if
-    desired. When running normally, e.g. via ``python -m ...``, it does
-    nothing.
+    desired, which can be useful to e.g. run programatic unit/integration
+    tests mocking CLI functionality. When running normally, e.g. via
+    ``python -m ...``, it simply forwards the call to :func:`main`.
 
     :param cli_args: If none given, CLI arguments from ``sys.argv`` are left
       untouched. Otherwise, ``sys.argv[1:]`` will be mocked to have the given
@@ -224,49 +250,36 @@ def main_wrapper(cli_args=None):
             try:
                 main()
             except SystemExit:
-                # ArgParser exits with '-h', we don't want that
+                # ArgParser exits with '-h', we don't want that, because this
+                # wrapper is intended to run within a live process
                 # https://stackoverflow.com/a/58367457
                 pass
 
 
 def main():
-    """Entry point for ``python -m skerch``."""
+    """Main entry point for ``python -m skerch``."""
     # parse args and check that action is recognized
     parser = get_argparser()
     args = parser.parse_args()
     cmd = args.command
     assert cmd in COMMANDS, f"Unknown command! {cmd}"
     main = COMMANDS[cmd]
-    # a-priori estimation of hyperparameters
-    if cmd == "prio_hpars":
-        shape = args.shape
-        budget = args.budget
-        sym = args.sym
-        main(shape, budget, sym)
     # a-posteriori error probability bounds
-    elif cmd == "post_bounds":
+    if cmd == "post_bounds":
         n = args.apost_n
         err = args.apost_err
-        main(n, err)
+        cplx = args.is_complex
+        main(n, err, cplx)
     # create HDF5 layout
-    elif cmd == "create_hdf5_layout":
+    elif cmd == "create_hdf5_layout_lop":
         dirpath = ensure_dirpath(args.hdf5dir)
-        shape = args.shape
-        with_ro = not args.sym  # if matrix Hermitian, no need for right outer
-        outer = args.outer
-        inner = args.inner
+        lop_shape = args.lop_shape
         dtype = args.dtype
-        main(
-            dirpath,
-            shape,
-            dtype,
-            outer,
-            inner,
-            LO_FMT,
-            RO_FMT,
-            INNER_FMT,
-            with_ro,
-        )
+        partsize = args.partsize
+        lo = args.lo
+        ro = args.ro
+        inner = args.inner
+        main(dirpath, lop_shape, dtype, partsize, lo, ro, inner)
     # merge
     elif cmd == "merge_hdf5":
         inpath = args.in_path
