@@ -144,9 +144,7 @@ class SketchedAlgorithmDispatcher:
                 conj=False,
             )
         else:
-            raise ValueError(
-                f"Unknown type! {mop_type} Supported: {supported}"
-            )
+            raise ValueError(f"Unknown type! {mop_type} Supported: {supported}")
         #
         return mop
 

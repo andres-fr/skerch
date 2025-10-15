@@ -10,6 +10,8 @@ import pytest
 import torch
 
 from skerch.recovery import (
+    hmt,
+    hmt_h,
     nystrom,
     nystrom_h,
     oversampled,
@@ -183,6 +185,24 @@ def test_recovery_general(  # noqa:C901
                             if isinstance(I, torch.Tensor)
                             else np.allclose
                         )
+                        # hmt - UV
+                        Urec, Vhrec = hmt(Y, Z, mat, as_svd=False)
+                        try:
+                            uv_test_helper(mat, Urec, Vhrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"HMT-UV {mode} error!"
+                            raise AssertionError(errmsg) from ae
+                        # hmt - SVD
+                        Urec, Srec, Vhrec = hmt(Y, Z, mat, as_svd=True)
+                        try:
+                            svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
+                            # correctness of recovered svals
+                            assert allclose(
+                                S[: len(Srec)], Srec, atol=tol
+                            ), "Incorrect svals!"
+                        except AssertionError as ae:
+                            errmsg = f"HMT-SVD {mode} error!"
+                            raise AssertionError(errmsg) from ae
                         # singlepass - UV
                         Urec, Vhrec = singlepass(Y, Z, right, as_svd=False)
                         try:
@@ -321,6 +341,31 @@ def test_recovery_hermitian(  # noqa:C901
                             if isinstance(I, torch.Tensor)
                             else np.allclose
                         )
+                        # hmt - QCQh
+                        Crec, Qrec = hmt_h(Y, mat, as_eigh=False)
+                        try:
+                            qc_test_helper(mat, I, Crec, Qrec, tol)
+                        except AssertionError as ae:
+                            errmsg = f"hmt_h-QCQh {mode} error!"
+                            raise AssertionError(errmsg) from ae
+                        # hmt - EIGH
+                        for by_mag in (True, False):
+                            ews_rec, evs_rec = hmt_h(
+                                Y, mat, as_eigh=True, by_mag=by_mag
+                            )
+                            try:
+                                eigh_test_helper(
+                                    mat, I, ews_rec, evs_rec, tol, by_mag
+                                )
+                                # correctness of recovered eigvals
+                                sorted_rec = ews_rec[ews_rec.argsort()]
+                                assert allclose(
+                                    sorted_ews, sorted_rec, atol=tol
+                                ), "Incorrect eigvals!"
+                            except AssertionError as ae:
+                                errmsg = f"hmt_h-EIGH {mode} error!"
+                                errmsg += f" (by_mag={by_mag})"
+                                raise AssertionError(errmsg) from ae
                         # singlepass_h - QCQh
                         Crec, Qrec = singlepass_h(Y, right, as_eigh=False)
                         try:

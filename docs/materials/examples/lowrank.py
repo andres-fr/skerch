@@ -251,9 +251,7 @@ apost_error_bounds(TEST_MEAS, 0.5)
 
 scree_lo, scree_hi = scree_bounds(S3, err3sq**0.5)
 svals = torch.linalg.svdvals(mat)
-scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (
-    svals**2
-).sum()
+scree_true = (svals**2).flip(0).cumsum(0).flip(0)[: len(S3)] / (svals**2).sum()
 
 fig, ax = plt.subplots(figsize=(8, 3))
 ax.plot(scree_lo.cpu(), label="lower", ls="--", linewidth=2)
