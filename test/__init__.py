@@ -114,7 +114,7 @@ def autocorrelation_test_helper(vec, delta_at_least=0.8, nondelta_at_most=0.1):
     ).all(), "Noise autocorr has strong non-delta!"
 
 
-def svd_test_helper(mat, I, U, S, Vh, atol):
+def svd_test_helper(mat, idty, U, S, Vh, atol):
     """Helper to test SVD output.
 
     Given the produced SVD of ``mat``, tests that:
@@ -130,10 +130,10 @@ def svd_test_helper(mat, I, U, S, Vh, atol):
     # correctness of result
     assert allclose(mat, (U * S) @ Vh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered U, V
-    assert allclose(I, U.conj().T @ U, atol=atol), "U not orthogonal?"
-    assert allclose(I, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
+    assert allclose(idty, U.conj().T @ U, atol=atol), "U not orthogonal?"
+    assert allclose(idty, Vh @ Vh.conj().T, atol=atol), "V not orthogonal?"
     # svals given as vector
-    assert S.shape == (len(I),), f"Svals not a vector? {S.shape}"
+    assert S.shape == (len(idty),), f"Svals not a vector? {S.shape}"
     # svals nonnegative and by descending magnitude
     assert (S >= 0).all(), "Negative svals!"
     assert (diff(S) <= 0).all(), "Ascending svals?"
@@ -146,7 +146,7 @@ def svd_test_helper(mat, I, U, S, Vh, atol):
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
 
 
-def eigh_test_helper(mat, I, ews_rec, evs_rec, atol, by_mag=True):
+def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     """Helper to test Hermitian eigendecomposition output.
 
     Given the produced EIGH of ``mat``, tests that:
@@ -157,13 +157,15 @@ def eigh_test_helper(mat, I, ews_rec, evs_rec, atol, by_mag=True):
     * The recovered eigvals are by descending magnitude/value
     * The devices and dtypes all match
     """
-    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
-    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
+    allclose = (
+        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
+    )
+    diff = torch.diff if isinstance(idty, torch.Tensor) else np.diff
     V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
     # correctness of result
     assert allclose(mat, (V * Lbd) @ Vh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered V
-    assert allclose(I, Vh @ V, atol=atol), "Eigvecs not orthogonal?"
+    assert allclose(idty, Vh @ V, atol=atol), "Eigvecs not orthogonal?"
     # eigvals given as vector
     assert Lbd.shape == (len(Vh),), f"Eigvals not a vector? {Lbd.shape}"
     # Eigvals by descending magnitude

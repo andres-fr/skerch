@@ -78,7 +78,6 @@ def test_torchwrapper_formal(torch_devices, dtypes_tols):
     for device in torch_devices:
         for dtype in dtypes_tols.keys():
             tnsr = torch.ones(5, dtype=dtype, device=device)
-            arr = tnsr.cpu().numpy()
             # tensor to lop raises error
             with pytest.raises(ValueError):
                 _ = lop @ tnsr

@@ -164,7 +164,7 @@ def test_apost_error_correctness(
     """
     for seed in rng_seeds:
         for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
+            for dtype, _ in dtypes_tols.items():
                 for (
                     shape,
                     perturb,
@@ -182,10 +182,9 @@ def test_apost_error_correctness(
                     lop1 = BasicMatrixLinOp(mat1)
                     lop2 = BasicMatrixLinOp(mat2)
                     # ground truth quantities
-                    frob1 = mat1.norm()  #  ** 2
+                    frob1 = mat1.norm()  # ** 2
                     frob2 = mat2.norm()  # ** 2
                     error = torch.dist(mat1, mat2)  # ** 2
-                    svals2 = torch.linalg.svdvals(mat2)
                     #
                     for adj in (True, False):
                         for noise_type, complex_only in apost_noise_types:

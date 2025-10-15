@@ -113,7 +113,7 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                 for i, (beg, end) in enumerate(begs_ends):
                     vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
                     vals[:] = tnsr[beg:end]
-                    flgs[:] = f"good"
+                    flgs[:] = "good"
                     h5.close()
                 # VIRTUAL LOAD TEST
                 # test that virtual data and flags are correct in content+shape
@@ -130,7 +130,7 @@ def test_hdf5_io(  # noqa: C901  # ignore "is too complex"
                     shape[0],
                 ), "Wrong merged flags shape!"
                 for f in all_flags[:]:
-                    assert f.decode() == f"good", "Unsuccessful flag?"
+                    assert f.decode() == "good", "Unsuccessful flag?"
                 all_h5.close()
                 # SUBFILE LOAD TEST
                 # now load again (it was closed), but this time one by
@@ -177,7 +177,7 @@ def test_hdf5_too_many_files(shapes_partsizes_toomany):
         for i, (beg, end) in enumerate(begs_ends):
             vals, flgs, h5 = DistributedHDF5Tensor.load(h5_subpaths[i])
             vals[:] = tnsr[beg:end]
-            flgs[:] = f"good"
+            flgs[:] = "good"
             h5.close()
         # now, the aggregated dataset is not correct! This is due to OS file
         # limit per process being exceeded, overflown values are empty
@@ -227,7 +227,7 @@ def test_hdf5_merge():
         # load ALL layout, check that it contains virtual data
         all_data, all_flags, all_h5 = DistributedHDF5Tensor.load(h5_path)
         for ds in all_h5.values():
-            assert ds.is_virtual, f"HDF5 layout not virtual?"
+            assert ds.is_virtual, "HDF5 layout not virtual?"
         all_h5.close()
         # merge layout into monolithic file
         DistributedHDF5Tensor.merge(
@@ -238,7 +238,7 @@ def test_hdf5_merge():
         # load file again. Now it is non-virtual, contents are correct
         all_data, all_flags, all_h5 = DistributedHDF5Tensor.load(h5_path)
         assert all(
-            [flag_str == s.decode() for s in all_flags[:]]
+            flag_str == s.decode() for s in all_flags
         ), "Unsuccessful flags in merged array!"
         assert np.array_equal(all_data, tnsr), "Wrong merged array!"
         for ds in all_h5.values():
@@ -312,7 +312,9 @@ def test_hdf5_create_layout_lop():
             data, flags, h5 = DistributedHDF5Tensor.load(ro_pth)
             assert data.dtype == strtype, "Wrong HDF5 ro dtype?"
             assert data.shape == (outermeas, shape[0]), "Wrong HDF5 ro shape?"
-            num = len([x for x in os.listdir(tmpdir.name) if "rightouter" in x])
+            num = len(
+                [x for x in os.listdir(tmpdir.name) if "rightouter" in x]
+            )
             assert num == (
                 num_outer_blocks + 1
             ), "Wrong number of ro HDF5 subfiles created?"

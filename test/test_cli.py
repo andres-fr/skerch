@@ -35,7 +35,7 @@ def expected_plugins():
 @pytest.fixture
 def all_dtypes():
     """ """
-    result = [t for t in REAL_DTYPES] + [t for t in COMPLEX_DTYPES]
+    result = list(REAL_DTYPES) + list(COMPLEX_DTYPES)
     return result
 
 
@@ -57,15 +57,15 @@ def test_aux_cli(expected_plugins, monkeypatch, capsys):
     with pytest.raises(ValueError):
         _ = matrix_shape("1, 2, 3")  # too many dims
     with pytest.raises(ValueError):
-        _ = matrix_shape("1")  #  too little dims
+        _ = matrix_shape("1")  # too little dims
     with pytest.raises(ValueError):
-        _ = matrix_shape("1, 0")  #  empty dims
+        _ = matrix_shape("1, 0")  # empty dims
     with pytest.raises(ValueError):
-        _ = matrix_shape("-1, 1")  #  negative dims
+        _ = matrix_shape("-1, 1")  # negative dims
     with pytest.raises(ValueError):
-        _ = matrix_shape("1, 2.0")  #  float dims
+        _ = matrix_shape("1, 2.0")  # float dims
     with pytest.raises(ValueError):
-        _ = matrix_shape("1, abc")  #  non-numeric dims
+        _ = matrix_shape("1, abc")  # non-numeric dims
 
 
 def test_main_cli(all_dtypes, capsys):
@@ -112,7 +112,9 @@ def test_main_cli(all_dtypes, capsys):
         ]
     )
     h5_names = os.listdir(tmpdir.name)
-    assert len([n for n in h5_names if "ALL" in n]) == 3, "Wrong ALL CLI files?"
+    assert (
+        len([n for n in h5_names if "ALL" in n]) == 3
+    ), "Wrong ALL CLI files?"
     assert (
         len([n for n in h5_names if "leftouter" in n]) == 4
     ), "Wrong leftouter CLI files?"

@@ -114,17 +114,18 @@ class BasicMatrixLinOp:
         """ """
         self.matrix = matrix
         self.shape = matrix.shape
+        self.delay = delay
 
     def __matmul__(self, x):
         """ """
-        if delay > 0:
-            time.sleep(delay)
+        if self.delay > 0:
+            time.sleep(self.delay)
         return self.matrix @ x
 
     def __rmatmul__(self, x):
         """ """
-        if delay > 0:
-            time.sleep(delay)
+        if self.delay > 0:
+            time.sleep(self.delay)
         return x @ self.matrix
 
 
@@ -190,8 +191,8 @@ def test_iid_measurements_formal(
                     torch.complex64,
                     torch.complex128,
                 }:
+                    clop = lop_type(hw, 0, register=False)
                     with pytest.raises(ValueError):
-                        clop = lop_type(hw, 0, register=False)
                         _ = clop @ torch.ones(hw[1], dtype=dtype)
                     continue
                 # seed consistency across devices (if CUDA is available)
@@ -213,7 +214,8 @@ def test_iid_measurements_formal(
                 else:
                     warnings.warn(
                         "Warning! cross-device tests didn't run "
-                        "because CUDA is not available in this device"
+                        "because CUDA is not available in this device",
+                        stacklevel=2,
                     )
                 # deterministic behaviour and seed consistency
                 for device in torch_devices:
@@ -245,7 +247,7 @@ def test_iid_measurements_formal(
                     assert mat1a.device.type == device, "Mismatching device!"
 
 
-def test_iid_measurements_correctness(
+def test_iid_measurements_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,
@@ -397,11 +399,10 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
     with pytest.raises(NotImplementedError):
         SSRFT.issrft(torch.ones(10), out_dims=10, seed=0, norm="XXXX")
     # non-orthogonal norm raises error (linop)
+    lop = SsrftNoiseLinOp(hw, 0, norm="XXXX", register=False)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX", register=False)
         lop @ torch.ones(10)
     with pytest.raises(NotImplementedError):
-        lop = SsrftNoiseLinOp(hw, 0, norm="XXXX", register=False)
         torch.ones(10) @ lop
     # empty input raises BadShapeError (linop)
     lop = SsrftNoiseLinOp(hw, 0, register=False)
@@ -530,7 +531,8 @@ def test_ssrft_formal(rng_seeds, torch_devices, dtypes_tols):
             else:
                 warnings.warn(
                     "Warning! cross-device tests didn't run "
-                    "because CUDA is not available in this device"
+                    "because CUDA is not available in this device",
+                    stacklevel=2,
                 )
 
 

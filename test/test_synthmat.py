@@ -291,7 +291,7 @@ def _helper_lord_correctness(
     """
     assert mat.norm() > 0, "Zero matrix?"
     assert not mat.isnan().any(), f"NaNs in {mat.shape, mat.dtype, mat.device}"
-    assert not diag.isnan().any(), f"NaNs in diagonal"
+    assert not diag.isnan().any(), "NaNs in diagonal"
     #
     assert device == mat.device.type, "Wrong matrix device?"
     assert device == diag.device.type, "Wrong diagonal device?"
@@ -334,7 +334,7 @@ def _helper_lord_correctness(
         raise ValueError(f"Unknown mat_type! {mat_type}")
 
 
-def test_lord_correctness(
+def test_lord_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,

@@ -79,15 +79,16 @@ def uv_test_helper(mat, U, Vh, atol):
     assert Vh.dtype == mat.dtype, "Incorrect V dtype!"
 
 
-def qc_test_helper(mat, I, core_rec, q_rec, atol):
+def qc_test_helper(mat, idty, core_rec, q_rec, atol):
     """ """
-    allclose = torch.allclose if isinstance(I, torch.Tensor) else np.allclose
-    diff = torch.diff if isinstance(I, torch.Tensor) else np.diff
+    allclose = (
+        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
+    )
     C, Q, Qh = core_rec, q_rec, q_rec.conj().T
     # correctness of result
     assert allclose(mat, Q @ C @ Qh, atol=atol), "Incorrect recovery!"
     # orthogonality of recovered Q
-    assert allclose(I, Qh @ Q, atol=atol), "Eigvecs not orthogonal?"
+    assert allclose(idty, Qh @ Q, atol=atol), "Eigvecs not orthogonal?"
     # simmetry of recovered core
     assert allclose(C, C.conj().T, atol=atol), "Core not hermitian?"
     # matching device and type
@@ -100,7 +101,7 @@ def qc_test_helper(mat, I, core_rec, q_rec, atol):
 # ##############################################################################
 # # RECOVERY FOR GENERAL MATRICES
 # ##############################################################################
-def test_recovery_general(
+def test_recovery_general(  # noqa:C901
     rng_seeds, torch_devices, dtypes_tols, general_recovery_shapes
 ):
     """Test case for recovery of general matrices (formal and correctness).
@@ -184,7 +185,9 @@ def test_recovery_general(
                             errmsg = f"Singlepass-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # singlepass - SVD
-                        Urec, Srec, Vhrec = singlepass(Y, Z, right, as_svd=True)
+                        Urec, Srec, Vhrec = singlepass(
+                            Y, Z, right, as_svd=True
+                        )
                         try:
                             svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
                             # correctness of recovered svals
@@ -239,7 +242,7 @@ def test_recovery_general(
 # ##############################################################################
 # # RECOVERY FOR HERMITIAN MATRICES
 # ##############################################################################
-def test_recovery_hermitian(
+def test_recovery_hermitian(  # noqa:C901
     rng_seeds, torch_devices, dtypes_tols, hermitian_recovery_shapes
 ):
     """Test case for recovery of Hermitian matrices (formal and correctness).
