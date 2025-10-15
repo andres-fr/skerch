@@ -17,7 +17,8 @@ build:
     # and move results to where RTD can find them
     - pip install ".[lint,docs]"  # dev,test,lint
     - make lint
-    - make docs  # docs-prepare docs-html docs-pdf
+    - make docs-prepare
+    - make docs-html  # also: docs docs-pdf
     - mkdir -p $READTHEDOCS_OUTPUT/html/
     - cp -r docs/.sphinx/_build/html/* $READTHEDOCS_OUTPUT/html/
     # - mkdir -p $READTHEDOCS_OUTPUT/pdf/
