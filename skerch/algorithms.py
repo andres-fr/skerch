@@ -173,7 +173,48 @@ def ssvd(
     meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
-    """In-core Sketched SVD."""
+    r"""In-core Sketched SVD.
+
+    The core idea behind this method is outlined in
+    `[HMT2009] <https://arxiv.org/abs/0909.4061>`_:
+    Given a linear operator :math:`A`, we assume that there are *thin*,
+    orthogonal matrices :math:`P, Q` such that
+    :math:`A \approx P P^H A Q Q^H` and to obtain an SVD we just need to
+    decompose the small "core" matrix :math:`C = P^H A Q`.
+
+    The crucial realization here is that we can efficiently obtain
+    :math:`P, Q` from random measurements, or sketches. This function
+    follows that plan, namely:
+
+    * 1. Perform left and right sketches using the desired ``noise_type``
+    and orthogonalize them, yielding :math:`P, Q`
+
+    * 2. Solve the core matrix using the desired ``recovery`` algorithm
+
+    The result is a sketched SVD of :math:`A`.
+
+    :param lop: The linear operator :math:`A` to be decomposed
+    :param lop_device: The device where :math:`A` runs
+    :param lop_dtype: The datatype :math:`A` interacts with
+    :param outer_dims: How many measurements will be used to obtain
+      :math:`P` and :math:`Q` (respectively)
+    :param seed: Overall random seed for the algorithm
+    :param noise_type: Which noise to use. Must be supported by the given
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param recovery_type: Which recovery method to use. Must be supported
+      by the given ``dispatcher`` (see
+      :meth:`SketchedAlgorithmDispatcher.recovery` and
+      :meth:`skerch.recovery`).
+    :param lstsq_rcond: Least-squares condition threshold used in the
+      recovery, see :meth:`SketchedAlgorithmDispatcher.recovery`
+      and :meth:`skerch.recovery`.
+
+    :param meas_blocksize: How many sketched measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
+    :returns: The singular value decomposition ``U, S, Vh`` where
+      :math:`A \approx U diag(S) V^H`.
+    """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     # figure out recovery settings
@@ -278,7 +319,18 @@ def seigh(
     by_mag=True,
     dispatcher=SketchedAlgorithmDispatcher,
 ):
-    """ """
+    r"""In-core Sketched Hermitian eigendecomposition (EIGH).
+
+    This function is the Hermitian version of
+    :func:`ssvd`. It behaves largely the same, with the following differences:
+
+    * It assumes that the provided ``lop`` is Hermitian
+    * Less measurements are performed due to Hermitian symmetry
+    * Unlike the SVD, the returned value is :math:`\Lambda, Q`, where
+      :math:`A \approx Q diag(\Lambda) Q^H`. Since :math:`A` is Hermitian,
+      this is an eigendecomposition: :math:`\Lambda` may contain negative
+      values, and both left and right matrices are identical.
+    """
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
@@ -374,18 +426,68 @@ def hutchpp(
     dispatcher=SketchedAlgorithmDispatcher,
     return_diag=True,
 ):
-    """Diagonal and trace sketched approximation via Hutch++.
+    r"""Diagonal and trace sketched approximation via Hutch++.
 
-    As it can be seen in Table 1 from
-    `[BN2022] <https://arxiv.org/abs/2201.10684>`_,
-    Gaussian noise is less efficient than Rademacher: These functions provide
-    the number of measurements needed to ensure an approximation with at
-    most ``eps`` error, with a probability of at least ``1 - delta``
-    (try e.g. ``eps=0.001, delta=0.001``). We see that the number of samples
-    is in the millions, i.e. GH is not sample-efficient for smaller matrices.
+    Given a square linear operator :math:`A`, and random vectors
+    :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^H] = I`, consider
+    the Girard-Hutchinson **diagonal** estimator:
 
-    rad = lambda delta, eps: 2 * np.log(2 / delta) / eps**2
-    gau = lambda delta, eps: 4 * np.log2(2**0.5 / delta) / eps**2
+    .. math::
+
+      A_{ii} = \mathbb{E}_{v \sim \mathcal{R}} \big[ \bar{v} \odot Av \big]_i
+
+    The convergence of this estimator can be accelerated greatly if we
+    also incorporate rank deflation :math:`A = (Q Q^H) A + (I - (Q Q^H)) A`,
+    where :math:`Q` is an orthogonal matrix spanning the top space of
+    :math:`A`. Similarly to :func:`ssvd`, it turns out that we can obtain
+    :math:`Q` efficiently from ``defl_dims`` random measurements.
+
+    Then, the diagonal of :math:`(Q Q^H) A` can be obtained exactly, and
+    :math:`diag((I - (Q Q^H)) A)` is then estimated via Girard-Hutchinson
+    using ``extra_gh_meas`` measurements.
+
+    A very similar logic applies for the estimation of the **trace**, which
+    is the sum of the diagonal entries. In fact, most computations can be
+    recycled, and this algorithm computes and returns both quantities jointly
+    with minimal overhead. The Hutchinson estimator for the trace is:
+
+    .. math::
+
+      tr(A) = \langle A, I \rangle
+      = \langle A, \mathbb{E}_{v \sim \mathcal{R}}[v v^H] \rangle
+      = \mathbb{E}_{v \sim \mathcal{R}}[v^H A v]
+
+    .. note::
+
+      As it can be seen in Table 1 from
+      `[BN2022] <https://arxiv.org/abs/2201.10684>`_, Gaussian noise is
+      generally less efficient than Rademacher for the Girard-Hutchinson
+      step. In general, we observe that noise entries that are more or less
+      of the same magnitud help with stabiltiy. We also see that the number
+      of required G-H samples for good recovery is in the millions,
+      i.e. this is not efficient for smaller matrices.
+
+    :param lop: The :math:`A` operator whose diagonal we wish to estimate.
+    :param lop_device: The device where :math:`A` runs
+    :param lop_dtype: The datatype :math:`A` interacts with
+    :param defl_dims: How many measurements will be used to obtain
+      the :math:`Q` deflation matrix
+    :param extra_gh_meas: How many measurements will be used to obtain
+      the deflated Girard-Hutchinson estimation
+    :param seed: Overall random seed for the algorithm
+    :param noise_type: Which noise to use. Must be supported by the given
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param meas_blocksize: How many sketched measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
+    :param return_diag: If true, diagonal estimation is also returned.
+    :returns: A dictionary in the form
+      ``{"QR": (Q, R), "tr": (t, t_top, t_gh)}`` where ``(Q, R)`` is the
+      QR decomposition of the sketch used to obtain the deflation, ``t``
+      is the trace estimate, ``t_top`` is :math:`tr(Q Q^H A)` and
+      ``t_gh`` is the G-H estimate of :math:`tr((I -Q Q^H) A)`.
+      If ``return_diag`` is true, the dictionary also contains the
+      ``"diag": (d, d_top, d_gh)`` estimates, analogous to the trace.
     """
     register = False  # set to True for seed debugging
     h, w = lop.shape
@@ -498,7 +600,7 @@ def xdiag(
     dispatcher=SketchedAlgorithmDispatcher,
     cache_mop=True,
 ):
-    """Diagonal sketched approximation."""
+    r"""Diagonal sketched approximation via XDiag."""
     register = False  # set to True for seed debugging
     h, w = lop.shape
     if h != w:
@@ -590,9 +692,45 @@ def snorm(
     adj_meas=None,
     norm_types=("fro", "op"),
 ):
-    """Sketched norms.
+    r"""Sketched norm estimation.
 
-    For Frobenius, check 6.2 in Tropp 19.
+    It is possible to estimate the norm of a linear operator from a few
+    random measurements. In
+    `[TYUC2018, 6.2] <https://arxiv.org/abs/1609.00048>`_, it is shown
+    that the Frobenius norm is proportional to the norm of the measurements
+    themselves (akin to a Gram trace estimation).
+
+    From the same measurements, we can also estimate the operator norm
+    (largest singular value) as follows. Consider the linear operator
+    :math:`A`, and its top-``k`` approximation :math:`\hat{A} = Q Q^H A`
+    for orthogonal :math:`Q`. Then:
+
+    .. math::
+
+      \lVert A \rVert_2 = \lVert \hat{A} \rVert_2
+      \approx \lVert Q Q^H A \rVert_2 = \lVert Q^H A \rVert_2
+
+    And, as discussed in :func:`ssvd`, :math:`Q` can be efficiently estimated
+    from a few random measurements.
+
+    :param lop: The :math:`A` operator whose norms we wish to estimate.
+    :param lop_device: The device where :math:`A` runs
+    :param lop_dtype: The datatype :math:`A` interacts with
+    :param num_meas: How many measurements will be used to estimate
+      the norms
+    :param seed: Overall random seed for the algorithm
+    :param noise_type: Which noise to use. Must be supported by the given
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param meas_blocksize: How many sketched measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
+    :param adj_meas: If true, measurements to obtain :math:`Q` are adjoint.
+      This can affect accuracy somewhat.
+    :param norm_types: Collection with norm types to be returned. Currently
+      supported: ``"fro"`` (Frobenius), ``"op"`` (operator norm)
+    :returns: The tuple ``(result, (Q, R))``, where ``(Q, R)`` is the QR
+      decomposition of the sketched measurements, and ``result`` is a
+      dictionary in the form ``{norm_type: value}``.
     """
     h, w = lop.shape
     if num_meas <= 0 or num_meas > min(h, w):
