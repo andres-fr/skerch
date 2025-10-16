@@ -188,14 +188,14 @@ def test_recovery_general(  # noqa:C901
                             else np.allclose
                         )
                         # hmt - UV
-                        Urec, Vhrec = hmt(Y, Z, mat, as_svd=False)
+                        Urec, Vhrec = hmt(Y, mat, as_svd=False)
                         try:
                             uv_test_helper(mat, Urec, Vhrec, tol)
                         except AssertionError as ae:
                             errmsg = f"HMT-UV {mode} error!"
                             raise AssertionError(errmsg) from ae
                         # hmt - SVD
-                        Urec, Srec, Vhrec = hmt(Y, Z, mat, as_svd=True)
+                        Urec, Srec, Vhrec = hmt(Y, mat, as_svd=True)
                         try:
                             svd_test_helper(mat, I, Urec, Srec, Vhrec, tol)
                             # correctness of recovered svals

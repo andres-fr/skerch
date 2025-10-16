@@ -11,53 +11,39 @@ from .utils import eigh, lstsq, qr, svd
 # ##############################################################################
 # # RECOVERY FOR GENERAL MATRICES (UV/SVD)
 # ##############################################################################
-def hmt(
-    sketch_right,
-    sketch_left,
-    lop,
-    as_svd=True,
-):
+def hmt(sketch_right, lop, as_svd=True):
     r"""HMT sketched low-rank recovery.
 
     The core idea behind this method is outlined in
     `[HMT2009] <https://arxiv.org/abs/0909.4061>`_:
-    Given a linear operator :math:`A`, we assume that there are *thin*,
-    orthogonal matrices :math:`P, Q` such that
-    :math:`A \approx P P^H A Q Q^H`. Crucially, it is possible to
-    efficiently obtain :math:`P, Q` from random measurements, or sketches,
-    via QR orthogonalization.
+    Given a linear operator :math:`A`, we assume that there exists a *thin*,
+    orthogonal matrix :math:`Q` such that  :math:`A \approx Q Q^H A`.
+    Crucially, it is possible to
+    efficiently obtain :math:`Q` from random measurements, or sketches,
+    followed by QR orthogonalization.
 
-    Then, to produce an SVD, it remains to decompose the small, "core"
-    matrix :math:`C = P^H A Q = U \Sigma V^H`, yielding the final
-    SVD: :math:`A \approx (P U) \Sigma (V^H Q^H)`.
+    Then, to produce an SVD, it remains to decompose the "thin"
+    matrix :math:`B^H = P^H A = U \Sigma V^H`, yielding the final
+    SVD: :math:`A \approx (P U) \Sigma V^H`.
 
     :param sketch_right: Sketches ``A @ mop_right`` (typically a tall
-      matrix).
-    :param sketch_left: Sketches ``(mop_left @ A)`` (typically a fat
       matrix).
     :param lop: Our target linear operator ``A``.
     :returns: If ``as_svd``, a triple ``U, S, Vh`` with
       :math:`A \approx U diag(S) V^H` being a *thin SVD*. Otherwise,
-      the pair ``Y, Bh`` with :math:`A \approx Y B^H`.
+      :math:`(Q, B^H)`.
     """
-    P = qr(sketch_right, in_place_q=False, return_R=False)
-    Qh = qr(sketch_left.T, in_place_q=False, return_R=False).T
-    core = P.conj().T @ (lop @ Qh.conj().T)  # second pass over lop!
+    Q = qr(sketch_right, in_place_q=False, return_R=False)
+    Bh = Q.conj().T @ lop  # second pass over lop!
     if as_svd:
-        U, S, Vh = svd(core)
-        result = (P @ U), S, (Vh @ Qh)
+        U, S, Vh = svd(Bh)
+        result = (Q @ U), S, Vh
     else:
-        result = (P @ core), Qh
+        result = Q, Bh
     return result
 
 
-def singlepass(
-    sketch_right,
-    sketch_left,
-    mop_right,
-    rcond=1e-6,
-    as_svd=True,
-):
+def singlepass(sketch_right, sketch_left, mop_right, rcond=1e-6, as_svd=True):
     r"""Single-pass recovery of linop from left and right sketches.
 
     Single-pass recovery from
@@ -219,21 +205,21 @@ def oversampled(
 # ##############################################################################
 # # RECOVERY FOR SYMMETRIC MATRICES (EIGH)
 # ##############################################################################
-def hmt_h(
-    sketch_right,
-    lop,
-    as_eigh=True,
-    by_mag=True,
-):
+def hmt_h(sketch_right, lop, as_eigh=True, by_mag=True):
     r"""HMT sketched low-rank recovery (Hermitian).
 
     Hermitian version of :func:`hmt`. Since :math:`A = A^H`, we
-    only need sketches from one side, because in the Hermitian case ``Q``
-    can also be obtained by orthogonalizing ``sketch_right``, and the
-    method remains unchanged.
+    can further compact the core matrix into a Hermitian, "small" matrix:
+    :math:`A \approx Q Q^H A Q Q^H \Rightarrow C = Q^H A Q`.
+    Then we can obtain the eigendecomposition of :math:`C`.
+
+    :param by_mag: see :func:`skerch.utils.eigh`.
+    :returns: If ``as_eigh``, the pair :math:`\Lambda, X` corresponding to the
+      eigendecomposition :math:`A \approx X diag(\Lambda) X^H`. Otherwise,
+      the pair :math:`C, Q` (see derivation above).
     """
     Q = qr(sketch_right, in_place_q=False, return_R=False)
-    core = Q.conj().T @ (lop @ Q)  # second pass over lop!
+    core = (Q.conj().T @ lop) @ Q  # second pass over lop!
     if not as_eigh:
         result = core, Q
     else:
@@ -243,11 +229,7 @@ def hmt_h(
 
 
 def singlepass_h(
-    sketch_right,
-    mop_right,
-    rcond=1e-6,
-    as_eigh=True,
-    by_mag=True,
+    sketch_right, mop_right, rcond=1e-6, as_eigh=True, by_mag=True
 ):
     r"""Single-pass recovery of Hermitian linop from right sketch.
 
@@ -255,6 +237,11 @@ def singlepass_h(
     only need sketches from one side, because in the Hermitian case ``Q``
     can also be obtained by orthogonalizing ``sketch_right``, and the
     method remains unchanged.
+
+    :param by_mag: see :func:`skerch.utils.eigh`.
+    :returns: If ``as_eigh``, the pair :math:`\Lambda, X` corresponding to the
+      eigendecomposition :math:`A \approx X diag(\Lambda) X^H`. Otherwise,
+      the pair :math:`C, Q` (see derivation above).
     """
     # If the placements of the .conj() don't make sense, note that we
     # leverage symmetries, adding conj in some places and removed from others,
@@ -271,19 +258,18 @@ def singlepass_h(
     return result
 
 
-def nystrom_h(
-    sketch_right,
-    mop_right,
-    rcond=1e-6,
-    as_eigh=True,
-    by_mag=True,
-):
+def nystrom_h(sketch_right, mop_right, rcond=1e-6, as_eigh=True, by_mag=True):
     r"""Generalized Nyström recovery of Hermitian linop from right sketch.
 
     Hermitian version of :func:`nystrom`. Since :math:`A = A^H`, we
     only need sketches from one side:
     :math:`A \approx A \Omega C \Omega^H A`, with Hermitian *core matrix*
     in the form :math:`C = (\Omega^H A \Omega)^\dagger`.
+
+    :param by_mag: see :func:`skerch.utils.eigh`.
+    :returns: If ``as_eigh``, the pair :math:`\Lambda, X` corresponding to the
+      eigendecomposition :math:`A \approx X diag(\Lambda) X^H`. Otherwise,
+      the pair :math:`C, Q` (see derivation above).
     """
     P, S = qr(sketch_right, in_place_q=False, return_R=True)
     if not as_eigh:
@@ -322,6 +308,11 @@ def oversampled_h(
 
     (see `[FSMH2025] <https://openreview.net/forum?id=yGGoOVpBVP>`_
     for more discussion).
+
+    :param by_mag: see :func:`skerch.utils.eigh`.
+    :returns: If ``as_eigh``, the pair :math:`\Lambda, X` corresponding to the
+      eigendecomposition :math:`A \approx X diag(\Lambda) X^H`. Otherwise,
+      the pair :math:`C, Q` (see derivation above).
     """
     P = qr(sketch_right, in_place_q=False, return_R=False)
     core = lstsq(lilop @ P, sketch_inner, rcond=rcond)

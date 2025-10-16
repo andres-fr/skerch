@@ -173,7 +173,7 @@ class SketchedAlgorithmDispatcher:
 # ##############################################################################
 # # SSVD/SEIGH
 # ##############################################################################
-def ssvd(
+def ssvd(  # noqa:C901
     lop,
     lop_device,
     lop_dtype,
@@ -197,24 +197,26 @@ def ssvd(
 
       A \approx P P^H A Q Q^H = P C Q^H
 
-    One crucial point here is that we can efficiently obtain
+    The crucial point here is that it is possible to efficiently obtain
     :math:`P, Q` from random measurements, or sketches. Then, it only remains
     to decompose the *small* "core" matrix :math:`C`, which can be done with
-    traditional methods. This function follows that plan, namely:
+    traditional methods.
 
-    * Perform left and right sketches using the desired ``noise_type``
-      and orthogonalize them, yielding :math:`P, Q`
-    * Solve the core matrix using the desired ``recovery`` algorithm
-
-    The result is a sketched SVD of :math:`A`.
+    Depending on which ``recovery_type`` we use, there are several strategies
+    to solve this sketch, each with their nuances and tradeoffs (see
+    e.g. note below). Available
+    recovery methods are implemented and documented in :mod:`skerch.recovery`.
 
     .. note::
 
-      The method described above requires us to first
-      obtain :math:`P, Q`, and then do a *second round of measurements*
+      The straightforward recovery method from
+      `[HMT2009] <https://arxiv.org/abs/0909.4061>`_ (implemented in
+      :func:`skerch.recovery.hmt`) requires us to first
+      obtain :math:`Q`, and then do a *second round of measurements*
       :math:`A Q` to obtain the core matrix.
-      Further developments have shown that it is possible to obtain
-      :math:`A Q` without having to run a second pass of measurements,
+      Further developments have shown that it is possible to estimate
+      :math:`A Q` without having to run a second pass of measurements by
+      solving a least-squares problem,
       which can lead to significant speedup if we leverage parallelization
       (see e.g. `[TYUC2018] <https://arxiv.org/abs/1609.00048>`_).
       These *single-pass* recovery methods have also
@@ -258,9 +260,8 @@ def ssvd(
     if meas_blocksize is None:
         idims = 0 if inner_dims is None else inner_dims
         meas_blocksize = max(lop.shape) + outer_dims + idims
-    # instantiate measurement linops
+    # perform right outer measurements
     ro_seed = seed
-    lo_seed = ro_seed + outer_dims + 1
     ro_mop = dispatcher.mop(
         noise_type,
         (w, outer_dims),
@@ -269,14 +270,30 @@ def ssvd(
         meas_blocksize,
         register,
     )
-    lo_mop = dispatcher.mop(
-        noise_type,
-        (h, outer_dims),
-        lo_seed,
-        lop_dtype,
-        meas_blocksize,
-        register,
+    ro_sketch = torch.empty(
+        (lop.shape[0], outer_dims), dtype=lop_dtype, device=lop_device
     )
+    for block, idxs in ro_mop.get_blocks(lop_dtype, lop_device):
+        ro_sketch[:, idxs] = lop @ block  # assuming block is by_col!
+
+    # optionally perform left outer measurements
+    if recovery_type != "hmt":
+        lo_seed = ro_seed + outer_dims + 1
+        lo_mop = dispatcher.mop(
+            noise_type,
+            (h, outer_dims),
+            lo_seed,
+            lop_dtype,
+            meas_blocksize,
+            register,
+        )
+        lo_sketch = torch.empty(
+            (outer_dims, lop.shape[1]), dtype=lop_dtype, device=lop_device
+        )
+        for block, idxs in lo_mop.get_blocks(lop_dtype, lop_device):
+            lo_sketch[idxs, :] = block.conj().T @ lop  # assuming block by_col
+
+    # optionally perform inner measurements
     if inner_dims is not None:
         ri_seed = lo_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
@@ -298,32 +315,20 @@ def ssvd(
                 register,
             )
         )
-    # perform outer measurements
-    ro_sketch = torch.empty(
-        (lop.shape[0], outer_dims), dtype=lop_dtype, device=lop_device
-    )
-    lo_sketch = torch.empty(
-        (outer_dims, lop.shape[1]), dtype=lop_dtype, device=lop_device
-    )
-    for block, idxs in ro_mop.get_blocks(lop_dtype, lop_device):
-        ro_sketch[:, idxs] = lop @ block  # assuming block is by_col!
-    for block, idxs in lo_mop.get_blocks(lop_dtype, lop_device):
-        lo_sketch[idxs, :] = block.conj().T @ lop  # assuming block is by_col!
-    # if not oversampled, solve sketch
-    if inner_dims is None:
-        if recovery_type == "hmt":
-            U, S, Vh = recovery_fn(ro_sketch, lo_sketch, lop, as_svd=True)
-        else:
-            U, S, Vh = recovery_fn(
-                ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
-            )
-    # if oversampled, perform inner measurements and then solve
-    else:
         inner_sketch = torch.empty(
             (inner_dims, inner_dims), dtype=lop_dtype, device=lop_device
         )
         for block, idxs in ri_mop.get_blocks(lop_dtype, lop_device):
             inner_sketch[:, idxs] = li_mop @ (lop @ block)  # assuming by_col!
+
+    # solve sketches:
+    if recovery_type == "hmt":
+        U, S, Vh = recovery_fn(ro_sketch, lop, as_svd=True)
+    elif inner_dims is None:
+        U, S, Vh = recovery_fn(
+            ro_sketch, lo_sketch, ro_mop, rcond=lstsq_rcond, as_svd=True
+        )
+    elif inner_dims is not None:  # oversampled:
         U, S, Vh = recovery_fn(
             ro_sketch,
             lo_sketch,
@@ -333,11 +338,13 @@ def ssvd(
             rcond=lstsq_rcond,
             as_svd=True,
         )
+    else:
+        raise RuntimeError("Should never happen!")
     #
     return U, S, Vh
 
 
-def seigh(
+def seigh(  # noqa:C901
     lop,
     lop_device,
     lop_dtype,
@@ -380,7 +387,7 @@ def seigh(
     if meas_blocksize is None:
         idims = 0 if inner_dims is None else inner_dims
         meas_blocksize = max(lop.shape) + outer_dims + idims
-    # instantiate outer measurement linop and perform outer measurements
+    # perform outer measurements
     ro_seed = seed
     ro_mop = dispatcher.mop(
         noise_type,
@@ -395,20 +402,8 @@ def seigh(
     )
     for block, idxs in ro_mop.get_blocks(lop_dtype, lop_device):
         ro_sketch[:, idxs] = lop @ block  # assuming block is by_col!
-    # if not oversampled, solve sketch
-    if inner_dims is None:
-        if recovery_type == "hmt":
-            ews, evs = recovery_fn(ro_sketch, lop, as_eigh=True, by_mag=by_mag)
-        else:
-            ews, evs = recovery_fn(
-                ro_sketch,
-                ro_mop,
-                rcond=lstsq_rcond,
-                as_eigh=True,
-                by_mag=by_mag,
-            )
-    # if oversampled, perform inner measurements and then solve
-    else:
+    # optionally perform inner measurements
+    if inner_dims is not None:
         ri_seed = ro_seed + outer_dims + 1
         li_seed = ri_seed + inner_dims + 1
         ri_mop = dispatcher.mop(
@@ -434,6 +429,19 @@ def seigh(
         )
         for block, idxs in ri_mop.get_blocks(lop_dtype, lop_device):
             inner_sketch[:, idxs] = li_mop @ (lop @ block)  # assuming by_col!
+
+    # solve sketch
+    if recovery_type == "hmt":
+        ews, evs = recovery_fn(ro_sketch, lop, as_eigh=True, by_mag=by_mag)
+    elif inner_dims is None:
+        ews, evs = recovery_fn(
+            ro_sketch,
+            ro_mop,
+            rcond=lstsq_rcond,
+            as_eigh=True,
+            by_mag=by_mag,
+        )
+    elif inner_dims is not None:  # oversampled:
         ews, evs = recovery_fn(
             ro_sketch,
             inner_sketch,
