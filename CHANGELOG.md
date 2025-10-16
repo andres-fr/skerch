@@ -1,3 +1,13 @@
+## 1.1.0 (2025-10-16)
+
+### Feat
+
+- changed curvlinops dependency to 3.0 and updated docs, now torch wrapper is not needed
+
+### Fix
+
+- Bufgix in HMT recovery and updated docs
+
 ## 1.0.1 (2025-10-15)
 
 ## 1.0.0 (2025-10-15)
