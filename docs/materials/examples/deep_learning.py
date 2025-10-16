@@ -39,7 +39,7 @@ from curvlinops import HessianLinearOperator
 
 from skerch.a_posteriori import apost_error
 from skerch.algorithms import seigh
-from skerch.linops import CompositeLinOp, DiagonalLinOp, TorchLinOpWrapper
+from skerch.linops import CompositeLinOp, DiagonalLinOp
 from skerch.utils import gaussian_noise, rademacher_noise
 
 # %%
@@ -56,21 +56,12 @@ from skerch.utils import gaussian_noise, rademacher_noise
 
 SEED = 12345780
 DTYPE = torch.float32
-if False:
-    # set to True to test larger scales locally
-    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-    DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
-    MLP_DIMS = (784, 50, 50, 10)
-    OUTER_MEAS, INNER_MEAS, TEST_MEAS = 6_000, 9_000, 100
-    MEAS_BLOCKSIZE = 5_000
-else:
-    # lighter-weight config to run on autodoc CPU server
-    DEVICE = "cpu"
-    DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
-    MLP_DIMS = (784, 50, 10)
-    OUTER_MEAS, INNER_MEAS, TEST_MEAS = 2000, 3_000, 30
-    MEAS_BLOCKSIZE = 3_000
-
+# medium-scale config to run on autodoc CPU server.
+# change to "cuda" and bigger data/MLP to test larger scales locally
+DEVICE = "cpu"
+DATASET_SHAPE = (2, 50, 784)  # num_batches, batch_size, xdim
+MLP_DIMS = (784, 50, 10)
+SKETCH_DIMS, TEST_MEAS = 2000, 30
 
 # synthetic dataset, model and loss function
 X = gaussian_noise(DATASET_SHAPE, seed=SEED, dtype=DTYPE, device=DEVICE)
@@ -102,40 +93,23 @@ print("Number of Hessian entries:", num_params**2)
 # Sketched Hessian Eigendecomposition
 # -----------------------------------
 #
-# While ``CurvLinOps`` interfaces with ``SciPy/NumPy``, ``skerch`` does expect
-# that the linear operators input and output ``PyTorch`` tensors. To overcome
-# this discrepancy, ``skerch`` provides a
-# :class:`skerch.linops.TorchLinOpWrapper` class that simply converts between
-# ``SciPy/NumPy`` and ``PyTorch`` at input/output, and keeps track of the
-# right device. With this, ``seigh`` can be directly applied to the wrapped
-# ``CurvLinOps`` operator!
-
-
-class TorchHessianLinearOperator(TorchLinOpWrapper, HessianLinearOperator):
-    pass
-
-
 # Now we can create the Hessian LinOp and perform the ``skerch``
-# eigendecomposition. Some considerations:
-# * If ``SKERCH_MEAS`` is too small, recovery quality may suffer drastically
+# eigendecomposition! Some considerations:
+#
+# * If ``SKETCH_DIMS`` is too small, recovery quality may suffer
 # * Reducing ``meas_blocksize`` helps against out-of-memory errors, but
 #   is slower (less parallel measurements at once)
 
-H = TorchHessianLinearOperator(
-    model, loss_function, params, dataloader, progressbar=False
-)
+H = HessianLinearOperator(model, loss_function, params, dataloader)
 print(H)
-
 ews, evs = seigh(
     H,
     DEVICE,
     DTYPE,
-    OUTER_MEAS,
+    SKETCH_DIMS,
     seed=SEED + 2,
     noise_type="rademacher",
-    recovery_type=f"oversampled_{INNER_MEAS}",
-    lstsq_rcond=1e-6,
-    meas_blocksize=MEAS_BLOCKSIZE,
+    recovery_type="hmt",
 )
 sH = CompositeLinOp((("Q", evs), ("Lbd", DiagonalLinOp(ews)), ("Qt", evs.T)))
 
@@ -151,7 +125,6 @@ sH = CompositeLinOp((("Q", evs), ("Lbd", DiagonalLinOp(ews)), ("Qt", evs.T)))
 (frob_sq, f_sq, err_sq), _ = apost_error(
     H, sH, DEVICE, DTYPE, num_meas=TEST_MEAS, seed=SEED + num_params
 )
-
 
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
 ax1.plot(ews.cpu())

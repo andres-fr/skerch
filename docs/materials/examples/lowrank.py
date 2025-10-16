@@ -154,9 +154,9 @@ U3, S3, Vh3 = (
 )
 
 matnorm = mat.norm()
-err1 = torch.dist(mat, (U1 * S1) @ Vh1).item() / matnorm
-err2 = torch.dist(mat, (U2 * S2) @ Vh2.H).item() / matnorm
-err3 = torch.dist(mat, (U3 * S3) @ Vh3).item() / matnorm
+err1 = torch.dist(mat, (U1 * S1) @ Vh1).item()
+err2 = torch.dist(mat, (U2 * S2) @ Vh2.H).item()
+err3 = torch.dist(mat, (U3 * S3) @ Vh3).item()
 
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(12, 5))
 ax1.bar(["torch SVD (mat)", "torch sSVD (mat)", "skerch sSVD (lop)"], times)
@@ -165,7 +165,7 @@ ax2.bar(
     (err1, err2, err3),
 )
 fig.suptitle(
-    f"Wallclock times and relative errors for rank={SKETCH_MEAS}. "
+    f"Wallclock times and Frobenius errors for rank={SKETCH_MEAS}. "
     "Note that PyTorch implementations run on tensors."
 )
 fig.tight_layout()
@@ -231,7 +231,6 @@ fig.tight_layout()
 # be obtained as follows (see also :ref:`Command Line Interface`):
 
 apost_error_bounds(TEST_MEAS, 0.5)
-
 
 # %%
 #

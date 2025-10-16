@@ -219,7 +219,7 @@ def hmt_h(sketch_right, lop, as_eigh=True, by_mag=True):
       the pair :math:`C, Q` (see derivation above).
     """
     Q = qr(sketch_right, in_place_q=False, return_R=False)
-    core = (Q.conj().T @ lop) @ Q  # second pass over lop!
+    core = Q.conj().T @ (lop @ Q)  # second pass over lop!
     if not as_eigh:
         result = core, Q
     else:
