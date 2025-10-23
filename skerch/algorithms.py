@@ -144,7 +144,9 @@ class SketchedAlgorithmDispatcher:
                 conj=False,
             )
         else:
-            raise ValueError(f"Unknown type! {mop_type} Supported: {supported}")
+            raise ValueError(
+                f"Unknown type! {mop_type} Supported: {supported}"
+            )
         #
         return mop
 
@@ -635,6 +637,153 @@ def hutchpp(  # noqa: C901
     return result
 
 
+def hutch(
+    lop,
+    lop_dtype,
+    lop_device,
+    num_meas,
+    seed=0b1110101001010101011,
+    noise_type="rademacher",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    return_diag=True,
+    defl_mat=None,
+):
+    """Girard-Hutchinson trace and diagonal estimator.
+
+    :param mop: Measurement linop. A tall Rademacher/Phase matrix
+    :returns: Estimate of ``diag(lop)``
+    """
+    # housekeeping
+    register = False  # set to True for seed debugging
+    h, w = lop.shape
+    if h != w or h <= 0:
+        raise BadShapeError("hutch expects nonempty square operators!")
+    dims = h
+    # figure out recovery settings
+    if num_meas <= 0:
+        raise ValueError("num_meas must be positive!")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for trace/diag estimation! "
+            + "Check output quality and consider using Rademacher/PhaseNoise.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    #
+    mop = dispatcher.mop(
+        noise_type,
+        (dims, num_meas),
+        seed,
+        lop_dtype,
+        num_meas if meas_blocksize is None else meas_blocksize,
+        register,
+    )
+    trace = 0
+    if return_diag:
+        diag = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
+    for block, idxs in mop.get_blocks(lop_dtype, lop_device):
+        # transpose block: all measurements adjoint since Q deflates lop on
+        # the left space
+        block = block.T  # after transp: (idxs, dims)
+        # nonscalar normalization before deflation
+        if not is_noise_unitnorm:
+            # so gram matrix of (dims, dims) has diag=len(idxs)
+            # and adding every subtrace/gh_meas yields unit diagonal.
+            block *= (len(idxs) ** 0.5) / block.norm(dim=0)
+        # deflate block and perform adj meas
+        if defl_mat is None:
+            block_defl = block
+        else:
+            block_defl = block - (block @ defl_mat.conj()) @ Q.T
+        b_lop = block_defl.conj() @ lop
+        trace += (block_defl * b_lop).sum() / num_meas
+        if return_diag:
+            if is_noise_unitnorm:
+                diag += (block * b_lop).sum(0)
+            else:
+                diag += ((block * b_lop) / (block * block.conj())).sum(0)
+    #
+    if return_diag:
+        diag /= num_meas
+    #
+    result = {"tr": trace}
+    if return_diag:
+        result["diag"] = diag
+    return result
+
+
+def xhutchpp(
+    lop,
+    lop_device,
+    lop_dtype,
+    x_dims=0,
+    gh_meas=0,
+    seed=0b1110101001010101011,
+    noise_type="rademacher",
+    meas_blocksize=None,
+    dispatcher=SketchedAlgorithmDispatcher,
+    return_diag=True,
+    cache_xmop=True,
+):
+    """
+    TODO:
+
+
+    """
+    # housekeeping
+    register = False  # set to True for seed debugging
+    h, w = lop.shape
+    if h != w or h <= 0:
+        raise BadShapeError("xhutchpp expects nonempty square operators!")
+    dims = h
+    # figure out recovery settings
+    if defl_dims > dims:
+        raise ValueError("More defl rank than max linop rank!")
+    #
+    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
+    if not is_noise_unitnorm:
+        warnings.warn(
+            "Non-unitnorm noise can be unstable for trace/diag estimation! "
+            + "Check output quality and consider using Rademacher/PhaseNoise.",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+    if (x_dims < 0) or (gh_meas < 0):
+        raise ValueError("Negative number of measurements?")
+    if x_dims + gh_meas <= 0:
+        raise ValueError("Deflation dims and/or GH measurements needed!")
+    #
+    xmop = dispatcher.mop(
+        noise_type,
+        (dims, x_dims),
+        seed,
+        lop_dtype,
+        x_dims if meas_blocksize is None else meas_blocksize,
+        register,
+    )
+    if cache_xmop:
+        xmop = xmop.to_matrix(lop_dtype, lop_device)
+    Q, R = torch.linalg.qr(lop @ xmop)
+    # XDiag objects
+    Rinv = torch.linalg.inv(R)
+    Sh_k = Rinv / (Rinv.norm(dim=1, keepdim=True) * x_dims**0.5)
+    Psi = -Sh_k.H @ Sh_k
+    Psi[range(x_dims), range(x_dims)] += 1
+    Psi_Qh_A = Psi @ Q.H @ lop
+    D_psi = (Q.T * Psi_Qh_A).sum(0)
+    #
+    Q_Psi_Qh_A = CompositeLinOp([("Q", Q), ("Psi Qh A", Psi_Qh_A)])
+    Psi_defl = SumLinOp([("A", True, lop), ("Q Psi QhA", False, Q_Psi_Qh_A)])
+    D_xd_defl = hutch(psi_defl, mop_gh)
+    D_xpp = (len(R) * D_xd + mop_gh.shape[1] * D_xd_defl) / (
+        len(R) + mop_gh.shape[1]
+    )
+    breakpoint()
+
+
 def xdiag(  # noqa: C901
     lop,
     lop_device,
@@ -724,7 +873,7 @@ def xdiag(  # noqa: C901
             RuntimeWarning,
             stacklevel=2,
         )
-    # instantiate outer measurement linop and perform outer measurements
+    #
     mop = dispatcher.mop(
         noise_type,
         (dims, x_dims),

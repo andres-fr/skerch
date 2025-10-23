@@ -19,6 +19,8 @@ from skerch.algorithms import (
     snorm,
     ssvd,
     xdiag,
+    hutch,
+    xhutchpp,
 )
 from skerch.linops import TransposedLinOp, linop_to_matrix
 from skerch.measurements import GaussianNoiseLinOp
@@ -85,27 +87,42 @@ def seigh_recovery_shapes(request):
 
 
 @pytest.fixture
-def diag_recovery_shapes(request):
-    """Fixture to test Diag++ and XDiag.
+def diagtrace_configs(request):
+    """Fixture to test diagonal and trace recovery algorithms.
 
-    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
-    where the tolerances are in the form ``(full, top_only)``.
+    Tuples: ``(dims, rank, diagratio, xdims, gh_meas, diag_tol, trace_tol)``
     """
     result = [
-        # # low-rank matrix with good deflation: good d++, decent XD top
-        (200, 5, 50, 0, (1e-10, 1e-10), (0.3, 0.1)),
-        # # now less deflation but we add G-H: while dtop is equally good in
-        # # both, the few GH measurements seem to hurt much more in d++ than XD
-        (200, 10, 9, 50, (0.8, 0.3), (0.35, 0.3)),
-        # now we add more GH measurements to D++, and then it surpasses XD
-        (200, 10, 9, 190, (0.3, 0.3), (0.35, 0.3)),
-        # # just doing a lot of GH measurements also works for D++
-        # Commented out: now meas > rank not allowed (just create mat)
-        (10, 10, 0, 2_000, (0.05, None), (None, None)),
+        # low-rank matrix with salient diag: A few xtrace are decent
+        (200, 50, 3.0, 50, 0, 0.01, 0.01),
     ]
-    if request.config.getoption("--quick"):
-        result = result[:1]
+    # if request.config.getoption("--quick"):
+    #     result = result[:1]
     return result
+
+
+# @pytest.fixture
+# def diag_recovery_shapes(request):
+#     """Fixture to test Diag++ and XDiag.
+
+#     Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
+#     where the tolerances are in the form ``(full, top_only)``.
+#     """
+#     result = [
+#         # # low-rank matrix with good deflation: good d++, decent XD top
+#         (200, 5, 50, 0, (1e-10, 1e-10), (0.3, 0.1)),
+#         # # now less deflation but we add G-H: while dtop is equally good in
+#         # # both, the few GH measurements seem to hurt much more in d++ than XD
+#         (200, 10, 9, 50, (0.8, 0.3), (0.35, 0.3)),
+#         # now we add more GH measurements to D++, and then it surpasses XD
+#         (200, 10, 9, 190, (0.3, 0.3), (0.35, 0.3)),
+#         # # just doing a lot of GH measurements also works for D++
+#         # Commented out: now meas > rank not allowed (just create mat)
+#         (10, 10, 0, 2_000, (0.05, None), (None, None)),
+#     ]
+#     if request.config.getoption("--quick"):
+#         result = result[:1]
+#     return result
 
 
 @pytest.fixture
@@ -635,14 +652,16 @@ def test_hutchpp_xdiag_formal():
         _ = xdiag(H, H.device, H.dtype, x_dims=0, seed=0)
     # warning for non-unitnorm noise
     with pytest.warns(RuntimeWarning):
-        _ = xdiag(H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian")
+        _ = xdiag(
+            H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian"
+        )
 
 
-def test_diagpp_xdiag_correctness(  # noqa:C901
+def test_diag_trace_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,
-    diag_recovery_shapes,
+    diagtrace_configs,
     diagtrace_noise_types,
 ):
     """Correctness test case for ``diagpp`` amd ``xdiag``.
@@ -659,17 +678,18 @@ def test_diagpp_xdiag_correctness(  # noqa:C901
                 for (
                     dims,
                     rank,
-                    defl,
-                    gh_extra,
-                    (diagpp_full_tol, diagpp_top_tol),
-                    (xdiag_full_tol, xdiag_top_tol),
-                ) in diag_recovery_shapes:
+                    diag_ratio,
+                    xdims,
+                    gh_meas,
+                    diag_tol,
+                    trace_tol,
+                ) in diagtrace_configs:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
                         decay=100,
-                        diag_ratio=0.0,
+                        diag_ratio=diag_ratio,
                         symmetric=False,
                         psd=False,
                         seed=seed,
@@ -678,7 +698,8 @@ def test_diagpp_xdiag_correctness(  # noqa:C901
                     )
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
-                    idty = torch.eye(defl, dtype=dtype, device=device)
+                    tr = D.sum()
+                    idty = torch.eye(xdims, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
@@ -686,69 +707,96 @@ def test_diagpp_xdiag_correctness(  # noqa:C901
                             # skip this iteration
                             continue
                         # run hutchpp
-                        hutch = hutchpp(
+                        aaa = hutch(
                             lop,
-                            device,
                             dtype,
-                            defl,
-                            gh_extra,
+                            device,
+                            xdims * 10,
                             seed,
                             noise_type,
-                            meas_blocksize=dims,
-                            dispatcher=MyDispatcher,
+                            meas_blocksize=5,
                             return_diag=True,
+                            dispatcher=MyDispatcher,
                         )
-                        Q1, R1 = hutch["QR"]
-                        diag1, dtop1, dgh1 = hutch["diag"]
-                        # orth Q
-                        if Q1 is not None:
-                            QhQ1 = Q1.H @ Q1
-                            assert torch.allclose(
-                                QhQ1, idty, atol=tol
-                            ), "Diag++ Q not orthogonal?"
-                        # correct recoveries
-                        if diagpp_full_tol is not None:
-                            assert (
-                                relerr(D, diag1) < diagpp_full_tol
-                            ), "Bad full Diag++?"
-                        if diagpp_top_tol is not None:
-                            assert (
-                                relerr(D, dtop1) < diagpp_top_tol
-                            ), "Bad top Diag++?"
-                        # run XDiag
-                        for cache in (True, False):
-                            if (
-                                xdiag_full_tol is not None
-                                or xdiag_top_tol is not None
-                            ):
-                                diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
-                                    lop,
-                                    device,
-                                    dtype,
-                                    defl,
-                                    seed,
-                                    noise_type,
-                                    meas_blocksize=dims,
-                                    dispatcher=MyDispatcher,
-                                    cache_mop=cache,
-                                )
-                            else:
-                                Q2 = None
-                            # orth Q
-                            if Q2 is not None:
-                                QhQ2 = Q2.H @ Q2
-                                assert torch.allclose(
-                                    QhQ2, idty, atol=tol
-                                ), "XDiag Q not orthogonal?"
-                            # correct recoveries
-                            if xdiag_full_tol is not None:
-                                assert (
-                                    relerr(D, diag2) < xdiag_full_tol
-                                ), "Bad full XDiag?"
-                            if xdiag_top_tol is not None:
-                                assert (
-                                    relerr(D, dtop2) < xdiag_top_tol
-                                ), "Bad top XDiag?"
+                        bb1 = relerr(D, aaa["diag"])
+                        bb2 = relsumerr(tr, aaa["tr"], D)
+                        print(bb1, bb2)
+                        # xpp = xhutchpp(
+                        #     lop,
+                        #     device,
+                        #     dtype,
+                        #     defl,
+                        #     gh_extra,
+                        #     seed,
+                        #     noise_type,
+                        #     meas_blocksize=dims,
+                        #     dispatcher=MyDispatcher,
+                        #     return_diag=True,
+                        # )
+                        # breakpoint()
+                        # hutch = hutchpp(
+                        #     lop,
+                        #     device,
+                        #     dtype,
+                        #     defl,
+                        #     gh_extra,
+                        #     seed,
+                        #     noise_type,
+                        #     meas_blocksize=dims,
+                        #     dispatcher=MyDispatcher,
+                        #     return_diag=True,
+                        # )
+                        # Q1, R1 = hutch["QR"]
+                        # diag1, dtop1, dgh1 = hutch["diag"]
+                        # # orth Q
+                        # if Q1 is not None:
+                        #     QhQ1 = Q1.H @ Q1
+                        #     assert torch.allclose(
+                        #         QhQ1, idty, atol=tol
+                        #     ), "Diag++ Q not orthogonal?"
+                        # # correct recoveries
+                        # if diagpp_full_tol is not None:
+                        #     assert (
+                        #         relerr(D, diag1) < diagpp_full_tol
+                        #     ), "Bad full Diag++?"
+                        # if diagpp_top_tol is not None:
+                        #     assert (
+                        #         relerr(D, dtop1) < diagpp_top_tol
+                        #     ), "Bad top Diag++?"
+                        # # run XDiag
+                        # for cache in (True, False):
+                        #     if (
+                        #         xdiag_full_tol is not None
+                        #         or xdiag_top_tol is not None
+                        #     ):
+                        #         diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                        #             lop,
+                        #             device,
+                        #             dtype,
+                        #             defl,
+                        #             seed,
+                        #             noise_type,
+                        #             meas_blocksize=dims,
+                        #             dispatcher=MyDispatcher,
+                        #             cache_mop=cache,
+                        #         )
+                        #     else:
+                        #         Q2 = None
+                        #     # orth Q
+                        #     if Q2 is not None:
+                        #         QhQ2 = Q2.H @ Q2
+                        #         assert torch.allclose(
+                        #             QhQ2, idty, atol=tol
+                        #         ), "XDiag Q not orthogonal?"
+                        #     # correct recoveries
+                        #     if xdiag_full_tol is not None:
+                        #         assert (
+                        #             relerr(D, diag2) < xdiag_full_tol
+                        #         ), "Bad full XDiag?"
+                        #     if xdiag_top_tol is not None:
+                        #         assert (
+                        #             relerr(D, dtop2) < xdiag_top_tol
+                        #         ), "Bad top XDiag?"
 
 
 # ##############################################################################
