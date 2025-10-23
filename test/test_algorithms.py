@@ -20,7 +20,7 @@ from skerch.algorithms import (
     ssvd,
     xdiag,
     hutch,
-    xhutchpp,
+    xdiagpp,
 )
 from skerch.linops import TransposedLinOp, linop_to_matrix
 from skerch.measurements import GaussianNoiseLinOp
@@ -94,7 +94,7 @@ def diagtrace_configs(request):
     """
     result = [
         # low-rank matrix with salient diag: A few xtrace are decent
-        (200, 50, 3.0, 50, 0, 0.01, 0.01),
+        (200, 50, 3.0, 50, 100, 0.01, 0.01),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]
@@ -706,34 +706,56 @@ def test_diag_trace_correctness(  # noqa:C901
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # run hutchpp
+                        #
                         aaa = hutch(
                             lop,
                             dtype,
                             device,
-                            xdims * 10,
+                            xdims,
                             seed,
                             noise_type,
                             meas_blocksize=5,
                             return_diag=True,
                             dispatcher=MyDispatcher,
                         )
-                        bb1 = relerr(D, aaa["diag"])
-                        bb2 = relsumerr(tr, aaa["tr"], D)
+                        bb1 = relerr(D, aaa["diag"]).item()
+                        bb2 = relsumerr(tr, aaa["tr"], D).item()
                         print(bb1, bb2)
-                        # xpp = xhutchpp(
-                        #     lop,
-                        #     device,
-                        #     dtype,
-                        #     defl,
-                        #     gh_extra,
-                        #     seed,
-                        #     noise_type,
-                        #     meas_blocksize=dims,
-                        #     dispatcher=MyDispatcher,
-                        #     return_diag=True,
-                        # )
-                        # breakpoint()
+                        xpp = xdiagpp(
+                            lop,
+                            device,
+                            dtype,
+                            0,  # xdims,
+                            xdims,  # gh_meas,
+                            seed,
+                            noise_type,
+                            meas_blocksize=dims,
+                            dispatcher=MyDispatcher,
+                            return_diag=True,
+                        )
+                        bb1 = relerr(D, xpp["diag"]).item()
+                        bb2 = relsumerr(tr, xpp["tr"], D).item()
+                        print("      ", bb1, bb2)
+
+                        """
+                        check normalization of test vectors (2.3). helps?
+
+                        also rn we are assuming caching mop...
+                        also it seems we assume rademacher... not good
+                        also triang linop probably benefits from this somehow
+
+                        Test xdiagpp in all 3 modalities:
+                        * pure GH
+                        * GH with Q_defl
+                        * pure XD: much better than GH
+                        * Hybrid: better than just GH
+
+                        Test diags and traces in same place
+                        Then we just have one function for diag and trace
+                        Autodoc and send out under minor version update
+                        """
+                        breakpoint()
+
                         # hutch = hutchpp(
                         #     lop,
                         #     device,

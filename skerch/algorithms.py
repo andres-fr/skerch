@@ -12,6 +12,8 @@ import torch
 from .linops import (
     BaseLinOp,
     TransposedLinOp,
+    SumLinOp,
+    CompositeLinOp,
     check_linop_input,
 )
 from .measurements import (
@@ -458,21 +460,21 @@ def seigh(  # noqa:C901
 
 
 # ##############################################################################
-# # TRACEPP AND DIAGPP/XDIAG
+# # TRACE AND DIAGONAL
 # ##############################################################################
-def hutchpp(  # noqa: C901
+def hutch(
     lop,
-    lop_device,
     lop_dtype,
-    defl_dims=0,
-    extra_gh_meas=0,
+    lop_device,
+    num_meas,
     seed=0b1110101001010101011,
     noise_type="rademacher",
     meas_blocksize=None,
     dispatcher=SketchedAlgorithmDispatcher,
     return_diag=True,
+    defl_Q=None,
 ):
-    r"""Diagonal and trace sketched approximation via Hutch++.
+    """Girard-Hutchinson trace and diagonal estimator.
 
     Given a square linear operator :math:`A`, and random vectors
     :math:`v \sim \mathcal{R}` with :math:`\mathbb{E}[v v^H] = I`, consider
@@ -490,8 +492,8 @@ def hutchpp(  # noqa: C901
     :math:`Q` efficiently from ``defl_dims`` random measurements.
     Then, the diagonal of :math:`(Q Q^H) A` can be obtained exactly, and
     :math:`diag((I - (Q Q^H)) A)` is then estimated via Girard-Hutchinson
-    using ``extra_gh_meas`` measurements
-    (see `[BN2022] <https://arxiv.org/abs/2201.10684>`_).
+    using ``extra_gh_meas`` (uncorrelated) measurements. This is the
+    ``Hutch++`` algorithm (see `[BN2022] <https://arxiv.org/abs/2201.10684>`_).
 
     A very similar logic applies for the estimation of the **trace**, which
     is the sum of the diagonal entries. In fact, most computations can be
@@ -515,144 +517,25 @@ def hutchpp(  # noqa: C901
       i.e. this is not efficient for smaller matrices.
 
     :param lop: The :math:`A` operator whose diagonal we wish to estimate.
-    :param lop_device: The device where :math:`A` runs
-    :param lop_dtype: The datatype :math:`A` interacts with
-    :param defl_dims: How many measurements will be used to obtain
-      the :math:`Q` deflation matrix
-    :param extra_gh_meas: How many measurements will be used to obtain
-      the deflated Girard-Hutchinson estimation
-    :param seed: Overall random seed for the algorithm
+    :param lop_device: The device where :math:`A` runs.
+    :param lop_dtype: The datatype :math:`A` interacts with.
+    :param num_meas: How many measurements will be used.
+    :param seed: Overall random seed for the algorithm.
     :param noise_type: Which noise to use. Must be supported by the given
-      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`).
     :param meas_blocksize: How many sketched measurements should be done
       at once. Ideally, as many as it fits in memory.
       See :class:`skerch.linops.ByBlockLinOp` for more details.
     :param return_diag: If true, diagonal estimation is also returned.
-    :returns: A dictionary in the form
-      ``{"QR": (Q, R), "tr": (t, t_top, t_gh)}`` where ``(Q, R)`` is the
-      QR decomposition of the sketch used to obtain the deflation, ``t``
-      is the trace estimate, ``t_top`` is :math:`tr(Q Q^H A)` and
-      ``t_gh`` is the G-H estimate of :math:`tr((I -Q Q^H) A)`.
-      If ``return_diag`` is true, the dictionary also contains the
-      ``"diag": (d, d_top, d_gh)`` estimates, analogous to the trace.
-    """
-    register = False  # set to True for seed debugging
-    h, w = lop.shape
-    if h != w:
-        raise BadShapeError("Diag++ expects square operators!")
-    dims = h
-    if dims == 0:
-        raise BadShapeError("Only nonempty operators supported!")
-    if meas_blocksize is None:
-        meas_blocksize = max(*lop.shape) + defl_dims + extra_gh_meas
-    # figure out recovery settings
-    if defl_dims > dims:
-        raise ValueError("More defl rank than max linop rank!")
-    #
-    is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
-    if not is_noise_unitnorm:
-        warnings.warn(
-            "Non-unitnorm noise can be unstable for trace/diag estimation! "
-            + "Check output and consider using Rademacher or PhaseNoise.",
-            RuntimeWarning,
-            stacklevel=2,
-        )
-    if (defl_dims < 0) or (extra_gh_meas < 0):
-        raise ValueError("Negative number of measurements?")
-    if defl_dims + extra_gh_meas <= 0:
-        raise ValueError("Deflation dims and/or GH measurements needed!")
-    # without deflation
-    if defl_dims <= 0:
-        Q, R, Xh = None, None, None
-        t_top = 0
-        if return_diag:
-            d_top = torch.zeros(dims, dtype=lop_dtype, device=lop_device)
-    # with deflation
-    else:
-        # instantiate deflation linop and perform measurements
-        mop = dispatcher.mop(
-            noise_type,
-            (dims, defl_dims),
-            seed,
-            lop_dtype,
-            meas_blocksize,
-            register,
-        )
-        sketch = torch.empty(
-            (lop.shape[0], defl_dims), dtype=lop_dtype, device=lop_device
-        )
-        for block, idxs in mop.get_blocks(lop_dtype, lop_device):
-            sketch[:, idxs] = lop @ block  # assuming block is by_col!
-        # leveraging A ~= (Q @ Q.H) A + [I - (Q @ Q.H)] A, we hard-compute
-        # the first component. Here, X.H = Q.H @ A
-        Q, R = qr(sketch, in_place_q=True, return_R=True)
-        Xh = Q.conj().T @ lop
-        # top diagonal estimate is then diag(Q @ Xh)
-        t_top = (Q * Xh.T).sum()  # no conj here!
-        if return_diag:
-            d_top = (Q * Xh.T).sum(1)  # no conj here!
-    # Girard-Hutchinson:
-    t_gh = 0
-    if return_diag:
-        d_gh = torch.zeros_like(d_top)
-    # perform any extra Girard-Hutchinson measurements,
-    if extra_gh_meas > 0:
-        seed_gh = seed + defl_dims + 1
-        mop_gh = dispatcher.mop(
-            noise_type,
-            (dims, extra_gh_meas),
-            seed_gh,
-            lop_dtype,
-            meas_blocksize,
-            register,
-        )
-        #
-        for block, idxs in mop_gh.get_blocks(lop_dtype, lop_device):
-            # transpose block: all measurements adjoint since Q deflates lop on
-            # the left space
-            block = block.T  # after transp: (idxs, dims)
-            # nonscalar normalization before deflation
-            if not is_noise_unitnorm:
-                # so gram matrix of (dims, dims) has diag=len(idxs)
-                # and adding every subtrace/gh_meas yields unit diagonal.
-                block *= (len(idxs) ** 0.5) / block.norm(dim=0)
-            # deflate block and perform adj meas
-            block_defl = (
-                block if Q is None else block - (block @ Q.conj()) @ Q.T
-            )
-            b_lop = block_defl.conj() @ lop
-            t_gh += (block_defl * b_lop).sum() / extra_gh_meas
-            if return_diag:
-                if is_noise_unitnorm:
-                    d_gh += (block * b_lop).sum(0)
-                else:
-                    d_gh += ((block * b_lop) / (block * block.conj())).sum(0)
-        #
-        if return_diag:
-            d_gh /= extra_gh_meas
-    #
-    result = {"QR": (Q, R), "tr": (t_top + t_gh, t_top, t_gh)}
-    if return_diag:
-        result["diag"] = (d_top + d_gh, d_top, d_gh)
-    return result
-
-
-def hutch(
-    lop,
-    lop_dtype,
-    lop_device,
-    num_meas,
-    seed=0b1110101001010101011,
-    noise_type="rademacher",
-    meas_blocksize=None,
-    dispatcher=SketchedAlgorithmDispatcher,
-    return_diag=True,
-    defl_mat=None,
-):
-    """Girard-Hutchinson trace and diagonal estimator.
-
-    :param mop: Measurement linop. A tall Rademacher/Phase matrix
-    :returns: Estimate of ``diag(lop)``
+      Otherwise just the trace.
+    :param defl_Q: The tall :math:`Q` matrix used for optional deflation (see
+      explanation). It should be composed of orthonormal columns and have
+      shape ``(dims, defl_dims)``. Ideally it is aligned with the top-space
+      of ``lop``. Also, it should be obtained from measurements that are
+      uncorrelated to this estimator, so make sure to use a
+      different source of random noise (e.g. a different seed) here.
+    :returns: A dictionary in the form ``{"tr": tr, "diag": diag}`` with
+      the trace and diagonal (if ``return_diag`` is true) estimations.
     """
     # housekeeping
     register = False  # set to True for seed debugging
@@ -694,28 +577,30 @@ def hutch(
             # and adding every subtrace/gh_meas yields unit diagonal.
             block *= (len(idxs) ** 0.5) / block.norm(dim=0)
         # deflate block and perform adj meas
-        if defl_mat is None:
+        if defl_Q is None:
             block_defl = block
         else:
-            block_defl = block - (block @ defl_mat.conj()) @ Q.T
+            block_defl = block - (block @ defl_Q.conj()) @ defl_Q.T
         b_lop = block_defl.conj() @ lop
-        trace += (block_defl * b_lop).sum() / num_meas
         if return_diag:
+            # just accumulate diagonal, then sum at end to get trace
             if is_noise_unitnorm:
                 diag += (block * b_lop).sum(0)
             else:
                 diag += ((block * b_lop) / (block * block.conj())).sum(0)
+        else:
+            # just accumulate the trace, no diag needed
+            trace += (block_defl * b_lop).sum() / num_meas
     #
     if return_diag:
         diag /= num_meas
-    #
-    result = {"tr": trace}
-    if return_diag:
-        result["diag"] = diag
+        result = {"diag": diag, "tr": diag.sum()}
+    else:
+        result = {"tr": trace}
     return result
 
 
-def xhutchpp(
+def xdiagpp(
     lop,
     lop_device,
     lop_dtype,
@@ -728,9 +613,52 @@ def xhutchpp(
     return_diag=True,
     cache_xmop=True,
 ):
-    """
-    TODO:
+    """Diagonal and trace sketched approximation via Hutch++/XDiag.
 
+    In :func:`hutch` we see how to estimate the trace and diagonal via
+    Girard-Hutchinson and ``Hutch++``. This function extends this
+    functionality with ``XTrace/XDiag``
+    `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_, which allow
+    us to perform ``x_dims`` dimensional deflation, and then recycle the
+    ``x_dims`` measurements for the subsequent deflated Girard-Hutchinson
+    estimator, which we  can also further enrich with ``gh_meas``
+    extra measurements. The memory cost of this function is dominated
+    by the deflation: we need to store a matrix of ``(dims, x_dims)``
+    size. The runtime cost is dominated by the total number of measurements:
+    ``2 * x_dims + gh_meas``.
+
+    .. note::
+
+      This function is equivalent to plain Girard-Hutchinson for
+      ``x_dims=0``, and equivalent to ``XDiag`` if ``gh_meas=0``.
+      For the ``Hutch++`` estimator, run :func:`hutch` providing the
+      desired ``Q_defl`` deflation matrix.
+
+
+
+    :param defl_dims: How many measurements will be used to obtain
+      the :math:`Q` deflation matrix
+    :param lop: The :math:`A` operator whose diagonal we wish to estimate.
+    :param lop_device: The device where :math:`A` runs
+    :param lop_dtype: The datatype :math:`A` interacts with
+    :param x_dims: How many measurements will be used to obtain
+      the :math:`Q` deflation matrix, and the subsequent deflated
+      estimation (the ``k`` above).
+    :param seed: Overall random seed for the algorithm
+    :param noise_type: Which noise to use. Must be supported by the given
+      ``dispatcher`` (see :meth:`SketchedAlgorithmDispatcher.mop`)
+    :param meas_blocksize: How many sketched measurements should be done
+      at once. Ideally, as many as it fits in memory.
+      See :class:`skerch.linops.ByBlockLinOp` for more details.
+    :param cache_mop: If true, the measurement linear operator (which is
+      used twice) is converted to an explicit matrix and kept around.
+      This saves computation, since it does not need to be sampled twice,
+      at the expense of the memory required to store its entries.
+    :returns: A tuple in the form ``d, (d_top, d_gh, Q, R)``, where
+      where ``(Q, R)`` is the QR decomposition of the sketch used to obtain
+      the deflation, ``d`` is the diagonal estimate, ``d_top``
+      is :math:`diag(Q \Psi Q^H A)` and ``t_gh`` is the G-H estimate of
+      :math:`tr((I -Q \Psi Q^H) A)`.
 
     """
     # housekeeping
@@ -740,8 +668,8 @@ def xhutchpp(
         raise BadShapeError("xhutchpp expects nonempty square operators!")
     dims = h
     # figure out recovery settings
-    if defl_dims > dims:
-        raise ValueError("More defl rank than max linop rank!")
+    if x_dims > dims:
+        raise ValueError("More x_dims than diag entries!")
     #
     is_noise_unitnorm = dispatcher.unitnorm_lop_entries(noise_type)
     if not is_noise_unitnorm:
@@ -755,33 +683,72 @@ def xhutchpp(
         raise ValueError("Negative number of measurements?")
     if x_dims + gh_meas <= 0:
         raise ValueError("Deflation dims and/or GH measurements needed!")
+    A_defl = lop
+    # if we have x_dims, actually deflate A and obtain deflation estimates
+    if x_dims >= 1:
+        xmop = dispatcher.mop(
+            noise_type,
+            (dims, x_dims),
+            seed,
+            lop_dtype,
+            x_dims if meas_blocksize is None else meas_blocksize,
+            register,
+        )
+        if cache_xmop:
+            xmop = xmop.to_matrix(lop_dtype, lop_device)
+        # compute exchangeability objects
+        Q, R = torch.linalg.qr(lop @ xmop)
+        Rinv = torch.linalg.inv(R)
+        Sh_k = Rinv / (Rinv.norm(dim=1, keepdim=True) * x_dims**0.5)
+        Psi = -Sh_k.H @ Sh_k
+        Psi[range(x_dims), range(x_dims)] += 1
+        Psi_Qh_A = Psi @ Q.H @ lop
+        #
+        Q_Psi_Qh_A = CompositeLinOp([("Q", Q), ("Psi Qh A", Psi_Qh_A)])
+        A_defl = SumLinOp([("A", True, lop), ("Q Psi QhA", False, Q_Psi_Qh_A)])
+        # obtain xdiag/xtrace deflation estimates
+        if return_diag:
+            xdiag = (Q.T * Psi_Qh_A).sum(0)
+            ydiag = ((Q @ Sh_k.H) * (xmop.conj() * (Sh_k @ R).diag())).sum(1)
+            xtrace = xdiag.sum()
+            ytrace = ydiag.sum()
+        else:
+            xtrace = (Q.T * Psi_Qh_A).sum(0)
+            ytrace = ((Q @ Sh_k.H) * (xmop.conj() * (Sh_k @ R).diag())).sum()
     #
-    xmop = dispatcher.mop(
-        noise_type,
-        (dims, x_dims),
-        seed,
-        lop_dtype,
-        x_dims if meas_blocksize is None else meas_blocksize,
-        register,
-    )
-    if cache_xmop:
-        xmop = xmop.to_matrix(lop_dtype, lop_device)
-    Q, R = torch.linalg.qr(lop @ xmop)
-    # XDiag objects
-    Rinv = torch.linalg.inv(R)
-    Sh_k = Rinv / (Rinv.norm(dim=1, keepdim=True) * x_dims**0.5)
-    Psi = -Sh_k.H @ Sh_k
-    Psi[range(x_dims), range(x_dims)] += 1
-    Psi_Qh_A = Psi @ Q.H @ lop
-    D_psi = (Q.T * Psi_Qh_A).sum(0)
+    if gh_meas >= 1:
+        # Girard-Hutchinson on (optionally deflated) A
+        defl = hutch(
+            A_defl,
+            lop_dtype,
+            lop_device,
+            gh_meas,
+            seed + x_dims,
+            noise_type,
+            meas_blocksize,
+            dispatcher,
+            return_diag,
+        )
+    # merge logic:
+    if x_dims == 0:
+        result = defl
+    elif gh_meas == 0:
+        result = {"tr": xtrace + ytrace}
+        if return_diag:
+            result["diag"] = xdiag + ydiag
+    else:
+        result = defl
+        k, q = x_dims, gh_meas  # both nonzero
+        result["diag"][:] = xdiag + (k * ydiag + q * defl["diag"]) / (k + q)
+        result["tr"] = xtrace + (k * ytrace + q * defl["tr"]) / (k + q)
     #
-    Q_Psi_Qh_A = CompositeLinOp([("Q", Q), ("Psi Qh A", Psi_Qh_A)])
-    Psi_defl = SumLinOp([("A", True, lop), ("Q Psi QhA", False, Q_Psi_Qh_A)])
-    D_xd_defl = hutch(psi_defl, mop_gh)
-    D_xpp = (len(R) * D_xd + mop_gh.shape[1] * D_xd_defl) / (
-        len(R) + mop_gh.shape[1]
-    )
-    breakpoint()
+    if x_dims >= 1:
+        result["Q"] = Q
+        result["R"] = R
+        result["Sh_k"] = Sh_k
+        result["Psi"] = Psi
+    #
+    return result
 
 
 def xdiag(  # noqa: C901
