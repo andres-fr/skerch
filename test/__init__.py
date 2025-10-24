@@ -178,3 +178,28 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     if isinstance(mat, torch.Tensor):
         assert V.device == mat.device, "Incorrect eigvecs device!"
         assert Lbd.device == mat.device, "Incorrect eigvals device!"
+
+
+def diag_trace_test_helper(
+    diag, tr, idty, results, tr_tol, diag_tol, q_tol, errcode=""
+):
+    """Helper to test correctness of diag/trace estimators.
+
+    * ``results["tr"]`` via relsumerr
+    * If present, ``results["diag"]`` via relerr
+    * If present, orthogonality of ``results["Q"]``
+    """
+    # tr
+    assert (
+        relsumerr(tr, results["tr"], diag) < tr_tol
+    ), f"[{errcode}]: Bad trace?"
+    # diag
+    if "diag" in results:
+        err = relerr(diag, results["diag"])
+        assert err < diag_tol, f"[{errcode}]: Bad diag? {err}"
+    # orth Q
+    if "Q" in results:
+        Q = results["Q"]
+        assert torch.allclose(
+            Q.H @ Q, idty, atol=q_tol
+        ), f"[{errcode}]: Q not orthogonal?"

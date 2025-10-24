@@ -50,6 +50,14 @@ But they can take a substantial amount of time. A quicker (few minutes), yet sti
   make test-light
 
 
+A coverage report is produced at the end of the test. Detailed report with lines missing coverage can be also produced via:
+
+.. code:: bash
+
+  coverage report -m
+
+Make sure to check this report and ensure that tests have good coverage (CI pipeline will fail if coverage goes too low).
+
 
 Documentation and Integration Tests
 -----------------------------------

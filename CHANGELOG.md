@@ -1,3 +1,9 @@
+## 1.2.0 (2025-10-24)
+
+### Feat
+
+- Bugfix and restructure of diagonal estimators
+
 ## 1.1.0 (2025-10-16)
 
 ### Feat

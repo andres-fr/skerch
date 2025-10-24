@@ -8,11 +8,12 @@ In this example we explore the following ``skerch`` functionality:
 * Trace and diagonal estimations
 * Triangular matrix-vector multiplications
 
-Given a linear operator :math:`A`, we first perform the trace and diagonal
-estimation using variations of the Girard-Hutchinson sketched method. The
-computations needed for both estimations are very similar and can be mostly
+Given a linear operator :math:`A`, we first perform stochastic trace and
+diagonal estimation using XDiag/Huch++
+(see :func:`skerch.algorithms.xhutchpp`).
+Computations needed for both estimations are very similar and can be mostly
 recycled to compute both quantities at once.
-To illustrate the benefits of low-rank deflation for diagonal estimation, we
+To illustrate the effect of low-rank deflation, we
 run these methods on a full-rank and a low-rank matrix.
 
 Then, we move onto triangular mat-vec estimation, i.e. :math:`tril(A) v` and
@@ -27,16 +28,16 @@ actual quantities.
   in general, doing just a few noisy measurements can introduce large amounts
   of error and be worse that not doing it at all (especially if entries in
   the measurement vectors span multiple orders of magnitude).
-  To obtain reliable estimates at scale, typically measurements must be
-  in the order of thousands (see Table 1 in
-  `[BN2022] <https://arxiv.org/abs/2201.10684>`_ for bounds). This is still
-  fine nonetheless for linear operators with large ambient dimension.
+  If the diagonal is not very prominent and the operator has a flat spectrum,
+  measurements needed for a reliable estimate must be typically in the order
+  of thousands (see Table 1 in
+  `[BN2022] <https://arxiv.org/abs/2201.10684>`_ for bounds).
 """
 
 import matplotlib.pyplot as plt
 import torch
 
-from skerch.algorithms import TriangularLinOp, hutchpp
+from skerch.algorithms import TriangularLinOp, xhutchpp
 from skerch.synthmat import RandomLordMatrix
 from skerch.utils import gaussian_noise
 
@@ -52,15 +53,15 @@ from skerch.utils import gaussian_noise
 SEED = 392781
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float64
-DIMS, RANK = 3000, 100
-DEFL_DIMS, GH_MEAS = 75, 2000
+DIMS, RANK = 3000, 50
+DEFL_DIMS, GH_MEAS = 80, 1500
 
 shape = (DIMS, DIMS)
 mat = RandomLordMatrix.exp(
-    shape, RANK, 0.001, seed=SEED + 1, device=DEVICE, dtype=DTYPE
+    shape, RANK, 0.0005, seed=SEED + 1, device=DEVICE, dtype=DTYPE
 )[0]
 lomat = RandomLordMatrix.exp(
-    shape, RANK, 100, seed=SEED, device=DEVICE, dtype=DTYPE
+    shape, RANK, 0.5, seed=SEED, device=DEVICE, dtype=DTYPE
 )[0]
 
 fig, (ax1, ax2) = plt.subplots(ncols=2, figsize=(8, 3))
@@ -75,16 +76,20 @@ fig.tight_layout()
 #
 # ##############################################################################
 #
-# Trace and diagonal estimation via Hutch++
-# -----------------------------------------
+# Trace and diagonal estimation via XHutch++
+# ------------------------------------------
 #
-# Hutch++ (implemented in :func:`skerch.algorithms.hutchpp`) combines
-# Girard-Hutchinson with low-rank deflation to estimate the trace and/or
-# the diagonal. In ``skerch`` we can customize many aspects, including
-# how many measurements are performed in each part. Note that the
-# low-rank deflation requires ``2 * DEFL_DIMS`` measurements:
+# XHutch++ (see :func:`skerch.algorithms.xhutchpp`) immplements both
+# XDiag and plain Girard-Hutchinson to estimate the trace and/or
+# the diagonal.
+# XDiag is generally the preferred choice (unless our matrix has a very flat
+# spectrum), but it has one drawback: It requires us to store as many vectors
+# as measurements, which may not always be possible. With ``xhutchpp`` we can
+# set ``DEFL_DIMS`` to whatever we can afford in terms of memory, and then
+# independently set ``GH_MEAS`` to perform further measurements on top, at
+# no substantial overhaead in memory:
 
-hutch1 = hutchpp(
+hutch1 = xhutchpp(
     mat,
     DEVICE,
     DTYPE,
@@ -95,7 +100,8 @@ hutch1 = hutchpp(
     meas_blocksize=None,
     return_diag=True,
 )
-hutch2 = hutchpp(
+
+hutch2 = xhutchpp(
     lomat,
     DEVICE,
     DTYPE,
@@ -107,8 +113,8 @@ hutch2 = hutchpp(
     return_diag=True,
 )
 
-tr1, diag1 = hutch1["tr"][0], hutch1["diag"][0]
-tr2, diag2 = hutch2["tr"][0], hutch2["diag"][0]
+tr1, diag1 = hutch1["tr"], hutch1["diag"]
+tr2, diag2 = hutch2["tr"], hutch2["diag"]
 
 
 # %%
@@ -182,7 +188,7 @@ print("Diagonal relative error (steep):", diag2_err)
 # Triangular matrix-vector estimation
 # -----------------------------------
 #
-# Similar in spirit to :func:`skerch.algorithms.hutchpp`,
+# Similar in spirit to :func:`skerch.algorithms.xhutchpp`,
 # :class:`skerch.algorithms.TriangularLinOp` wraps any given linear operator
 # (as long as it implements the ``.shape = (height, width)`` attribute and
 # the ``@`` matmul operation), and combines deterministic staircase-shaped

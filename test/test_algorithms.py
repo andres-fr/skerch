@@ -14,11 +14,11 @@ import torch
 from skerch.algorithms import (
     SketchedAlgorithmDispatcher,
     TriangularLinOp,
-    hutchpp,
+    hutch,
     seigh,
     snorm,
     ssvd,
-    xdiag,
+    xhutchpp,
 )
 from skerch.linops import TransposedLinOp, linop_to_matrix
 from skerch.measurements import GaussianNoiseLinOp
@@ -27,6 +27,7 @@ from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
 
 from . import (
     BasicMatrixLinOp,
+    diag_trace_test_helper,
     eigh_test_helper,
     relerr,
     relsumerr,
@@ -85,44 +86,17 @@ def seigh_recovery_shapes(request):
 
 
 @pytest.fixture
-def diag_recovery_shapes(request):
-    """Fixture to test Diag++ and XDiag.
+def diagtrace_configs(request):
+    """Fixture to test diagonal and trace recovery algorithms.
 
-    Tuples in the form ``(dims, rank, defl, gh_extra, diagpp_tol, xdiag_tol)``
-    where the tolerances are in the form ``(full, top_only)``.
+    Tuples: ``(dims, rank, diagratio, xdims, gh_meas, diag_tol, trace_tol)``
     """
     result = [
-        # # low-rank matrix with good deflation: good d++, decent XD top
-        (200, 5, 50, 0, (1e-10, 1e-10), (0.3, 0.1)),
-        # # now less deflation but we add G-H: while dtop is equally good in
-        # # both, the few GH measurements seem to hurt much more in d++ than XD
-        (200, 10, 9, 50, (0.8, 0.3), (0.35, 0.3)),
-        # now we add more GH measurements to D++, and then it surpasses XD
-        (200, 10, 9, 190, (0.3, 0.3), (0.35, 0.3)),
-        # # just doing a lot of GH measurements also works for D++
-        # Commented out: now meas > rank not allowed (just create mat)
-        (10, 10, 0, 2_000, (0.05, None), (None, None)),
+        # low-rank matrix with salient diag: A few xtrace are decent
+        (200, 50, 3.0, 55, 500, 0.15, 1e-2),
     ]
-    if request.config.getoption("--quick"):
-        result = result[:1]
-    return result
-
-
-@pytest.fixture
-def trace_recovery_shapes(request):
-    """Fixture to test Trace++ (and XTrace).
-
-    Tuples in the form ``(dims, rank, defl, gh_extra, tracepp_tol, xtrace_tol)``
-    where the tolerances are in the form ``(full, top_only)``.
-    """
-    result = [
-        # low-rank matrix with good deflation: good tr++
-        (200, 5, 50, 0, (1e-10, 1e-10), (None, None)),
-        # now less deflation but we add G-H: GH seems to hurt but still decent
-        (200, 10, 9, 50, (0.025, 0.01), (None, None)),
-        # # just doing a lot of GH measurements also works
-        (10, 10, 0, 1_000, (0.05, None), (None, None)),
-    ]
+    # if request.config.getoption("--quick"):
+    #     result = result[:1]
     return result
 
 
@@ -409,10 +383,15 @@ def test_ssvd_correctness(
                             "nystrom",
                             f"oversampled_{innermeas}",
                         ):
-                            errmsg = (
-                                "SSVD error! "
-                                "{(seed, device, dtype, (hw, rank, outermeas, "
-                                "innermeas), noise_type, recovery_type)})"
+                            errmsg = "SSVD error! ({})".format(
+                                (
+                                    seed,
+                                    device,
+                                    dtype,
+                                    (hw, rank, outermeas, innermeas),
+                                    noise_type,
+                                    recovery_type,
+                                )
                             )
                             # run SSVD with max blocksize
                             U, S, Vh = ssvd(
@@ -542,116 +521,135 @@ def test_seigh_correctness(  # noqa:C901
 # ##############################################################################
 # # XDIAG/DIAGPP
 # ##############################################################################
-def test_hutchpp_xdiag_formal():
-    """Formal test case for ``hutchpp`` amd ``xdiag``.
+def test_diag_trace_formal():
+    """Formal test case for trace and diagonal estimators.
 
     * Only square, nonempty linops supported
-    * defl_dims or x_dims can't be larger than dims.
+    * x_dims can't be larger than dims.
     * At least 1 measurement must be done, and meas params can't be negative
     * Warning for non-unitnorm noise
     """
     Z, M, H = torch.ones(0, 0), torch.ones(4, 5), torch.ones(5, 5)
-    # HUTCHPP
-    for diag in (True, False):
-        # nonsquare lop
-        with pytest.raises(BadShapeError):
-            _ = hutchpp(
-                M,
-                M.device,
-                M.dtype,
-                defl_dims=1,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # empty lop
-        with pytest.raises(BadShapeError):
-            _ = hutchpp(
-                Z,
-                Z.device,
-                Z.dtype,
-                defl_dims=1,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # too many defl
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=6,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # zero total measurements
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=0,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # negative measurements
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=-1,
-                extra_gh_meas=1,
-                seed=0,
-                return_diag=diag,
-            )
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=1,
-                extra_gh_meas=-1,
-                seed=0,
-                return_diag=diag,
-            )
-    # warning for non-unitnorm noise
-    with pytest.warns(RuntimeWarning):
-        _ = hutchpp(H, H.device, H.dtype, defl_dims=1, noise_type="gaussian")
-    # XDIAG
     # nonsquare lop
     with pytest.raises(BadShapeError):
-        _ = xdiag(M, M.device, M.dtype, x_dims=1, seed=0)
-    # empty lop
+        _ = hutch(
+            M,
+            M.device,
+            M.dtype,
+            num_meas=1,
+            seed=0,
+        )
     with pytest.raises(BadShapeError):
-        _ = xdiag(Z, Z.device, Z.dtype, x_dims=1, seed=0)
-    # too many or negative meas
+        _ = xhutchpp(
+            M,
+            M.device,
+            M.dtype,
+            x_dims=1,
+            gh_meas=1,
+            seed=0,
+        )
+    # empy lop
+    with pytest.raises(BadShapeError):
+        _ = hutch(
+            Z,
+            Z.device,
+            Z.dtype,
+            num_meas=1,
+            seed=0,
+        )
+    with pytest.raises(BadShapeError):
+        _ = xhutchpp(
+            Z,
+            Z.device,
+            Z.dtype,
+            x_dims=1,
+            gh_meas=1,
+            seed=0,
+        )
+    # too many defl
     with pytest.raises(ValueError):
-        _ = xdiag(H, H.device, H.dtype, x_dims=6, seed=0)
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=len(H) + 1,
+            gh_meas=0,
+            seed=0,
+        )
+    # zero total measurements
     with pytest.raises(ValueError):
-        _ = xdiag(H, H.device, H.dtype, x_dims=0, seed=0)
+        _ = hutch(
+            H,
+            H.device,
+            H.dtype,
+            num_meas=0,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=0,
+            gh_meas=0,
+            seed=0,
+        )
+    # negative measurements
+    with pytest.raises(ValueError):
+        _ = hutch(
+            H,
+            H.device,
+            H.dtype,
+            num_meas=-1,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=-1,
+            gh_meas=1,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=1,
+            gh_meas=-1,
+            seed=0,
+        )
     # warning for non-unitnorm noise
     with pytest.warns(RuntimeWarning):
-        _ = xdiag(H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian")
+        _ = hutch(H, H.device, H.dtype, num_meas=1, noise_type="gaussian")
+    with pytest.warns(RuntimeWarning):
+        _ = xhutchpp(H, H.device, H.dtype, gh_meas=1, noise_type="gaussian")
 
 
-def test_diagpp_xdiag_correctness(  # noqa:C901
+def test_diag_trace_correctness(  # noqa:C901
     rng_seeds,
     torch_devices,
     dtypes_tols,
-    diag_recovery_shapes,
+    diagtrace_configs,
     diagtrace_noise_types,
 ):
-    """Correctness test case for ``diagpp`` amd ``xdiag``.
+    """Correctness test case for diagonal and trace estimators.
 
-    Runs diagonal recoveries on all devices/dtypes/noisemats, on a few
-    different settings for rank and measurements, testing that:
+    Runs ``hutch`` and ``xhutchpp`` diagonal and trace recoveries on all
+    devices/dtypes/noisemats, on a few
+    different settings for rank and measurements, testing that diag/trace
+    recoveries are sufficiently good, for the following estimators:
 
-    * Retrieved Q matrices are orthogonal
-    * Retrieved diagonals are close enough (either deflation or final ones)
+    * Plain hutch
+    * Just deflation
+    * Hutch with deflation (Hutch++)
+    * Plain XDiag
+    * XDiag with additional GH measurements
+
+    Also:
+    * If given, test that retrieved Q matrices are orthogonal
     """
     for seed in rng_seeds:
         for device in torch_devices:
@@ -659,17 +657,18 @@ def test_diagpp_xdiag_correctness(  # noqa:C901
                 for (
                     dims,
                     rank,
-                    defl,
-                    gh_extra,
-                    (diagpp_full_tol, diagpp_top_tol),
-                    (xdiag_full_tol, xdiag_top_tol),
-                ) in diag_recovery_shapes:
+                    diag_ratio,
+                    xdims,
+                    gh_meas,
+                    diag_tol,
+                    trace_tol,
+                ) in diagtrace_configs:
                     hw = (dims, dims)
                     mat, _ = RandomLordMatrix.exp(
                         hw,
                         rank,
                         decay=100,
-                        diag_ratio=0.0,
+                        diag_ratio=diag_ratio,
                         symmetric=False,
                         psd=False,
                         seed=seed,
@@ -678,77 +677,119 @@ def test_diagpp_xdiag_correctness(  # noqa:C901
                     )
                     lop = BasicMatrixLinOp(mat)
                     D = mat.diag()
-                    idty = torch.eye(defl, dtype=dtype, device=device)
+                    tr = D.sum()
+                    idty = torch.eye(xdims, dtype=dtype, device=device)
                     #
                     for noise_type, complex_only in diagtrace_noise_types:
                         if dtype not in COMPLEX_DTYPES and complex_only:
                             # this noise type does not support reals,
                             # skip this iteration
                             continue
-                        # run hutchpp
-                        hutch = hutchpp(
-                            lop,
-                            device,
-                            dtype,
-                            defl,
-                            gh_extra,
-                            seed,
-                            noise_type,
-                            meas_blocksize=dims,
-                            dispatcher=MyDispatcher,
-                            return_diag=True,
-                        )
-                        Q1, R1 = hutch["QR"]
-                        diag1, dtop1, dgh1 = hutch["diag"]
-                        # orth Q
-                        if Q1 is not None:
-                            QhQ1 = Q1.H @ Q1
-                            assert torch.allclose(
-                                QhQ1, idty, atol=tol
-                            ), "Diag++ Q not orthogonal?"
-                        # correct recoveries
-                        if diagpp_full_tol is not None:
-                            assert (
-                                relerr(D, diag1) < diagpp_full_tol
-                            ), "Bad full Diag++?"
-                        if diagpp_top_tol is not None:
-                            assert (
-                                relerr(D, dtop1) < diagpp_top_tol
-                            ), "Bad top Diag++?"
-                        # run XDiag
-                        for cache in (True, False):
-                            if (
-                                xdiag_full_tol is not None
-                                or xdiag_top_tol is not None
-                            ):
-                                diag2, (dtop2, ddefl2, Q2, R2) = xdiag(
+                        #
+                        for return_diag in (True, False):
+                            # plain GH
+                            result_gh = hutch(
+                                lop,
+                                device,
+                                dtype,
+                                gh_meas,
+                                seed,
+                                noise_type,
+                                meas_blocksize=None,
+                                return_diag=return_diag,
+                                dispatcher=MyDispatcher,
+                            )
+                            diag_trace_test_helper(
+                                D,
+                                tr,
+                                idty,
+                                result_gh,
+                                trace_tol,
+                                diag_tol,
+                                tol,
+                                errcode="GH",
+                            )
+                            # plain XDiag:
+                            for cache_xmop in (True, False):
+                                result_xd = xhutchpp(
                                     lop,
                                     device,
                                     dtype,
-                                    defl,
+                                    xdims,
+                                    0,
+                                    seed + xdims + gh_meas,
+                                    noise_type,
+                                    meas_blocksize=None,
+                                    dispatcher=MyDispatcher,
+                                    return_diag=return_diag,
+                                    cache_xmop=cache_xmop,
+                                )
+                                diag_trace_test_helper(
+                                    D,
+                                    tr,
+                                    idty,
+                                    result_xd,
+                                    trace_tol,
+                                    diag_tol,
+                                    tol,
+                                    errcode=f"XDiag (cache={cache_xmop})",
+                                )
+                            # XDiag++:
+                            for cache_xmop in (True, False):
+                                result_xpp = xhutchpp(
+                                    lop,
+                                    device,
+                                    dtype,
+                                    xdims,
+                                    gh_meas,
                                     seed,
                                     noise_type,
-                                    meas_blocksize=dims,
+                                    meas_blocksize=None,
                                     dispatcher=MyDispatcher,
-                                    cache_mop=cache,
+                                    return_diag=return_diag,
+                                    cache_xmop=cache_xmop,
                                 )
-                            else:
-                                Q2 = None
-                            # orth Q
-                            if Q2 is not None:
-                                QhQ2 = Q2.H @ Q2
-                                assert torch.allclose(
-                                    QhQ2, idty, atol=tol
-                                ), "XDiag Q not orthogonal?"
-                            # correct recoveries
-                            if xdiag_full_tol is not None:
-                                assert (
-                                    relerr(D, diag2) < xdiag_full_tol
-                                ), "Bad full XDiag?"
-                            if xdiag_top_tol is not None:
-                                assert (
-                                    relerr(D, dtop2) < xdiag_top_tol
-                                ), "Bad top XDiag?"
+                                diag_trace_test_helper(
+                                    D,
+                                    tr,
+                                    idty,
+                                    result_xpp,
+                                    trace_tol,
+                                    diag_tol,
+                                    tol,
+                                    errcode=f"XDiag++ (cache={cache_xmop})",
+                                )
+                            # Just deflation
+                            Q = result_xd["Q"]
+                            D_top = (Q.T * (Q.H @ mat)).sum(0)
+                            tr_top = D_top.sum()
+                            assert relerr(D, D_top) < 0.5, "Bad diag deflation?"
+                            # Hutch++
+                            result_hpp = hutch(
+                                lop,
+                                device,
+                                dtype,
+                                gh_meas,
+                                seed,
+                                noise_type,
+                                meas_blocksize=None,
+                                return_diag=return_diag,
+                                dispatcher=MyDispatcher,
+                                defl_Q=Q,
+                            )
+                            result_hpp["tr"] += tr_top
+                            if return_diag:
+                                result_hpp["diag"] += D_top
+                            diag_trace_test_helper(
+                                D,
+                                tr,
+                                idty,
+                                result_hpp,
+                                trace_tol,
+                                diag_tol,
+                                tol,
+                                errcode="Hutch++",
+                            )
 
 
 # ##############################################################################
@@ -1080,87 +1121,3 @@ def test_norm_correctness(
                         assert (
                             abs(frob - snorms["fro"]) / frob <= froberr
                         ), "Wrong Frobenius snorm!"
-
-
-# ##############################################################################
-# # TRACEPP/XTRACE
-# ##############################################################################
-def test_tracepp_xtrace_correctness(
-    rng_seeds,
-    torch_devices,
-    dtypes_tols,
-    trace_recovery_shapes,
-    diagtrace_noise_types,
-):
-    """Correctness test case for ``tracepp`` amd ``xtrace``.
-
-    Runs trace recoveries on all devices/dtypes/noisemats, on a few
-    different settings for rank and measurements, testing that:
-
-    * Retrieved Q matrices are orthogonal
-    * Retrieved traces are close enough (either deflation or final ones)
-    """
-    for seed in rng_seeds:
-        for device in torch_devices:
-            for dtype, tol in dtypes_tols.items():
-                for (
-                    dims,
-                    rank,
-                    defl,
-                    gh_extra,
-                    (tracepp_full_tol, tracepp_top_tol),
-                    # (xtrace_full_tol, xtrace_top_tol),
-                    (_, _),
-                ) in trace_recovery_shapes:
-                    hw = (dims, dims)
-                    mat, _ = RandomLordMatrix.exp(
-                        hw,
-                        rank,
-                        decay=100,
-                        diag_ratio=0.0,
-                        symmetric=False,
-                        psd=False,
-                        seed=seed,
-                        dtype=dtype,
-                        device=device,
-                    )
-                    lop = BasicMatrixLinOp(mat)
-                    D = mat.diag()
-                    trace = D.sum()
-                    idty = torch.eye(defl, dtype=dtype, device=device)
-                    #
-                    for noise_type, complex_only in diagtrace_noise_types:
-                        if dtype not in COMPLEX_DTYPES and complex_only:
-                            # this noise type does not support reals,
-                            # skip this iteration
-                            continue
-                        # run hutchpp
-                        hutch = hutchpp(
-                            lop,
-                            device,
-                            dtype,
-                            defl,
-                            gh_extra,
-                            seed,
-                            noise_type,
-                            meas_blocksize=dims,
-                            dispatcher=MyDispatcher,
-                            return_diag=True,
-                        )
-                        Q1, R1 = hutch["QR"]
-                        tr1, ttop1, tgh1 = hutch["tr"]
-                        # test Qs are orthogonal
-                        if Q1 is not None:
-                            QhQ1 = Q1.H @ Q1
-                            assert torch.allclose(
-                                QhQ1, idty, atol=tol
-                            ), "Diag++ Q not orthogonal?"
-                        # test recoveries are correct
-                        if tracepp_full_tol is not None:
-                            assert (
-                                relsumerr(trace, tr1, D) < tracepp_full_tol
-                            ), "Bad full Trace++?"
-                        if tracepp_top_tol is not None:
-                            assert (
-                                relsumerr(trace, ttop1, D) < tracepp_top_tol
-                            ), "Bad top Trace++?"
