@@ -146,9 +146,7 @@ class SketchedAlgorithmDispatcher:
                 conj=False,
             )
         else:
-            raise ValueError(
-                f"Unknown type! {mop_type} Supported: {supported}"
-            )
+            raise ValueError(f"Unknown type! {mop_type} Supported: {supported}")
         #
         return mop
 
@@ -613,7 +611,7 @@ def xhutchpp(  # noqa:C901
     r"""Diagonal and trace sketched approximation via Hutch/XDiag.
 
     In :func:`hutch` we see how to estimate the trace and diagonal via
-    Girard-Hutchinson and ``Hutch++``. This function extends this
+    Girard-Hutchinson/``Hutch++``. This function extends this
     functionality with ``XTrace/XDiag``
     `[ETW2024] <https://arxiv.org/pdf/2301.07825>`_, which allow
     us to perform ``x_dims`` dimensional deflation, and then recycle the
@@ -766,9 +764,7 @@ def xhutchpp(  # noqa:C901
         k, q = x_dims, gh_meas  # both nonzero
         result["tr"] = xtrace + (k * ytrace + q * defl["tr"]) / (k + q)
         if return_diag:
-            result["diag"][:] = xdiag + (k * ydiag + q * defl["diag"]) / (
-                k + q
-            )
+            result["diag"][:] = xdiag + (k * ydiag + q * defl["diag"]) / (k + q)
     #
     if x_dims >= 1:
         result["Q"] = Q
