@@ -464,8 +464,8 @@ def seigh(  # noqa:C901
 # ##############################################################################
 def hutch(
     lop,
-    lop_dtype,
     lop_device,
+    lop_dtype,
     num_meas,
     seed=0b1110101001010101011,
     noise_type="rademacher",
@@ -711,6 +711,10 @@ def xdiagpp(  # noqa:C901
             #
             ydiag = torch.zeros_like(xdiag)
             for block, idxs in iterator:
+                if not is_noise_unitnorm:
+                    # so gram matrix of (dims, dims) has diag=len(idxs)
+                    # and adding every subtrace/gh_meas yields unit diagonal.
+                    block *= (len(idxs) ** 0.5) / block.norm(dim=0)
                 ydiag += (
                     (Q @ Sh_k[idxs].H)
                     * (block.conj() * (Sh_k[idxs] @ R[:, idxs]).diag())
@@ -720,9 +724,13 @@ def xdiagpp(  # noqa:C901
             xtrace = (Q.T * Psi_Qh_A).sum()
             ytrace = 0
             for block, idxs in iterator:
+                if not is_noise_unitnorm:
+                    # so gram matrix of (dims, dims) has diag=len(idxs)
+                    # and adding every subtrace/gh_meas yields unit diagonal.
+                    block *= (len(idxs) ** 0.5) / block.norm(dim=0)
                 ytrace += (
                     (Q @ Sh_k[idxs].H)
-                    * (xmop.conj() * (Sh_k[idxs] @ R[:, idxs]).diag())
+                    * (block.conj() * (Sh_k[idxs] @ R[:, idxs]).diag())
                 ).sum()
     #
     if gh_meas >= 1:

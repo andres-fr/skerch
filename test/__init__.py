@@ -183,7 +183,7 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
 
 
 def diag_trace_test_helper(
-    diag, tr, idty, results, tr_tol, diag_tol, errcode=""
+    diag, tr, idty, results, tr_tol, diag_tol, q_tol, errcode=""
 ):
     """ """
     # tr
@@ -192,12 +192,11 @@ def diag_trace_test_helper(
     ), f"[{errcode}]: Bad trace?"
     # diag
     if "diag" in results:
-        assert (
-            relerr(diag, results["diag"]) < diag_tol
-        ), f"[{errcode}]: Bad diag?"
+        err = relerr(diag, results["diag"])
+        assert err < diag_tol, f"[{errcode}]: Bad diag?"
     # orth Q
     if "Q" in results:
-        Q = result["Q"]
+        Q = results["Q"]
         assert torch.allclose(
-            Q.H @ Q, idty, atol=tol
+            Q.H @ Q, idty, atol=q_tol
         ), f"[{errcode}]: Q not orthogonal?"

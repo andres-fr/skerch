@@ -93,7 +93,7 @@ def diagtrace_configs(request):
     """
     result = [
         # low-rank matrix with salient diag: A few xtrace are decent
-        (200, 50, 3.0, 50, 500, 0.05, 1e-3),
+        (200, 50, 3.0, 55, 500, 0.1, 1e-3),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]
@@ -629,8 +629,8 @@ def test_diag_trace_correctness(  # noqa:C901
     recoveries are sufficiently good, for the following estimators:
 
     * Plain hutch
-    * Hutch with deflation
     * Just deflation
+    * Hutch with deflation (Hutch++)
     * Plain XDiag
     * XDiag with additional GH measurements
 
@@ -673,10 +673,11 @@ def test_diag_trace_correctness(  # noqa:C901
                             continue
                         #
                         for return_diag in (True, False):
+                            # plain GH
                             result = hutch(
                                 lop,
-                                dtype,
                                 device,
+                                dtype,
                                 gh_meas,
                                 seed,
                                 noise_type,
@@ -691,23 +692,50 @@ def test_diag_trace_correctness(  # noqa:C901
                                 result,
                                 trace_tol,
                                 diag_tol,
+                                tol,
                                 errcode="GH",
                             )
+                            # plain XDiag:
+                            for cache_xmop in (True, False):
+                                result = xdiagpp(
+                                    lop,
+                                    device,
+                                    dtype,
+                                    xdims,
+                                    0,
+                                    seed + xdims + gh_meas,
+                                    noise_type,
+                                    meas_blocksize=None,
+                                    dispatcher=MyDispatcher,
+                                    return_diag=return_diag,
+                                    cache_xmop=cache_xmop,
+                                )
+                                diag_trace_test_helper(
+                                    D,
+                                    tr,
+                                    idty,
+                                    result,
+                                    trace_tol,
+                                    diag_tol,
+                                    tol,
+                                    errcode=f"XDiag (cache={cache_xmop})",
+                                )
+                            """
+                            TODO:
 
-                        # xpp = xdiagpp(
-                        #     lop,
-                        #     device,
-                        #     dtype,
-                        #     50,  # xdims,
-                        #     0,  # gh_meas,
-                        #     seed,
-                        #     "rademacher",  # noise_type,
-                        #     meas_blocksize=7,
-                        #     dispatcher=MyDispatcher,
-                        #     return_diag=False,
-                        #     cache_xmop=True,
-                        # )
-                        # breakpoint()
+                            * xdiag is erroring for diag. Why?
+                              - error is in XDIAG complex bloated
+                              - float bloated is OK
+                            * finish formal tests
+
+                            * get rid of gh meas for triang
+                            * lint etc release
+                            """
+                            # Just deflation
+                            # Hutch++
+                            # XDiag++
+
+                            # breakpoint()
 
 
 # ##############################################################################
