@@ -597,7 +597,7 @@ def hutch(
     return result
 
 
-def xdiagpp(  # noqa:C901
+def xhutchpp(  # noqa:C901
     lop,
     lop_device,
     lop_dtype,
@@ -610,7 +610,7 @@ def xdiagpp(  # noqa:C901
     return_diag=True,
     cache_xmop=True,
 ):
-    r"""Diagonal and trace sketched approximation via Hutch++/XDiag.
+    r"""Diagonal and trace sketched approximation via Hutch/XDiag.
 
     In :func:`hutch` we see how to estimate the trace and diagonal via
     Girard-Hutchinson and ``Hutch++``. This function extends this
@@ -631,6 +631,13 @@ def xdiagpp(  # noqa:C901
       For the ``Hutch++`` estimator, run :func:`hutch` providing the
       desired ``Q_defl`` deflation matrix.
 
+    .. seealso::
+
+      `This blogpost <https://aferro.dynu.net/math/xdiagpp/>`_ provides
+      derivations and elaborates on the relationship between Hutch++
+      and XDiag, and how this can lead to a common implementation such as
+      this one.
+
     :param defl_dims: How many measurements will be used to obtain
       the :math:`Q` deflation matrix
     :param lop: The :math:`A` operator whose diagonal we wish to estimate.
@@ -649,11 +656,12 @@ def xdiagpp(  # noqa:C901
       used twice) is converted to an explicit matrix and kept around.
       This saves computation, since it does not need to be sampled twice,
       at the expense of the memory required to store its entries.
-    :returns: A tuple in the form ``d, (d_top, d_gh, Q, R)``, where
-      where ``(Q, R)`` is the QR decomposition of the sketch used to obtain
-      the deflation, ``d`` is the diagonal estimate, ``d_top``
-      is :math:`diag(Q \Psi Q^H A)` and ``t_gh`` is the G-H estimate of
-      :math:`tr((I -Q \Psi Q^H) A)`.
+    :returns: A dictionary in the form
+      ``{"tr": t, "diag": d, "Q": Q, "R": R, "Sh_k": S, "Psi": P}`` containing
+      trace and diagonal (if ``return_diag`` is true) estimations,
+      as well as the :math:`Q, R` matrices corresponding to the QR
+      decomposition of the deflation measurements, and the
+      :math:`S_k^H, \Psi` objects needed to compute the exchangeable estimator.
     """
     # housekeeping
     register = False  # set to True for seed debugging

@@ -158,9 +158,7 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     * The recovered eigvals are by descending magnitude/value
     * The devices and dtypes all match
     """
-    allclose = (
-        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
-    )
+    allclose = torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
     diff = torch.diff if isinstance(idty, torch.Tensor) else np.diff
     V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
     # correctness of result
@@ -185,7 +183,12 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
 def diag_trace_test_helper(
     diag, tr, idty, results, tr_tol, diag_tol, q_tol, errcode=""
 ):
-    """ """
+    """Helper to test correctness of diag/trace estimators.
+
+    * ``results["tr"]`` via relsumerr
+    * If present, ``results["diag"]`` via relerr
+    * If present, orthogonality of ``results["Q"]``
+    """
     # tr
     assert (
         relsumerr(tr, results["tr"], diag) < tr_tol
@@ -193,7 +196,7 @@ def diag_trace_test_helper(
     # diag
     if "diag" in results:
         err = relerr(diag, results["diag"])
-        assert err < diag_tol, f"[{errcode}]: Bad diag?"
+        assert err < diag_tol, f"[{errcode}]: Bad diag? {err}"
     # orth Q
     if "Q" in results:
         Q = results["Q"]

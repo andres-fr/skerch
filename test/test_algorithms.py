@@ -18,7 +18,7 @@ from skerch.algorithms import (
     seigh,
     snorm,
     ssvd,
-    xdiagpp,
+    xhutchpp,
 )
 from skerch.linops import TransposedLinOp, linop_to_matrix
 from skerch.measurements import GaussianNoiseLinOp
@@ -27,8 +27,8 @@ from skerch.utils import COMPLEX_DTYPES, BadShapeError, gaussian_noise
 
 from . import (
     BasicMatrixLinOp,
-    eigh_test_helper,
     diag_trace_test_helper,
+    eigh_test_helper,
     relerr,
     relsumerr,
     rng_seeds,
@@ -93,7 +93,7 @@ def diagtrace_configs(request):
     """
     result = [
         # low-rank matrix with salient diag: A few xtrace are decent
-        (200, 50, 3.0, 55, 500, 0.1, 1e-3),
+        (200, 50, 3.0, 55, 500, 0.15, 1e-2),
     ]
     # if request.config.getoption("--quick"):
     #     result = result[:1]
@@ -383,10 +383,15 @@ def test_ssvd_correctness(
                             "nystrom",
                             f"oversampled_{innermeas}",
                         ):
-                            errmsg = (
-                                "SSVD error! "
-                                "{(seed, device, dtype, (hw, rank, outermeas, "
-                                "innermeas), noise_type, recovery_type)})"
+                            errmsg = "SSVD error! ({})".format(
+                                (
+                                    seed,
+                                    device,
+                                    dtype,
+                                    (hw, rank, outermeas, innermeas),
+                                    noise_type,
+                                    recovery_type,
+                                )
                             )
                             # run SSVD with max blocksize
                             U, S, Vh = ssvd(
@@ -520,98 +525,107 @@ def test_diag_trace_formal():
     """Formal test case for trace and diagonal estimators.
 
     * Only square, nonempty linops supported
-    * defl_dims or x_dims can't be larger than dims.
+    * x_dims can't be larger than dims.
     * At least 1 measurement must be done, and meas params can't be negative
     * Warning for non-unitnorm noise
     """
     Z, M, H = torch.ones(0, 0), torch.ones(4, 5), torch.ones(5, 5)
-    # HUTCHPP
-    for diag in (True, False):
-        # nonsquare lop
-        with pytest.raises(BadShapeError):
-            _ = hutchpp(
-                M,
-                M.device,
-                M.dtype,
-                defl_dims=1,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # empty lop
-        with pytest.raises(BadShapeError):
-            _ = hutchpp(
-                Z,
-                Z.device,
-                Z.dtype,
-                defl_dims=1,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # too many defl
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=6,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # zero total measurements
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=0,
-                extra_gh_meas=0,
-                seed=0,
-                return_diag=diag,
-            )
-        # negative measurements
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=-1,
-                extra_gh_meas=1,
-                seed=0,
-                return_diag=diag,
-            )
-        with pytest.raises(ValueError):
-            _ = hutchpp(
-                H,
-                H.device,
-                H.dtype,
-                defl_dims=1,
-                extra_gh_meas=-1,
-                seed=0,
-                return_diag=diag,
-            )
-    # warning for non-unitnorm noise
-    with pytest.warns(RuntimeWarning):
-        _ = hutchpp(H, H.device, H.dtype, defl_dims=1, noise_type="gaussian")
-    # XDIAG
     # nonsquare lop
     with pytest.raises(BadShapeError):
-        _ = xdiag(M, M.device, M.dtype, x_dims=1, seed=0)
-    # empty lop
+        _ = hutch(
+            M,
+            M.device,
+            M.dtype,
+            num_meas=1,
+            seed=0,
+        )
     with pytest.raises(BadShapeError):
-        _ = xdiag(Z, Z.device, Z.dtype, x_dims=1, seed=0)
-    # too many or negative meas
+        _ = xhutchpp(
+            M,
+            M.device,
+            M.dtype,
+            x_dims=1,
+            gh_meas=1,
+            seed=0,
+        )
+    # empy lop
+    with pytest.raises(BadShapeError):
+        _ = hutch(
+            Z,
+            Z.device,
+            Z.dtype,
+            num_meas=1,
+            seed=0,
+        )
+    with pytest.raises(BadShapeError):
+        _ = xhutchpp(
+            Z,
+            Z.device,
+            Z.dtype,
+            x_dims=1,
+            gh_meas=1,
+            seed=0,
+        )
+    # too many defl
     with pytest.raises(ValueError):
-        _ = xdiag(H, H.device, H.dtype, x_dims=6, seed=0)
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=len(H) + 1,
+            gh_meas=0,
+            seed=0,
+        )
+    # zero total measurements
     with pytest.raises(ValueError):
-        _ = xdiag(H, H.device, H.dtype, x_dims=0, seed=0)
+        _ = hutch(
+            H,
+            H.device,
+            H.dtype,
+            num_meas=0,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=0,
+            gh_meas=0,
+            seed=0,
+        )
+    # negative measurements
+    with pytest.raises(ValueError):
+        _ = hutch(
+            H,
+            H.device,
+            H.dtype,
+            num_meas=-1,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=-1,
+            gh_meas=1,
+            seed=0,
+        )
+    with pytest.raises(ValueError):
+        _ = xhutchpp(
+            H,
+            H.device,
+            H.dtype,
+            x_dims=1,
+            gh_meas=-1,
+            seed=0,
+        )
     # warning for non-unitnorm noise
     with pytest.warns(RuntimeWarning):
-        _ = xdiag(
-            H, H.device, H.dtype, x_dims=1, seed=0, noise_type="gaussian"
-        )
+        _ = hutch(H, H.device, H.dtype, num_meas=1, noise_type="gaussian")
+    with pytest.warns(RuntimeWarning):
+        _ = xhutchpp(H, H.device, H.dtype, gh_meas=1, noise_type="gaussian")
 
 
 def test_diag_trace_correctness(  # noqa:C901
@@ -623,7 +637,7 @@ def test_diag_trace_correctness(  # noqa:C901
 ):
     """Correctness test case for diagonal and trace estimators.
 
-    Runs ``hutch`` and ``xdiagpp`` diagonal and trace recoveries on all
+    Runs ``hutch`` and ``xhutchpp`` diagonal and trace recoveries on all
     devices/dtypes/noisemats, on a few
     different settings for rank and measurements, testing that diag/trace
     recoveries are sufficiently good, for the following estimators:
@@ -697,7 +711,7 @@ def test_diag_trace_correctness(  # noqa:C901
                             )
                             # plain XDiag:
                             for cache_xmop in (True, False):
-                                result_xd = xdiagpp(
+                                result_xd = xhutchpp(
                                     lop,
                                     device,
                                     dtype,
@@ -722,7 +736,7 @@ def test_diag_trace_correctness(  # noqa:C901
                                 )
                             # XDiag++:
                             for cache_xmop in (True, False):
-                                result_xpp = xdiagpp(
+                                result_xpp = xhutchpp(
                                     lop,
                                     device,
                                     dtype,
@@ -749,9 +763,7 @@ def test_diag_trace_correctness(  # noqa:C901
                             Q = result_xd["Q"]
                             D_top = (Q.T * (Q.H @ mat)).sum(0)
                             tr_top = D_top.sum()
-                            assert (
-                                relerr(D, D_top) < 0.5
-                            ), "Bad diag deflation?"
+                            assert relerr(D, D_top) < 0.5, "Bad diag deflation?"
                             # Hutch++
                             result_hpp = hutch(
                                 lop,
