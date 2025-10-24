@@ -674,7 +674,7 @@ def test_diag_trace_correctness(  # noqa:C901
                         #
                         for return_diag in (True, False):
                             # plain GH
-                            result = hutch(
+                            result_gh = hutch(
                                 lop,
                                 device,
                                 dtype,
@@ -689,7 +689,7 @@ def test_diag_trace_correctness(  # noqa:C901
                                 D,
                                 tr,
                                 idty,
-                                result,
+                                result_gh,
                                 trace_tol,
                                 diag_tol,
                                 tol,
@@ -697,7 +697,7 @@ def test_diag_trace_correctness(  # noqa:C901
                             )
                             # plain XDiag:
                             for cache_xmop in (True, False):
-                                result = xdiagpp(
+                                result_xd = xdiagpp(
                                     lop,
                                     device,
                                     dtype,
@@ -714,16 +714,15 @@ def test_diag_trace_correctness(  # noqa:C901
                                     D,
                                     tr,
                                     idty,
-                                    result,
+                                    result_xd,
                                     trace_tol,
                                     diag_tol,
                                     tol,
                                     errcode=f"XDiag (cache={cache_xmop})",
                                 )
-                                Q = result["Q"]
                             # XDiag++:
                             for cache_xmop in (True, False):
-                                result = xdiagpp(
+                                result_xpp = xdiagpp(
                                     lop,
                                     device,
                                     dtype,
@@ -740,48 +739,45 @@ def test_diag_trace_correctness(  # noqa:C901
                                     D,
                                     tr,
                                     idty,
-                                    result,
+                                    result_xpp,
                                     trace_tol,
                                     diag_tol,
                                     tol,
                                     errcode=f"XDiag++ (cache={cache_xmop})",
                                 )
                             # Just deflation
+                            Q = result_xd["Q"]
+                            D_top = (Q.T * (Q.H @ mat)).sum(0)
+                            tr_top = D_top.sum()
                             assert (
-                                relerr(D, (Q.T * (Q.H @ mat)).sum(0)) < 0.5
+                                relerr(D, D_top) < 0.5
                             ), "Bad diag deflation?"
-                            # # Hutch++
-                            # result = hutch(
-                            #     lop,
-                            #     device,
-                            #     dtype,
-                            #     gh_meas,
-                            #     seed,
-                            #     noise_type,
-                            #     meas_blocksize=None,
-                            #     return_diag=return_diag,
-                            #     dispatcher=MyDispatcher,
-                            #     defl_Q=Q,
-                            # )
-                            # diag_trace_test_helper(
-                            #     D,
-                            #     tr,
-                            #     idty,
-                            #     result,
-                            #     trace_tol,
-                            #     diag_tol,
-                            #     tol,
-                            #     errcode="Hutch++",
-                            # )
-                            # XDiag++
-
-                            # breakpoint()
-                            """
-                            TODO:
-
-                            * get rid of gh meas for triang
-                            * lint etc release
-                            """
+                            # Hutch++
+                            result_hpp = hutch(
+                                lop,
+                                device,
+                                dtype,
+                                gh_meas,
+                                seed,
+                                noise_type,
+                                meas_blocksize=None,
+                                return_diag=return_diag,
+                                dispatcher=MyDispatcher,
+                                defl_Q=Q,
+                            )
+                            result_hpp["tr"] += tr_top
+                            if return_diag:
+                                result_hpp["diag"] += D_top
+                            diag_trace_test_helper(
+                                D,
+                                tr,
+                                idty,
+                                result_hpp,
+                                trace_tol,
+                                diag_tol,
+                                tol,
+                                errcode="Hutch++",
+                            )
 
 
 # ##############################################################################
