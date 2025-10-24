@@ -158,7 +158,9 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     * The recovered eigvals are by descending magnitude/value
     * The devices and dtypes all match
     """
-    allclose = torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
+    allclose = (
+        torch.allclose if isinstance(idty, torch.Tensor) else np.allclose
+    )
     diff = torch.diff if isinstance(idty, torch.Tensor) else np.diff
     V, Lbd, Vh = evs_rec, ews_rec, evs_rec.conj().T
     # correctness of result
@@ -178,3 +180,24 @@ def eigh_test_helper(mat, idty, ews_rec, evs_rec, atol, by_mag=True):
     if isinstance(mat, torch.Tensor):
         assert V.device == mat.device, "Incorrect eigvecs device!"
         assert Lbd.device == mat.device, "Incorrect eigvals device!"
+
+
+def diag_trace_test_helper(
+    diag, tr, idty, results, tr_tol, diag_tol, errcode=""
+):
+    """ """
+    # tr
+    assert (
+        relsumerr(tr, results["tr"], diag) < tr_tol
+    ), f"[{errcode}]: Bad trace?"
+    # diag
+    if "diag" in results:
+        assert (
+            relerr(diag, results["diag"]) < diag_tol
+        ), f"[{errcode}]: Bad diag?"
+    # orth Q
+    if "Q" in results:
+        Q = result["Q"]
+        assert torch.allclose(
+            Q.H @ Q, idty, atol=tol
+        ), f"[{errcode}]: Q not orthogonal?"
