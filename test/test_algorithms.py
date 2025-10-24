@@ -720,22 +720,68 @@ def test_diag_trace_correctness(  # noqa:C901
                                     tol,
                                     errcode=f"XDiag (cache={cache_xmop})",
                                 )
+                                Q = result["Q"]
+                            # XDiag++:
+                            for cache_xmop in (True, False):
+                                result = xdiagpp(
+                                    lop,
+                                    device,
+                                    dtype,
+                                    xdims,
+                                    gh_meas,
+                                    seed,
+                                    noise_type,
+                                    meas_blocksize=None,
+                                    dispatcher=MyDispatcher,
+                                    return_diag=return_diag,
+                                    cache_xmop=cache_xmop,
+                                )
+                                diag_trace_test_helper(
+                                    D,
+                                    tr,
+                                    idty,
+                                    result,
+                                    trace_tol,
+                                    diag_tol,
+                                    tol,
+                                    errcode=f"XDiag++ (cache={cache_xmop})",
+                                )
+                            # Just deflation
+                            assert (
+                                relerr(D, (Q.T * (Q.H @ mat)).sum(0)) < 0.5
+                            ), "Bad diag deflation?"
+                            # # Hutch++
+                            # result = hutch(
+                            #     lop,
+                            #     device,
+                            #     dtype,
+                            #     gh_meas,
+                            #     seed,
+                            #     noise_type,
+                            #     meas_blocksize=None,
+                            #     return_diag=return_diag,
+                            #     dispatcher=MyDispatcher,
+                            #     defl_Q=Q,
+                            # )
+                            # diag_trace_test_helper(
+                            #     D,
+                            #     tr,
+                            #     idty,
+                            #     result,
+                            #     trace_tol,
+                            #     diag_tol,
+                            #     tol,
+                            #     errcode="Hutch++",
+                            # )
+                            # XDiag++
+
+                            # breakpoint()
                             """
                             TODO:
-
-                            * xdiag is erroring for diag. Why?
-                              - error is in XDIAG complex bloated
-                              - float bloated is OK
-                            * finish formal tests
 
                             * get rid of gh meas for triang
                             * lint etc release
                             """
-                            # Just deflation
-                            # Hutch++
-                            # XDiag++
-
-                            # breakpoint()
 
 
 # ##############################################################################

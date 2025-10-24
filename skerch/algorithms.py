@@ -737,8 +737,8 @@ def xdiagpp(  # noqa:C901
         # Girard-Hutchinson on (optionally deflated) A
         defl = hutch(
             A_defl,
-            lop_dtype,
             lop_device,
+            lop_dtype,
             gh_meas,
             seed + x_dims,
             noise_type,
